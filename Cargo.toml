@@ -60,3 +60,6 @@ ignore = "0.4"
 
 # JSON Schema (for MCP tool parameters)
 schemars = "0.8"
+
+# Local embeddings (in-process, no external service needed)
+fastembed = "5"

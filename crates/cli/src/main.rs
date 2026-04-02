@@ -68,8 +68,8 @@ enum Commands {
 
     /// Generate embeddings for indexed functions
     Embed {
-        /// Embedding provider (ollama, openai)
-        #[arg(long, default_value = "ollama")]
+        /// Embedding provider (fastembed, ollama, openai)
+        #[arg(long, default_value = "fastembed")]
         provider: String,
 
         /// Batch size
@@ -94,8 +94,8 @@ enum Commands {
         #[arg(long, default_value = "10")]
         limit: usize,
 
-        /// Embedding provider
-        #[arg(long, default_value = "ollama")]
+        /// Embedding provider (fastembed, ollama, openai)
+        #[arg(long, default_value = "fastembed")]
         provider: String,
 
         /// Ollama base URL
@@ -481,11 +481,15 @@ async fn cmd_embed(
     model: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
-    use codescope_core::embeddings::{EmbeddingPipeline, OllamaProvider, OpenAIProvider};
+    use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
 
     let db = connect_db(db_path).await?;
 
     let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
+        "fastembed" => {
+            println!("Using FastEmbed (local, in-process). Model downloads on first run.");
+            Box::new(FastEmbedProvider::from_name(model)?)
+        }
         "ollama" => Box::new(OllamaProvider::new(
             Some(ollama_url.to_string()),
             Some(model.to_string()),
@@ -495,7 +499,7 @@ async fn cmd_embed(
                 .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY environment variable not set"))?;
             Box::new(OpenAIProvider::new(api_key, Some(model.to_string())))
         }
-        _ => return Err(anyhow::anyhow!("Unknown provider: {}. Use 'ollama' or 'openai'", provider)),
+        _ => return Err(anyhow::anyhow!("Unknown provider: {}. Use 'fastembed', 'ollama', or 'openai'", provider)),
     };
 
     println!("Embedding with {} (model: {})...", provider, model);
@@ -515,11 +519,12 @@ async fn cmd_semantic_search(
     model: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
-    use codescope_core::embeddings::{EmbeddingPipeline, OllamaProvider, OpenAIProvider};
+    use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
 
     let db = connect_db(db_path).await?;
 
     let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
+        "fastembed" => Box::new(FastEmbedProvider::from_name(model)?),
         "ollama" => Box::new(OllamaProvider::new(
             Some(ollama_url.to_string()),
             Some(model.to_string()),

@@ -38,6 +38,9 @@ tree-sitter-php = "0.23"
 serde_yaml = "0.9"
 toml = "0.8"
 
+# Local embeddings
+fastembed = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
