@@ -50,12 +50,25 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Installation
 
-### Prerequisites
+### Option 1: Download Pre-built Binary (Recommended)
 
-- [Rust](https://rustup.rs/) 1.89 or later
-- C/C++ compiler (for SurrealDB RocksDB and tree-sitter native builds)
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.ps1 | iex
+```
 
-### Build from Source
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
+```
+
+This downloads the latest release, installs `codescope` and `codescope-mcp` to your PATH, and you're ready to go. No Rust toolchain required.
+
+You can also download binaries manually from the [Releases page](https://github.com/onur-gokyildiz-bhi/codescope/releases).
+
+### Option 2: Build from Source
+
+Requires [Rust](https://rustup.rs/) 1.75+ and a C/C++ compiler (for SurrealDB RocksDB and tree-sitter).
 
 ```bash
 git clone https://github.com/onur-gokyildiz-bhi/codescope
@@ -68,7 +81,7 @@ Binaries will be at:
 - `target/release/codescope-mcp` — MCP server
 - `target/release/codescope-bench` — Benchmark runner
 
-### Optional: Add to PATH
+Optionally add them to PATH:
 
 ```bash
 # Linux/macOS
@@ -76,8 +89,15 @@ cp target/release/codescope ~/.local/bin/
 cp target/release/codescope-mcp ~/.local/bin/
 
 # Windows (PowerShell)
-Copy-Item target\release\codescope.exe C:\Users\$env:USERNAME\.local\bin\
-Copy-Item target\release\codescope-mcp.exe C:\Users\$env:USERNAME\.local\bin\
+Copy-Item target\release\codescope.exe $env:LOCALAPPDATA\codescope\bin\
+Copy-Item target\release\codescope-mcp.exe $env:LOCALAPPDATA\codescope\bin\
+```
+
+### Option 3: Cargo Install (Rust users)
+
+```bash
+cargo install --git https://github.com/onur-gokyildiz-bhi/codescope codescope
+cargo install --git https://github.com/onur-gokyildiz-bhi/codescope codescope-mcp
 ```
 
 ---
