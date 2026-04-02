@@ -58,7 +58,7 @@ fi
 
 # 3. Install skills
 echo "  [2/4] Installing skills..."
-SKILLS=("codescope" "cs-search" "cs-index" "cs-stats" "cs-ask" "cs-impact")
+SKILLS=("codescope" "cs-search" "cs-index" "cs-stats" "cs-ask" "cs-impact" "cs-callers" "cs-file" "cs-query")
 
 for skill in "${SKILLS[@]}"; do
     mkdir -p "$SKILLS_DIR/$skill"
@@ -101,6 +101,9 @@ echo "    /cs-index           — Re-index project"
 echo "    /cs-stats           — Codebase overview"
 echo "    /cs-ask <question>  — Ask in Turkish or English"
 echo "    /cs-impact <func>   — Impact analysis"
+echo "    /cs-callers <func>  — Who calls this function?"
+echo "    /cs-file <path>     — All entities in a file"
+echo "    /cs-query <surql>   — Raw SurrealQL query"
 echo ""
 echo "  Start Claude Code in any project:"
 echo "    cd /path/to/project && claude"

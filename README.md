@@ -347,6 +347,9 @@ After setup, these commands are available in Claude Code:
 | `/cs-stats` | Show codebase statistics |
 | `/cs-ask <question>` | Ask in Turkish or English |
 | `/cs-impact <function>` | Analyze change impact |
+| `/cs-callers <function>` | Who calls this function? |
+| `/cs-file <path>` | List all entities in a file |
+| `/cs-query <surql>` | Execute raw SurrealQL query |
 
 Claude will also **automatically use Codescope tools** when you ask code structure questions in natural language (Turkish or English):
 

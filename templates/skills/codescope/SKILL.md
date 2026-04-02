@@ -47,11 +47,14 @@ Automatically use these tools when the user asks (in any language):
 
 ## Slash Commands
 
-- `/cs-search <pattern>` — Quick function search
+- `/cs-search <pattern>` — Search functions by name
 - `/cs-index` — Re-index current project
 - `/cs-stats` — Show codebase stats
-- `/cs-ask <question>` — Natural language query
+- `/cs-ask <question>` — Natural language query (TR/EN)
 - `/cs-impact <function>` — Impact analysis
+- `/cs-callers <function>` — Who calls this function?
+- `/cs-file <path>` — All entities in a file
+- `/cs-query <surql>` — Raw SurrealQL query
 
 ## Arguments
 

@@ -55,7 +55,7 @@ if (Test-Path $claudeJson) {
 
 # 3. Install skills
 Write-Host "  [2/4] Installing skills..." -ForegroundColor Yellow
-$skills = @("codescope", "cs-search", "cs-index", "cs-stats", "cs-ask", "cs-impact")
+$skills = @("codescope", "cs-search", "cs-index", "cs-stats", "cs-ask", "cs-impact", "cs-callers", "cs-file", "cs-query")
 
 foreach ($skill in $skills) {
     $skillDir = "$SKILLS_DIR\$skill"
@@ -89,6 +89,9 @@ Write-Host "    /cs-index           - Re-index project"
 Write-Host "    /cs-stats           - Codebase overview"
 Write-Host "    /cs-ask <question>  - Ask in Turkish or English"
 Write-Host "    /cs-impact <func>   - Impact analysis"
+Write-Host "    /cs-callers <func>  - Who calls this function?"
+Write-Host "    /cs-file <path>     - All entities in a file"
+Write-Host "    /cs-query <surql>   - Raw SurrealQL query"
 Write-Host ""
 Write-Host "  Start Claude Code in any project:" -ForegroundColor Cyan
 Write-Host "    cd C:\path\to\project; claude"
