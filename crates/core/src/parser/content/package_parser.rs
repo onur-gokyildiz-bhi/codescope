@@ -37,8 +37,14 @@ fn parse_package_json(file_path: &str, source: &str, repo: &str) -> Result<(Vec<
         Err(_) => return Ok((entities, relations)),
     };
 
-    // Package name
-    if let Some(name) = value.get("name").and_then(|n| n.as_str()) {
+    // Package name (fallback to filename-derived name)
+    let pkg_name = value.get("name").and_then(|n| n.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            file_path.rsplit(&['/', '\\']).nth(1).unwrap_or("unknown").to_string()
+        });
+    {
+        let name = &pkg_name;
         let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
         let qname = format!("{}:package:{}", file_qname, name);
         entities.push(CodeEntity {

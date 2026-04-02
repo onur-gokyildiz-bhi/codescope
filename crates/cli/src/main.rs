@@ -241,7 +241,7 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
 
     // Walk the directory, respecting .gitignore
     let walker = ignore::WalkBuilder::new(&path)
-        .hidden(true)
+        .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .build();

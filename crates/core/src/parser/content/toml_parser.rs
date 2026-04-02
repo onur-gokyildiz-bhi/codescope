@@ -9,6 +9,12 @@ impl ContentParser for TomlParser {
     fn extensions(&self) -> &[&str] { &["toml"] }
 
     fn parse(&self, file_path: &str, source: &str, repo: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+        // Delegate to PackageParser for Cargo.toml files
+        let filename = file_path.rsplit(&['/', '\\']).next().unwrap_or(file_path);
+        if filename.eq_ignore_ascii_case("cargo.toml") {
+            return super::package_parser::PackageParser.parse(file_path, source, repo);
+        }
+
         let mut entities = Vec::new();
         let mut relations = Vec::new();
 

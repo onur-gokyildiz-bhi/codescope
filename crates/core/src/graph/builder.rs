@@ -118,16 +118,17 @@ impl GraphBuilder {
                 _ => {
                     // Generic insert for config, doc, api, db_entity, infra, package
                     let kind_str = format!("{:?}", entity.kind);
+                    let safe_id = id.replace('\'', "");
+                    let create_query = format!(
+                        "CREATE {}:`{}` SET \
+                         name = $name, qualified_name = $qname, \
+                         kind = $kind, file_path = $path, repo = $repo, \
+                         language = $lang, start_line = $start, end_line = $end, \
+                         body = $body",
+                        table, safe_id
+                    );
                     self.db
-                        .query(
-                            "CREATE type::thing($table, $id) SET \
-                             name = $name, qualified_name = $qname, \
-                             kind = $kind, file_path = $path, repo = $repo, \
-                             language = $lang, start_line = $start, end_line = $end, \
-                             body = $body"
-                        )
-                        .bind(("table", table))
-                        .bind(("id", id))
+                        .query(create_query)
                         .bind(("name", name))
                         .bind(("qname", qname))
                         .bind(("kind", kind_str))

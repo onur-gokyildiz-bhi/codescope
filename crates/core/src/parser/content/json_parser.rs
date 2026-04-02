@@ -9,6 +9,12 @@ impl ContentParser for JsonParser {
     fn extensions(&self) -> &[&str] { &["json"] }
 
     fn parse(&self, file_path: &str, source: &str, repo: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+        // Delegate to PackageParser for package.json files
+        let filename = file_path.rsplit(&['/', '\\']).next().unwrap_or(file_path);
+        if filename.eq_ignore_ascii_case("package.json") {
+            return super::package_parser::PackageParser.parse(file_path, source, repo);
+        }
+
         let mut entities = Vec::new();
         let mut relations = Vec::new();
 
