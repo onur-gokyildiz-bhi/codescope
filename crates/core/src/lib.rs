@@ -114,6 +114,8 @@ pub struct CodeRelation {
     pub kind: RelationKind,
     pub from_entity: String,
     pub to_entity: String,
+    pub from_table: String,
+    pub to_table: String,
     pub metadata: Option<serde_json::Value>,
 }
 

@@ -90,6 +90,8 @@ impl EntityExtractor {
                         kind: RelationKind::Contains,
                         from_entity: parent_qualified_name.unwrap_or(&file_qname).to_string(),
                         to_entity: qname.clone(),
+                        from_table: if parent_qualified_name.is_some() { "class".to_string() } else { "file".to_string() },
+                        to_table: "function".to_string(),
                         metadata: None,
                     });
 
@@ -124,6 +126,8 @@ impl EntityExtractor {
                         kind: RelationKind::Contains,
                         from_entity: file_qname,
                         to_entity: qname.clone(),
+                        from_table: "file".to_string(),
+                        to_table: "class".to_string(),
                         metadata: None,
                     });
 
@@ -153,6 +157,8 @@ impl EntityExtractor {
                         kind: RelationKind::Imports,
                         from_entity: file_qname,
                         to_entity: entity.qualified_name.clone(),
+                        from_table: "file".to_string(),
+                        to_table: "import_decl".to_string(),
                         metadata: None,
                     });
                     entities.push(entity);
@@ -308,6 +314,8 @@ impl EntityExtractor {
                     kind: RelationKind::Calls,
                     from_entity: caller_qname.to_string(),
                     to_entity: callee,
+                    from_table: "function".to_string(),
+                    to_table: "function".to_string(),
                     metadata: Some(serde_json::json!({
                         "line": node.start_position().row + 1,
                     })),
@@ -367,6 +375,8 @@ impl EntityExtractor {
                         kind: rel_kind,
                         from_entity: class_qname.to_string(),
                         to_entity: text.trim().to_string(),
+                        from_table: "class".to_string(),
+                        to_table: "class".to_string(),
                         metadata: None,
                     });
                 }

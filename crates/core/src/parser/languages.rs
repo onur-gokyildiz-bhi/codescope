@@ -98,6 +98,55 @@ impl LanguageRegistry {
             extensions: vec!["php".into()],
         });
 
+        // Swift
+        languages.push(LanguageConfig {
+            name: "swift".into(),
+            language: tree_sitter_swift::LANGUAGE.into(),
+            extensions: vec!["swift".into()],
+        });
+
+        // Dart
+        languages.push(LanguageConfig {
+            name: "dart".into(),
+            language: tree_sitter_dart::LANGUAGE.into(),
+            extensions: vec!["dart".into()],
+        });
+
+        // Scala
+        languages.push(LanguageConfig {
+            name: "scala".into(),
+            language: tree_sitter_scala::LANGUAGE.into(),
+            extensions: vec!["scala".into(), "sc".into()],
+        });
+
+        // Lua
+        languages.push(LanguageConfig {
+            name: "lua".into(),
+            language: tree_sitter_lua::LANGUAGE.into(),
+            extensions: vec!["lua".into()],
+        });
+
+        // Zig
+        languages.push(LanguageConfig {
+            name: "zig".into(),
+            language: tree_sitter_zig::LANGUAGE.into(),
+            extensions: vec!["zig".into()],
+        });
+
+        // Elixir
+        languages.push(LanguageConfig {
+            name: "elixir".into(),
+            language: tree_sitter_elixir::LANGUAGE.into(),
+            extensions: vec!["ex".into(), "exs".into()],
+        });
+
+        // Haskell
+        languages.push(LanguageConfig {
+            name: "haskell".into(),
+            language: tree_sitter_haskell::LANGUAGE.into(),
+            extensions: vec!["hs".into()],
+        });
+
         Self { languages }
     }
 

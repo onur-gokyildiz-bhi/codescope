@@ -1,0 +1,18 @@
+[package]
+name = "codescope-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+codescope-core = { path = "../core" }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+surrealdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }

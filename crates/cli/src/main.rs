@@ -216,20 +216,28 @@ async fn connect_db(db_path: Option<PathBuf>) -> Result<surrealdb::Surreal<surre
 }
 
 async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Option<PathBuf>) -> Result<()> {
+    use codescope_core::graph::IncrementalIndexer;
+
     let repo_name = repo.unwrap_or_else(|| {
         path.file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into())
     });
 
-    println!("Indexing {} as repo '{}'...", path.display(), repo_name);
-
     let db = connect_db(db_path).await?;
     let builder = GraphBuilder::new(db.clone());
+    let incremental = IncrementalIndexer::new(db.clone());
 
     if clean {
-        println!("Clearing existing data for repo '{}'...", repo_name);
+        println!("Full re-index: clearing existing data for '{}'...", repo_name);
         builder.clear_repo(&repo_name).await?;
+    } else {
+        println!("Incremental index of {} as '{}'...", path.display(), repo_name);
+        // Clean up deleted files first
+        let deleted = incremental.cleanup_deleted_files(&path, &repo_name).await?;
+        if deleted > 0 {
+            println!("  Cleaned up {} deleted files", deleted);
+        }
     }
 
     let parser = CodeParser::new();
@@ -237,6 +245,7 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
     let mut total_entities = 0usize;
     let mut total_relations = 0usize;
     let mut files_processed = 0usize;
+    let mut files_skipped = 0usize;
     let mut errors = Vec::new();
 
     // Walk the directory, respecting .gitignore
@@ -291,6 +300,23 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
             .to_string()
             .replace('\\', "/");
 
+        // Incremental: skip unchanged files (unless --clean)
+        if !clean {
+            if let Ok(content) = std::fs::read_to_string(file_path) {
+                match incremental.needs_reindex(&rel_path, &content).await {
+                    Ok(false) => {
+                        files_skipped += 1;
+                        continue;
+                    }
+                    Ok(true) => {
+                        // Delete old entities before re-indexing
+                        let _ = builder.delete_file_entities(&rel_path, &repo_name).await;
+                    }
+                    Err(_) => {} // On error, just re-index
+                }
+            }
+        }
+
         match parser.parse_file(file_path, &repo_name) {
             Ok((entities, relations)) => {
                 let ent_count = entities.len();
@@ -315,7 +341,10 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
 
     println!();
     println!("Indexing complete!");
-    println!("  Files processed:    {}", files_processed);
+    println!("  Files indexed:      {}", files_processed);
+    if files_skipped > 0 {
+        println!("  Files unchanged:    {}", files_skipped);
+    }
     println!("  Entities extracted: {}", total_entities);
     println!("  Relations created:  {}", total_relations);
 

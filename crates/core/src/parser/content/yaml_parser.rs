@@ -70,7 +70,10 @@ fn extract_yaml_value(
 
             relations.push(CodeRelation {
                 kind: RelationKind::Contains, from_entity: parent_qname.to_string(),
-                to_entity: qname.clone(), metadata: None,
+                to_entity: qname.clone(),
+                from_table: if depth == 0 { "file".to_string() } else { "config".to_string() },
+                to_table: "config".to_string(),
+                metadata: None,
             });
 
             extract_yaml_value(v, file_path, repo, &qname, &full_key, entities, relations, depth + 1);

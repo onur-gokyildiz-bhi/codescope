@@ -45,7 +45,10 @@ impl ContentParser for MarkdownParser {
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains, from_entity: current_section.clone(),
-                        to_entity: qname, metadata: None,
+                        to_entity: qname,
+                        from_table: if current_section == file_qname { "file".to_string() } else { "doc".to_string() },
+                        to_table: "doc".to_string(),
+                        metadata: None,
                     });
                     in_code_block = false;
                 } else {
@@ -77,7 +80,10 @@ impl ContentParser for MarkdownParser {
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                    to_entity: qname.clone(), metadata: None,
+                    to_entity: qname.clone(),
+                    from_table: "file".to_string(),
+                    to_table: "doc".to_string(),
+                    metadata: None,
                 });
                 current_section = qname;
             }
@@ -106,7 +112,10 @@ impl ContentParser for MarkdownParser {
                             relations.push(CodeRelation {
                                 kind: RelationKind::References,
                                 from_entity: current_section.clone(),
-                                to_entity: qname, metadata: None,
+                                to_entity: qname,
+                                from_table: if current_section == file_qname { "file".to_string() } else { "doc".to_string() },
+                                to_table: "doc".to_string(),
+                                metadata: None,
                             });
                         }
                         search = &rest[end + 1..];

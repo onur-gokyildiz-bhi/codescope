@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench"]
+members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench", "crates/web"]
 resolver = "2"
 
 [workspace.package]
@@ -60,6 +60,10 @@ ignore = "0.4"
 
 # JSON Schema (for MCP tool parameters)
 schemars = "0.8"
+
+# Web server
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
 
 # Local embeddings (in-process, no external service needed)
 fastembed = "5"

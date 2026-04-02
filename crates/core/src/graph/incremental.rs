@@ -35,64 +35,6 @@ impl IncrementalIndexer {
         }
     }
 
-    /// Get list of files that have changed since last index
-    pub async fn changed_files(
-        &self,
-        base_path: &Path,
-        repo_name: &str,
-        extensions: &[&str],
-    ) -> Result<Vec<std::path::PathBuf>> {
-        let mut changed = Vec::new();
-
-        let walker = ignore::WalkBuilder::new(base_path)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
-
-        for entry in walker {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                continue;
-            }
-
-            let file_path = entry.path();
-            let ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-
-            if !extensions.contains(&ext) {
-                continue;
-            }
-
-            let rel_path = file_path
-                .strip_prefix(base_path)
-                .unwrap_or(file_path)
-                .to_string_lossy()
-                .replace('\\', "/");
-
-            let content = match std::fs::read_to_string(file_path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            if self.needs_reindex(&rel_path, &content).await? {
-                changed.push(file_path.to_path_buf());
-            }
-        }
-
-        info!(
-            "Incremental check: {} files changed out of total scanned",
-            changed.len()
-        );
-
-        Ok(changed)
-    }
-
     /// Remove entities from files that no longer exist on disk
     pub async fn cleanup_deleted_files(
         &self,
@@ -115,12 +57,20 @@ impl IncrementalIndexer {
                 debug!("Cleaning up deleted file: {}", record.path);
                 let path = record.path.clone();
 
-                // Delete the file and all its contained entities
+                // Delete from ALL tables (including content parser tables)
                 let _ = self.db
                     .query(
                         "DELETE FROM `function` WHERE file_path = $path AND repo = $repo; \
                          DELETE FROM class WHERE file_path = $path AND repo = $repo; \
                          DELETE FROM import_decl WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM module WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM variable WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM config WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM doc WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM api WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM db_entity WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM infra WHERE file_path = $path AND repo = $repo; \
+                         DELETE FROM package WHERE file_path = $path AND repo = $repo; \
                          DELETE FROM file WHERE path = $path AND repo = $repo;"
                             .to_string(),
                     )
@@ -150,7 +100,7 @@ struct FilePathRecord {
     path: String,
 }
 
-fn hash_content(content: &str) -> String {
+pub fn hash_content(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())

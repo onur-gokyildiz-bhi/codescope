@@ -96,6 +96,8 @@ fn extract_json_keys(
             kind: RelationKind::Contains,
             from_entity: parent_qname.to_string(),
             to_entity: qname.clone(),
+            from_table: if depth == 0 { "file".to_string() } else { "config".to_string() },
+            to_table: "config".to_string(),
             metadata: None,
         });
 

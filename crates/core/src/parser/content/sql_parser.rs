@@ -42,7 +42,10 @@ impl ContentParser for SqlParser {
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                        to_entity: qname, metadata: None,
+                        to_entity: qname,
+                        from_table: "file".to_string(),
+                        to_table: "db_entity".to_string(),
+                        metadata: None,
                     });
                 }
             }
@@ -60,7 +63,10 @@ impl ContentParser for SqlParser {
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                        to_entity: qname, metadata: None,
+                        to_entity: qname,
+                        from_table: "file".to_string(),
+                        to_table: "db_entity".to_string(),
+                        metadata: None,
                     });
                 }
             }
@@ -78,7 +84,10 @@ impl ContentParser for SqlParser {
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                        to_entity: qname, metadata: None,
+                        to_entity: qname,
+                        from_table: "file".to_string(),
+                        to_table: "db_entity".to_string(),
+                        metadata: None,
                     });
                 }
             }

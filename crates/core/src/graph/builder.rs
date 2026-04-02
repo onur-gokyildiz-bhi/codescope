@@ -115,20 +115,19 @@ impl GraphBuilder {
                         .bind(("body", body))
                         .await
                 }
+                // All content parser entities: config, doc, api, db_entity, infra, package
                 _ => {
-                    // Generic insert for config, doc, api, db_entity, infra, package
                     let kind_str = format!("{:?}", entity.kind);
-                    let safe_id = id.replace('\'', "");
-                    let create_query = format!(
-                        "CREATE {}:`{}` SET \
-                         name = $name, qualified_name = $qname, \
-                         kind = $kind, file_path = $path, repo = $repo, \
-                         language = $lang, start_line = $start, end_line = $end, \
-                         body = $body",
-                        table, safe_id
-                    );
                     self.db
-                        .query(create_query)
+                        .query(
+                            "CREATE type::thing($table, $id) SET \
+                             name = $name, qualified_name = $qname, \
+                             kind = $kind, file_path = $path, repo = $repo, \
+                             language = $lang, start_line = $start, end_line = $end, \
+                             body = $body"
+                        )
+                        .bind(("table", table.clone()))
+                        .bind(("id", id))
                         .bind(("name", name))
                         .bind(("qname", qname))
                         .bind(("kind", kind_str))
@@ -164,17 +163,19 @@ impl GraphBuilder {
             let table = rel.kind.table_name();
             let from_id = sanitize_id(&rel.from_entity);
             let to_id = sanitize_id(&rel.to_entity);
+            let from_table = &rel.from_table;
+            let to_table = &rel.to_table;
 
-            // Use inline SurrealQL with string interpolation for the edge table
-            // RELATE needs record IDs, so we construct them inline
             let query = format!(
-                "RELATE (type::thing('function', $from))->{}->(type::thing('function', $to))",
+                "RELATE (type::thing($from_table, $from))->{}->(type::thing($to_table, $to))",
                 table
             );
 
             let result = self.db
                 .query(query)
+                .bind(("from_table", from_table.clone()))
                 .bind(("from", from_id))
+                .bind(("to_table", to_table.clone()))
                 .bind(("to", to_id))
                 .await;
 
@@ -195,10 +196,32 @@ impl GraphBuilder {
         Ok(count)
     }
 
+    /// Delete all entities for a specific file (for incremental re-indexing)
+    pub async fn delete_file_entities(&self, file_path: &str, repo: &str) -> Result<()> {
+        let tables = [
+            "`function`", "class", "module", "variable", "import_decl",
+            "config", "doc", "api", "db_entity", "infra", "package",
+        ];
+        for table in &tables {
+            self.db
+                .query(format!("DELETE FROM {} WHERE file_path = $path AND repo = $repo", table))
+                .bind(("path", file_path.to_string()))
+                .bind(("repo", repo.to_string()))
+                .await?;
+        }
+        self.db
+            .query("DELETE FROM file WHERE path = $path AND repo = $repo")
+            .bind(("path", file_path.to_string()))
+            .bind(("repo", repo.to_string()))
+            .await?;
+        Ok(())
+    }
+
     /// Clear all data for a specific repo
     pub async fn clear_repo(&self, repo: &str) -> Result<()> {
         let tables = [
             "file", "`function`", "class", "module", "variable", "import_decl",
+            "config", "doc", "api", "db_entity", "infra", "package",
         ];
         for table in &tables {
             let repo_owned = repo.to_string();

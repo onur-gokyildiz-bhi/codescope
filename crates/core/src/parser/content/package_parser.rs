@@ -57,7 +57,10 @@ fn parse_package_json(file_path: &str, source: &str, repo: &str) -> Result<(Vec<
         });
         relations.push(CodeRelation {
             kind: RelationKind::Contains, from_entity: file_qname.clone(),
-            to_entity: qname.clone(), metadata: None,
+            to_entity: qname.clone(),
+            from_table: "file".to_string(),
+            to_table: "package".to_string(),
+            metadata: None,
         });
 
         // Dependencies
@@ -75,7 +78,10 @@ fn parse_package_json(file_path: &str, source: &str, repo: &str) -> Result<(Vec<
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::DependsOnPackage,
-                        from_entity: qname.clone(), to_entity: dqname, metadata: None,
+                        from_entity: qname.clone(), to_entity: dqname,
+                        from_table: "package".to_string(),
+                        to_table: "package".to_string(),
+                        metadata: None,
                     });
                 }
             }
@@ -95,7 +101,10 @@ fn parse_package_json(file_path: &str, source: &str, repo: &str) -> Result<(Vec<
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::RunsScript,
-                    from_entity: qname.clone(), to_entity: sqname, metadata: None,
+                    from_entity: qname.clone(), to_entity: sqname,
+                    from_table: "package".to_string(),
+                    to_table: "package".to_string(),
+                    metadata: None,
                 });
             }
         }
@@ -155,7 +164,10 @@ fn parse_cargo_toml(file_path: &str, source: &str, repo: &str) -> Result<(Vec<Co
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::DependsOnPackage,
-                    from_entity: qname.clone(), to_entity: dqname, metadata: None,
+                    from_entity: qname.clone(), to_entity: dqname,
+                    from_table: "package".to_string(),
+                    to_table: "package".to_string(),
+                    metadata: None,
                 });
             }
         }

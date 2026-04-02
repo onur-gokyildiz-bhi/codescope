@@ -53,7 +53,10 @@ impl ContentParser for DockerfileParser {
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                    to_entity: qname.clone(), metadata: None,
+                    to_entity: qname.clone(),
+                    from_table: "file".to_string(),
+                    to_table: "infra".to_string(),
+                    metadata: None,
                 });
                 current_stage = qname;
             }
@@ -75,7 +78,10 @@ impl ContentParser for DockerfileParser {
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains, from_entity: current_stage.clone(),
-                    to_entity: qname, metadata: None,
+                    to_entity: qname,
+                    from_table: if current_stage == file_qname { "file".to_string() } else { "infra".to_string() },
+                    to_table: "infra".to_string(),
+                    metadata: None,
                 });
             }
         }

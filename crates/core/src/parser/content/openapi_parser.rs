@@ -63,7 +63,10 @@ impl ContentParser for OpenApiParser {
                         relations.push(CodeRelation {
                             kind: RelationKind::DefinesEndpoint,
                             from_entity: file_qname.clone(),
-                            to_entity: qname, metadata: None,
+                            to_entity: qname,
+                            from_table: "file".to_string(),
+                            to_table: "api".to_string(),
+                            metadata: None,
                         });
                     }
                 }
@@ -86,7 +89,10 @@ impl ContentParser for OpenApiParser {
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains, from_entity: file_qname.clone(),
-                    to_entity: qname.clone(), metadata: None,
+                    to_entity: qname.clone(),
+                    from_table: "file".to_string(),
+                    to_table: "api".to_string(),
+                    metadata: None,
                 });
 
                 // Extract fields
@@ -104,7 +110,10 @@ impl ContentParser for OpenApiParser {
                         });
                         relations.push(CodeRelation {
                             kind: RelationKind::HasField,
-                            from_entity: qname.clone(), to_entity: fqname, metadata: None,
+                            from_entity: qname.clone(), to_entity: fqname,
+                            from_table: "api".to_string(),
+                            to_table: "api".to_string(),
+                            metadata: None,
                         });
                     }
                 }

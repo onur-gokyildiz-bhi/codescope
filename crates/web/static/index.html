@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codescope — Knowledge Graph Explorer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; overflow: hidden; }
+#header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
+#header h1 { font-size: 18px; color: #58a6ff; white-space: nowrap; }
+#search { flex: 1; padding: 8px 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; outline: none; }
+#search:focus { border-color: #58a6ff; }
+#stats { display: flex; gap: 12px; padding: 8px 20px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 12px; }
+.stat { background: #21262d; padding: 4px 10px; border-radius: 12px; }
+.stat b { color: #58a6ff; }
+#graph { width: 100vw; height: calc(100vh - 90px); }
+svg { width: 100%; height: 100%; }
+.node circle { stroke: #30363d; stroke-width: 1.5px; cursor: pointer; }
+.node text { font-size: 10px; fill: #8b949e; pointer-events: none; }
+.node:hover circle { stroke: #58a6ff; stroke-width: 2px; }
+.node:hover text { fill: #c9d1d9; }
+.link { stroke: #30363d; stroke-opacity: 0.6; }
+.link-label { font-size: 8px; fill: #484f58; }
+#tooltip { position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 12px; font-size: 12px; pointer-events: none; display: none; max-width: 300px; z-index: 10; }
+#tooltip .tt-name { font-size: 14px; font-weight: 600; color: #58a6ff; margin-bottom: 4px; }
+#tooltip .tt-file { color: #8b949e; font-size: 11px; }
+#tooltip .tt-kind { display: inline-block; background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-top: 4px; }
+#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 16px; color: #484f58; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>Codescope</h1>
+  <input id="search" type="text" placeholder="Search functions... (Enter to center graph)" />
+</div>
+<div id="stats"></div>
+<div id="graph">
+  <div id="loading">Loading graph...</div>
+</div>
+<div id="tooltip">
+  <div class="tt-name"></div>
+  <div class="tt-file"></div>
+  <div class="tt-kind"></div>
+</div>
+
+<script>
+const colors = {
+  function: '#58a6ff', caller: '#f78166', callee: '#3fb950',
+  class: '#d2a8ff', file: '#8b949e', config: '#d29922',
+  doc: '#79c0ff', api: '#f778ba', infra: '#ffa657', package: '#a5d6ff'
+};
+
+const tooltip = d3.select('#tooltip');
+let simulation, svg, g, link, node;
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    const labels = ['Files', 'Functions', 'Classes', 'Imports', 'Configs', 'Docs', 'Packages'];
+    let html = '';
+    if (Array.isArray(data)) {
+      data.forEach((arr, i) => {
+        const total = Array.isArray(arr) && arr[0] ? (arr[0].total || arr[0].count || 0) : 0;
+        if (total > 0) html += `<span class="stat"><b>${total}</b> ${labels[i] || ''}</span>`;
+      });
+    }
+    document.getElementById('stats').innerHTML = html;
+  } catch(e) { console.error('Stats error:', e); }
+}
+
+async function loadGraph(center) {
+  document.getElementById('loading').style.display = 'block';
+  try {
+    const url = center ? `/api/graph?center=${encodeURIComponent(center)}` : '/api/graph';
+    const res = await fetch(url);
+    const data = await res.json();
+    document.getElementById('loading').style.display = 'none';
+    renderGraph(data, center);
+  } catch(e) {
+    document.getElementById('loading').textContent = 'Error loading graph';
+    console.error(e);
+  }
+}
+
+function renderGraph(data, center) {
+  d3.select('#graph svg').remove();
+  const width = window.innerWidth;
+  const height = window.innerHeight - 90;
+
+  svg = d3.select('#graph').append('svg').attr('width', width).attr('height', height);
+  g = svg.append('g');
+
+  // Zoom
+  const zoom = d3.zoom().scaleExtent([0.1, 5]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoom);
+
+  // Deduplicate nodes
+  const nodeMap = new Map();
+  data.nodes.forEach(n => { if (!nodeMap.has(n.id)) nodeMap.set(n.id, n); });
+  const nodes = Array.from(nodeMap.values());
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const edges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+  link = g.append('g').selectAll('line').data(edges).join('line').attr('class', 'link').attr('stroke-width', 1);
+
+  node = g.append('g').selectAll('g').data(nodes).join('g').attr('class', 'node');
+
+  node.append('circle')
+    .attr('r', d => d.id === center ? 12 : 7)
+    .attr('fill', d => colors[d.kind] || colors.function)
+    .on('mouseover', (e, d) => {
+      tooltip.style('display', 'block');
+      tooltip.select('.tt-name').text(d.name);
+      tooltip.select('.tt-file').text(d.file_path || '');
+      tooltip.select('.tt-kind').text(d.kind);
+    })
+    .on('mousemove', e => tooltip.style('left', (e.pageX+12)+'px').style('top', (e.pageY-12)+'px'))
+    .on('mouseout', () => tooltip.style('display', 'none'))
+    .on('click', (e, d) => { document.getElementById('search').value = d.name; loadGraph(d.name); });
+
+  node.append('text').attr('dx', 10).attr('dy', 4).text(d => d.name);
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collision', d3.forceCollide(20))
+    .on('tick', () => {
+      link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+  // Drag
+  node.call(d3.drag()
+    .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+}
+
+// Search
+document.getElementById('search').addEventListener('keydown', async e => {
+  if (e.key === 'Enter') {
+    const q = e.target.value.trim();
+    if (q) loadGraph(q);
+    else loadGraph();
+  }
+});
+
+// Init
+loadStats();
+loadGraph();
+</script>
+</body>
+</html>
