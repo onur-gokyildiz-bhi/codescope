@@ -57,6 +57,20 @@ impl EntityExtractor {
         relations: &mut Vec<CodeRelation>,
         parent_qualified_name: Option<&str>,
     ) -> Result<()> {
+        self.walk_node_depth(node, source, entities, relations, parent_qualified_name, 0)
+    }
+
+    fn walk_node_depth(
+        &self,
+        node: Node,
+        source: &str,
+        entities: &mut Vec<CodeEntity>,
+        relations: &mut Vec<CodeRelation>,
+        parent_qualified_name: Option<&str>,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > 100 { return Ok(()); }
+
         let kind_str = node.kind();
 
         match kind_str {
@@ -87,7 +101,7 @@ impl EntityExtractor {
                     // Continue walking children for nested items
                     for i in 0..node.child_count() {
                         if let Some(child) = node.child(i) {
-                            self.walk_node(child, source, entities, relations, Some(&qname))?;
+                            self.walk_node_depth(child, source, entities, relations, Some(&qname), depth + 1)?;
                         }
                     }
                     return Ok(());
@@ -121,7 +135,7 @@ impl EntityExtractor {
                     // Walk children with class as parent
                     for i in 0..node.child_count() {
                         if let Some(child) = node.child(i) {
-                            self.walk_node(child, source, entities, relations, Some(&qname))?;
+                            self.walk_node_depth(child, source, entities, relations, Some(&qname), depth + 1)?;
                         }
                     }
                     return Ok(());
@@ -151,7 +165,7 @@ impl EntityExtractor {
         // Recurse into children
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                self.walk_node(child, source, entities, relations, parent_qualified_name)?;
+                self.walk_node_depth(child, source, entities, relations, parent_qualified_name, depth + 1)?;
             }
         }
 

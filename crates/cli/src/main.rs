@@ -270,6 +270,19 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
             continue;
         }
 
+        // Skip build artifacts, node_modules, and large files (>512KB)
+        let path_str = file_path.to_string_lossy();
+        if path_str.contains("node_modules") || path_str.contains("/build/")
+            || path_str.contains("\\build\\") || path_str.contains(".dart_tool")
+            || path_str.contains("/target/") || path_str.contains("\\target\\")
+        {
+            continue;
+        }
+        let file_size = file_path.metadata().map(|m| m.len()).unwrap_or(0);
+        if file_size > 512_000 {
+            continue;
+        }
+
         // Get relative path
         let rel_path = file_path
             .strip_prefix(&path)
