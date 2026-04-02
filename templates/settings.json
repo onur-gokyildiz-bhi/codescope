@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "codescope-mcp . --auto-index > /dev/null 2>&1 &; echo '{\"hookSpecificOutput\":{\"additionalContext\":\"Codescope knowledge graph ready. Use MCP tools (search_functions, find_callers, impact_analysis, etc.) for code questions. Slash commands: /codescope, /cs-search, /cs-ask, /cs-stats, /cs-impact\"}}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"additionalContext\":\"Reminder: If the user asked about code structure and you read raw files instead of using Codescope MCP tools, suggest using /cs-search or /cs-ask next time for faster results.\"}}'",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

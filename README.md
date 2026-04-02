@@ -290,34 +290,71 @@ codescope-mcp /path/to/project --auto-index
 - `--db-path <path>` — Custom database location
 - `--embeddings ollama` — Enable semantic search with Ollama
 
-### Configure in Claude Code
+### Quick Setup (Recommended)
 
-Create `.mcp.json` in your project root:
+One command installs MCP config, slash commands, and skills:
 
-```json
-{
-  "mcpServers": {
-    "codescope": {
-      "type": "stdio",
-      "command": "/absolute/path/to/codescope-mcp",
-      "args": ["/absolute/path/to/project", "--auto-index"]
-    }
-  }
-}
+```bash
+# Linux/macOS
+curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.sh | bash
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.ps1 | iex
 ```
 
-Or add to your global `~/.claude/settings.json`:
+This configures:
+- **MCP server** in `~/.claude.json` (auto-index on startup)
+- **6 slash commands**: `/codescope`, `/cs-search`, `/cs-index`, `/cs-stats`, `/cs-ask`, `/cs-impact`
+- **CLAUDE.md template** for project-level instructions
+
+### Manual Setup
+
+Add to `~/.claude.json` (global, all projects):
 
 ```json
 {
   "mcpServers": {
     "codescope": {
-      "type": "stdio",
       "command": "codescope-mcp",
       "args": [".", "--auto-index"]
     }
   }
 }
+```
+
+Or create `.mcp.json` in your project root (project-level):
+
+```json
+{
+  "mcpServers": {
+    "codescope": {
+      "command": "codescope-mcp",
+      "args": [".", "--auto-index"]
+    }
+  }
+}
+```
+
+### Slash Commands
+
+After setup, these commands are available in Claude Code:
+
+| Command | Description |
+|---------|-------------|
+| `/codescope` | Main menu — routes to sub-commands |
+| `/cs-search <pattern>` | Search functions by name |
+| `/cs-index` | Re-index current project |
+| `/cs-stats` | Show codebase statistics |
+| `/cs-ask <question>` | Ask in Turkish or English |
+| `/cs-impact <function>` | Analyze change impact |
+
+Claude will also **automatically use Codescope tools** when you ask code structure questions in natural language (Turkish or English):
+
+```
+> Bu fonksiyonu kim cagiriyor?        → find_callers
+> auth ile ilgili fonksiyonlari goster → search_functions
+> Bunu degistirsem ne etkilenir?       → impact_analysis
+> What's the largest function?         → raw_query
 ```
 
 ### Available MCP Tools
