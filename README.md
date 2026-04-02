@@ -31,6 +31,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 - [Benchmarking](#benchmarking)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
+- [Comparison with Alternatives](#comparison-with-alternatives)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -652,6 +653,48 @@ For very large monorepos, increase the stack size:
 ```bash
 RUST_MIN_STACK=16777216 codescope index /path/to/large-monorepo
 ```
+
+---
+
+## Comparison with Alternatives
+
+How does Codescope compare to other code intelligence tools?
+
+### Feature Matrix
+
+| Feature | Codescope | [codebase-memory-mcp](https://github.com/nicobailon/codebase-memory-mcp) | [CodeGraphContext](https://github.com/nicobailon/CodeGraphContext) | [Serena](https://github.com/oraios/serena) | [Claude Context](https://github.com/zilliztech/claude-context) | [code-graph-mcp](https://github.com/entrepeneur4lyf/code-graph-mcp) |
+|---------|-----------|---------------------|------------------|--------|----------------|----------------|
+| **Language** | Rust | C | Python | Python | Node.js | Python |
+| **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
+| **Languages** | 12 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
+| **MCP Server** | Yes (11 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
+| **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
+| **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
+| **Local Embeddings** | Yes (FastEmbed, zero deps) | No | No | No | No (needs API key) | No |
+| **Single Binary** | Yes | Yes | No | No | No | No |
+| **Config/Doc Parsing** | Yes (JSON, YAML, MD, Docker, SQL, Terraform, OpenAPI) | No | No | No | No | No |
+| **Semantic Search** | Yes (in-process) | No | No | No | Yes (external) | No |
+| **Git History** | Yes (churn, coupling, contributors) | No | No | No | No | No |
+| **Claude Code Skills** | Yes (9 slash commands) | No | No | No | No | No |
+| **License** | MIT | MIT | MIT | MIT | MIT | MIT |
+
+### Approach Comparison
+
+| Approach | Tools | Pros | Cons |
+|----------|-------|------|------|
+| **Knowledge Graph + Embeddings** (Codescope) | SurrealDB, tree-sitter, FastEmbed | Persistent, queryable, semantic search, single binary, offline | Fewer languages than LSP-based |
+| **Knowledge Graph Only** (codebase-memory-mcp, CGC) | SQLite/KuzuDB, tree-sitter | Fast structural queries, broad language support | No semantic search, no config/doc parsing |
+| **LSP-based** (Serena) | Language Server Protocol | 40+ languages, IDE-grade precision | Ephemeral (resets each session), heavy (40+ processes), no embeddings |
+| **Embedding Only** (Claude Context) | Milvus, OpenAI/Voyage | Semantic similarity search | No structural graph, requires API keys, no call graph |
+| **SaaS** (Sourcegraph, Greptile) | Proprietary | Enterprise scale, managed | Not open source, requires cloud, paid |
+
+### What Makes Codescope Different
+
+1. **Graph + Embeddings in one tool** — Most tools offer structural analysis OR semantic search. Codescope does both in a single binary.
+2. **Zero external dependencies** — SurrealDB is embedded, FastEmbed runs in-process with ONNX Runtime. No Docker, no API keys, no external databases.
+3. **Beyond code** — Parses JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests. Others only handle source code.
+4. **Claude Code native** — 9 slash commands (`/cs-search`, `/cs-ask`, `/cs-impact`...) with Turkish + English natural language support.
+5. **Temporal analysis** — Git history integration for churn analysis, change coupling, contributor mapping.
 
 ---
 
