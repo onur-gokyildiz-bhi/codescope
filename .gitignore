@@ -1,5 +1,6 @@
 /target
 .graph-rag/
+.claude/
 *.swp
 *.swo
 .DS_Store
