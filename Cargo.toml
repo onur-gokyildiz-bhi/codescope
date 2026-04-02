@@ -1,0 +1,62 @@
+[workspace]
+members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Onur Gokyildiz"]
+description = "Rust-native code intelligence engine powered by SurrealDB knowledge graphs"
+repository = "https://github.com/onurgokyildiz/codescope"
+homepage = "https://github.com/onurgokyildiz/codescope"
+keywords = ["code-analysis", "graph-database", "mcp", "rag", "surrealdb"]
+categories = ["development-tools", "command-line-utilities"]
+
+[workspace.dependencies]
+# Database
+surrealdb = { version = "2.3", features = ["kv-rocksdb"] }
+
+# Parsing
+tree-sitter = "0.24"
+
+# MCP
+rmcp = { version = "0.1", features = ["server", "transport-io"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Git
+git2 = "0.19"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async traits
+async-trait = "0.1"
+
+# Hashing
+sha2 = "0.10"
+hex = "0.4"
+
+# File walking
+walkdir = "2"
+ignore = "0.4"
+
+# JSON Schema (for MCP tool parameters)
+schemars = "0.8"

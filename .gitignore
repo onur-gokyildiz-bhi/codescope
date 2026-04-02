@@ -1,0 +1,9 @@
+/target
+.graph-rag/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.env
+benchmarks/repos/
+benchmarks/results/
