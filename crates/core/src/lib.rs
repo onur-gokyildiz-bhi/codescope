@@ -6,7 +6,7 @@ pub mod crossrepo;
 
 use serde::{Deserialize, Serialize};
 
-/// A code entity extracted from source code
+/// An entity extracted from any content type (code, config, docs, infra, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeEntity {
     pub kind: EntityKind,
@@ -27,6 +27,7 @@ pub struct CodeEntity {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {
+    // Code entities
     File,
     Module,
     Function,
@@ -40,25 +41,74 @@ pub enum EntityKind {
     Constant,
     Import,
     TypeAlias,
+
+    // Config/Data entities (JSON, YAML, TOML)
+    ConfigKey,
+    ConfigSection,
+
+    // Documentation entities (Markdown)
+    DocSection,
+    DocLink,
+    DocCodeBlock,
+
+    // API entities (OpenAPI, Protobuf)
+    ApiEndpoint,
+    ApiSchema,
+    ApiField,
+
+    // Database entities (SQL)
+    DbTable,
+    DbColumn,
+    DbIndex,
+    DbView,
+
+    // Infrastructure entities (Terraform, Dockerfile, K8s)
+    InfraResource,
+    InfraVariable,
+    InfraProvider,
+    DockerStage,
+    DockerInstruction,
+
+    // Package entities (package.json, Cargo.toml)
+    Package,
+    Dependency,
+    Script,
 }
 
 impl EntityKind {
     pub fn table_name(&self) -> &str {
         match self {
+            // Code
             Self::File => "file",
             Self::Module => "module",
             Self::Function | Self::Method => "function",
-            Self::Class | Self::Struct => "class",
-            Self::Interface | Self::Trait => "class",
-            Self::Enum => "class",
+            Self::Class | Self::Struct | Self::Interface | Self::Trait | Self::Enum | Self::TypeAlias => "class",
             Self::Variable | Self::Constant => "variable",
             Self::Import => "import_decl",
-            Self::TypeAlias => "class",
+
+            // Config
+            Self::ConfigKey | Self::ConfigSection => "config",
+
+            // Documentation
+            Self::DocSection | Self::DocLink | Self::DocCodeBlock => "doc",
+
+            // API
+            Self::ApiEndpoint | Self::ApiSchema | Self::ApiField => "api",
+
+            // Database
+            Self::DbTable | Self::DbColumn | Self::DbIndex | Self::DbView => "db_entity",
+
+            // Infrastructure
+            Self::InfraResource | Self::InfraVariable | Self::InfraProvider
+            | Self::DockerStage | Self::DockerInstruction => "infra",
+
+            // Package
+            Self::Package | Self::Dependency | Self::Script => "package",
         }
     }
 }
 
-/// A relationship between two code entities
+/// A relationship between two entities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeRelation {
     pub kind: RelationKind,
@@ -70,6 +120,7 @@ pub struct CodeRelation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
+    // Code relations
     Contains,
     Calls,
     Imports,
@@ -78,6 +129,14 @@ pub enum RelationKind {
     Uses,
     ModifiedIn,
     DependsOn,
+
+    // Config/Doc/API/Infra relations
+    Configures,
+    DefinesEndpoint,
+    HasField,
+    References,
+    DependsOnPackage,
+    RunsScript,
 }
 
 impl RelationKind {
@@ -91,6 +150,12 @@ impl RelationKind {
             Self::Uses => "uses",
             Self::ModifiedIn => "modified_in",
             Self::DependsOn => "depends_on",
+            Self::Configures => "configures",
+            Self::DefinesEndpoint => "defines_endpoint",
+            Self::HasField => "has_field",
+            Self::References => "references",
+            Self::DependsOnPackage => "depends_on_package",
+            Self::RunsScript => "runs_script",
         }
     }
 }

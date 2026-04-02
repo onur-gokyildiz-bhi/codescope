@@ -265,7 +265,8 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
             .and_then(|e| e.to_str())
             .unwrap_or("");
 
-        if !parser.supports_extension(ext) {
+        let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
             continue;
         }
 

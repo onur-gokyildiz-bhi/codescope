@@ -310,7 +310,8 @@ impl GraphRagServer {
             }
             let file_path = entry.path();
             let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !parser.supports_extension(ext) {
+            let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
                 continue;
             }
 

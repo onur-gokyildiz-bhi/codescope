@@ -17,7 +17,8 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Features
 
-- **12 languages**: TypeScript, JavaScript, Python, Rust, Go, Java, C, C++, C#, Ruby, PHP, TSX
+- **12 programming languages**: TypeScript, JavaScript, Python, Rust, Go, Java, C, C++, C#, Ruby, PHP, TSX
+- **9 content formats**: JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform (HCL), OpenAPI, package manifests (package.json, Cargo.toml)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode (zero config)
 - **18 MCP tools**: Drop-in integration with Claude Code, Cursor, and any MCP-compatible AI agent
 - **Temporal analysis**: Git history tracking, hotspot detection, change coupling, contributor expertise maps
