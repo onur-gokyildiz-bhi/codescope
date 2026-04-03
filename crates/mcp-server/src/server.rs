@@ -27,6 +27,8 @@ pub struct ProjectCtx {
 pub struct GraphRagServer {
     project: Arc<tokio::sync::RwLock<Option<ProjectCtx>>>,
     daemon: Option<Arc<DaemonState>>,
+    /// Cached conversation context summary, injected into ServerInfo.instructions
+    context_summary: Arc<tokio::sync::RwLock<String>>,
 }
 
 // Parameter structs for MCP tools
@@ -173,6 +175,36 @@ pub struct ConversationSearchParams {
     pub limit: Option<usize>,
 }
 
+// === Semantic search tools ===
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ConversationTimelineParams {
+    /// Entity name (function, class, file) to search conversation history for
+    pub entity_name: String,
+    /// Number of days to look back (default: 30)
+    pub days_back: Option<u32>,
+    /// Maximum results (default: 20)
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EmbedParams {
+    /// Embedding provider: "fastembed" (default, local), "ollama", or "openai"
+    pub provider: Option<String>,
+    /// Batch size for embedding generation (default: 100)
+    pub batch_size: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SemanticSearchParams {
+    /// Natural language query to search for semantically similar code
+    pub query: String,
+    /// Maximum results (default: 10)
+    pub limit: Option<usize>,
+    /// Embedding provider: "fastembed" (default), "ollama", or "openai"
+    pub provider: Option<String>,
+}
+
 impl GraphRagServer {
     /// Create for stdio mode — project ready immediately
     pub fn new(db: Surreal<Db>, repo_name: String, codebase_path: PathBuf) -> Self {
@@ -183,6 +215,7 @@ impl GraphRagServer {
                 codebase_path,
             }))),
             daemon: None,
+            context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
         }
     }
 
@@ -191,6 +224,7 @@ impl GraphRagServer {
         Self {
             project: Arc::new(tokio::sync::RwLock::new(None)),
             daemon: Some(state),
+            context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
         }
     }
 
@@ -202,18 +236,40 @@ impl GraphRagServer {
             .clone()
             .ok_or_else(|| "No project initialized. Call `init_project` first with repo name and codebase path.".into())
     }
+
+    /// Load conversation context summary from DB and cache it.
+    /// Called after auto-indexing completes.
+    pub async fn load_context_summary(&self) {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let summary = build_context_summary(&ctx.db, &ctx.repo_name).await;
+        *self.context_summary.write().await = summary;
+    }
 }
 
 #[tool(tool_box)]
 impl ServerHandler for GraphRagServer {
     fn get_info(&self) -> ServerInfo {
+        let base_instructions = "Code Graph RAG — Intelligent code knowledge graph. \
+             Search, analyze, and query your codebase using a graph database. \
+             Supports semantic search, call graph analysis, impact analysis, \
+             conversation history, and Obsidian-like knowledge navigation.";
+
+        // Try to include cached conversation context (non-blocking)
+        let context = self.context_summary.try_read()
+            .map(|c| c.clone())
+            .unwrap_or_default();
+
+        let instructions = if context.is_empty() {
+            base_instructions.to_string()
+        } else {
+            format!("{}\n\n{}", base_instructions, context)
+        };
+
         ServerInfo {
-            instructions: Some(
-                "Code Graph RAG — Intelligent code knowledge graph. \
-                 Search, analyze, and query your codebase using a graph database. \
-                 Supports semantic search, call graph analysis, impact analysis, and more."
-                    .into(),
-            ),
+            instructions: Some(instructions.into()),
             capabilities: ServerCapabilities {
                 tools: Some(ToolsCapability::default()),
                 ..Default::default()
@@ -494,19 +550,29 @@ impl GraphRagServer {
 
         let parser = codescope_core::parser::CodeParser::new();
         let builder = codescope_core::graph::builder::GraphBuilder::new(ctx.db.clone());
+        let incremental = codescope_core::graph::incremental::IncrementalIndexer::new(ctx.db.clone());
 
-        if params.clean.unwrap_or(false) {
+        let clean = params.clean.unwrap_or(false);
+        if clean {
             if let Err(e) = builder.clear_repo(&ctx.repo_name).await {
                 return format!("Error clearing repo: {}", e);
             }
         }
+
+        // Load existing hashes in bulk for incremental comparison
+        let existing_hashes = if !clean {
+            incremental.load_file_hashes(&ctx.repo_name).await.unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        };
 
         let walker = ignore::WalkBuilder::new(&target_path)
             .hidden(true)
             .git_ignore(true)
             .build();
 
-        let mut files = 0;
+        let mut files_indexed = 0;
+        let mut files_skipped = 0;
         let mut entities = 0;
         let mut relations = 0;
         let mut errors = Vec::new();
@@ -525,14 +591,40 @@ impl GraphRagServer {
             if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
                 continue;
             }
+            if codescope_core::parser::should_skip_file(file_path) {
+                continue;
+            }
 
-            match parser.parse_file(file_path, &ctx.repo_name) {
+            // Read file content for incremental hash check
+            let content = match std::fs::read_to_string(file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let rel_path = file_path
+                .strip_prefix(&target_path)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .to_string()
+                .replace('\\', "/");
+
+            // Skip unchanged files (unless clean rebuild)
+            if !clean {
+                let current_hash = codescope_core::graph::incremental::hash_content(&content);
+                if existing_hashes.get(&rel_path).map(|h| h.as_str()) == Some(&current_hash) {
+                    files_skipped += 1;
+                    continue;
+                }
+                // File changed — delete old entities before re-inserting
+                let _ = builder.delete_file_entities(&rel_path, &ctx.repo_name).await;
+            }
+
+            match parser.parse_source(std::path::Path::new(&rel_path), &content, &ctx.repo_name) {
                 Ok((ents, rels)) => {
                     entities += ents.len();
                     relations += rels.len();
                     let _ = builder.insert_entities(&ents).await;
                     let _ = builder.insert_relations(&rels).await;
-                    files += 1;
+                    files_indexed += 1;
                 }
                 Err(e) => {
                     errors.push(format!("{}: {}", file_path.display(), e));
@@ -540,10 +632,20 @@ impl GraphRagServer {
             }
         }
 
+        // Clean up entities from deleted files
+        let deleted = if !clean {
+            incremental.cleanup_deleted_files(&target_path, &ctx.repo_name).await.unwrap_or(0)
+        } else {
+            0
+        };
+
         let mut output = format!(
-            "Indexing complete!\n- Files: {}\n- Entities: {}\n- Relations: {}",
-            files, entities, relations
+            "Indexing complete!\n- Files indexed: {}\n- Files unchanged (skipped): {}\n- Entities: {}\n- Relations: {}",
+            files_indexed, files_skipped, entities, relations
         );
+        if deleted > 0 {
+            output.push_str(&format!("\n- Deleted files cleaned: {}", deleted));
+        }
         if !errors.is_empty() {
             output.push_str(&format!("\n- Errors: {}", errors.len()));
         }
@@ -889,60 +991,67 @@ impl GraphRagServer {
     async fn ask(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let question = params.question.to_lowercase();
-        let gq = GraphQuery::new(ctx.db);
 
-        // Pattern matching for common questions
-        let surql = if question.contains("how many") && question.contains("file") {
-            "SELECT count() FROM file GROUP ALL".to_string()
-        } else if question.contains("how many") && question.contains("function") {
-            "SELECT count() FROM `function` GROUP ALL".to_string()
-        } else if question.contains("how many") && question.contains("class") {
-            "SELECT count() FROM class GROUP ALL".to_string()
-        } else if question.contains("all function") || question.contains("list function") {
-            "SELECT name, file_path, start_line FROM `function` ORDER BY name LIMIT 50".to_string()
-        } else if question.contains("all class") || question.contains("list class") || question.contains("all struct") || question.contains("list struct") {
-            "SELECT name, kind, file_path, start_line FROM class ORDER BY name LIMIT 50".to_string()
-        } else if question.contains("all file") || question.contains("list file") {
-            "SELECT path, language, line_count FROM file ORDER BY path LIMIT 50".to_string()
-        } else if question.contains("call graph") || question.contains("calls") {
-            // Try to extract a function name
-            let words: Vec<&str> = question.split_whitespace().collect();
-            if let Some(idx) = words.iter().position(|w| *w == "for" || *w == "of") {
-                let func_name = words[idx + 1..].join(" ").trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string();
-                format!(
-                    "SELECT ->calls->`function`.name AS calls FROM `function` WHERE name = '{}'",
-                    func_name
-                )
-            } else {
-                "SELECT *, ->calls->`function`.name AS calls FROM `function` WHERE array::len(->calls) > 0 LIMIT 20".to_string()
-            }
-        } else if question.contains("in file") || question.contains("in ") && question.contains(".rs") || question.contains(".ts") || question.contains(".py") {
-            // Extract file path from question
-            let path = extract_path_from_question(&question);
-            format!(
-                "SELECT name, qualified_name, start_line, end_line FROM `function` WHERE file_path CONTAINS '{}' \
-                 UNION \
-                 SELECT name, qualified_name, start_line, end_line FROM class WHERE file_path CONTAINS '{}'",
-                path, path
-            )
-        } else if question.contains("largest") || question.contains("biggest") || question.contains("longest") {
-            "SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".to_string()
-        } else if question.contains("import") {
-            "SELECT name, file_path FROM import_decl ORDER BY file_path LIMIT 50".to_string()
-        } else {
-            // Fallback: try text search on function names
-            let search_term = question.split_whitespace()
-                .filter(|w| w.len() > 3 && !["what", "where", "which", "find", "show", "list", "does", "that", "this", "from", "with"].contains(w))
-                .next()
-                .unwrap_or(&question);
-            format!(
-                "SELECT name, file_path, start_line, signature FROM `function` WHERE name ~ '{}' LIMIT 20",
-                search_term
-            )
+        // Sanitize user input for safe SurrealQL interpolation
+        let sanitize = |s: &str| -> String {
+            s.replace('\'', "")
+             .replace('\\', "")
+             .replace(';', "")
+             .replace("--", "")
         };
 
-        match gq.raw_query(&surql).await {
-            Ok(result) => {
+        // Pattern matching for common questions — all parameterized where possible
+        let (surql, binds): (String, Vec<(&str, String)>) =
+            if question.contains("how many") && question.contains("file") {
+                ("SELECT count() FROM file GROUP ALL".into(), vec![])
+            } else if question.contains("how many") && question.contains("function") {
+                ("SELECT count() FROM `function` GROUP ALL".into(), vec![])
+            } else if question.contains("how many") && question.contains("class") {
+                ("SELECT count() FROM class GROUP ALL".into(), vec![])
+            } else if question.contains("all function") || question.contains("list function") {
+                ("SELECT name, file_path, start_line FROM `function` ORDER BY name LIMIT 50".into(), vec![])
+            } else if question.contains("all class") || question.contains("list class") || question.contains("all struct") || question.contains("list struct") {
+                ("SELECT name, kind, file_path, start_line FROM class ORDER BY name LIMIT 50".into(), vec![])
+            } else if question.contains("all file") || question.contains("list file") {
+                ("SELECT path, language, line_count FROM file ORDER BY path LIMIT 50".into(), vec![])
+            } else if question.contains("call graph") || question.contains("calls") {
+                let words: Vec<&str> = question.split_whitespace().collect();
+                if let Some(idx) = words.iter().position(|w| *w == "for" || *w == "of") {
+                    let func_name = sanitize(&words[idx + 1..].join(" ").trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string());
+                    ("SELECT ->calls->`function`.name AS calls FROM `function` WHERE name = $name".into(),
+                     vec![("name", func_name)])
+                } else {
+                    ("SELECT *, ->calls->`function`.name AS calls FROM `function` WHERE array::len(->calls) > 0 LIMIT 20".into(), vec![])
+                }
+            } else if question.contains("in file") || question.contains("in ") && question.contains(".rs") || question.contains(".ts") || question.contains(".py") {
+                let path = sanitize(&extract_path_from_question(&question));
+                ("SELECT name, qualified_name, start_line, end_line FROM `function` WHERE file_path CONTAINS $path \
+                  UNION \
+                  SELECT name, qualified_name, start_line, end_line FROM class WHERE file_path CONTAINS $path".into(),
+                 vec![("path", path)])
+            } else if question.contains("largest") || question.contains("biggest") || question.contains("longest") {
+                ("SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".into(), vec![])
+            } else if question.contains("import") {
+                ("SELECT name, file_path FROM import_decl ORDER BY file_path LIMIT 50".into(), vec![])
+            } else {
+                let search_term = question.split_whitespace()
+                    .filter(|w| w.len() > 3 && !["what", "where", "which", "find", "show", "list", "does", "that", "this", "from", "with"].contains(w))
+                    .next()
+                    .unwrap_or(&question);
+                let safe_term = sanitize(search_term);
+                ("SELECT name, file_path, start_line, signature FROM `function` WHERE name ~ $term LIMIT 20".into(),
+                 vec![("term", safe_term)])
+            };
+
+        // Build parameterized query
+        let mut query = ctx.db.query(&surql);
+        for (key, val) in &binds {
+            query = query.bind((*key, val.clone()));
+        }
+
+        match query.await {
+            Ok(mut response) => {
+                let result: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
                 let mut output = format!("**Query:** `{}`\n\n**Results:**\n", surql);
                 output.push_str(&serde_json::to_string_pretty(&result).unwrap_or_default());
                 output
@@ -1308,6 +1417,26 @@ impl GraphRagServer {
         let mut total_result = codescope_core::conversation::ConvIndexResult::default();
 
         for jsonl_path in &jsonl_files {
+            let jsonl_name = jsonl_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown.jsonl")
+                .to_string();
+
+            // Incremental: check if this file is already indexed with same hash
+            if let Ok(existing) = check_conversation_hash(&ctx.db, &jsonl_name).await {
+                if let Some(stored_hash) = existing {
+                    // Compute current file hash
+                    if let Ok(content) = std::fs::read(jsonl_path) {
+                        use sha2::{Digest, Sha256};
+                        let current_hash = hex::encode(Sha256::digest(&content));
+                        if stored_hash == current_hash {
+                            total_result.skipped += 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
             match codescope_core::conversation::parse_conversation(jsonl_path, &ctx.repo_name, &known_entities) {
                 Ok((entities, relations, result)) => {
                     let _ = builder.insert_entities(&entities).await;
@@ -1325,21 +1454,53 @@ impl GraphRagServer {
             }
         }
 
+        // Index memory files in the project directory
+        let memory_dir = project_dir.join("memory");
+        let mut memory_count = 0;
+        if memory_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "md").unwrap_or(false) {
+                        match codescope_core::conversation::parse_memory_file(&path, &ctx.repo_name, &known_entities) {
+                            Ok((entities, relations)) => {
+                                let _ = builder.insert_entities(&entities).await;
+                                let _ = builder.insert_relations(&relations).await;
+                                memory_count += 1;
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to parse memory file {}: {}", path.display(), e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cross-session topic linking
+        let cross_links = link_cross_session_topics(&ctx.db, &ctx.repo_name).await;
+
         format!(
             "## Conversation Indexing Complete\n\n\
-             - Sessions: {}\n\
+             - Sessions indexed: {}\n\
+             - Skipped (unchanged): {}\n\
              - Decisions: {}\n\
              - Problems: {}\n\
              - Solutions: {}\n\
              - Topics: {}\n\
              - Code links: {}\n\
+             - Memory files: {}\n\
+             - Cross-session links: {}\n\
              - Source: {}",
             total_result.sessions_indexed,
+            total_result.skipped,
             total_result.decisions,
             total_result.problems,
             total_result.solutions,
             total_result.topics,
             total_result.code_links,
+            memory_count,
+            cross_links,
             project_dir.display(),
         )
     }
@@ -1434,32 +1595,228 @@ impl GraphRagServer {
 
         output
     }
+
+    // ===== Temporal Conversation Query =====
+
+    /// Search conversation history by time — find what was discussed about an entity recently
+    #[tool(description = "Search conversation history over time for a specific code entity. \
+        Shows decisions, problems, and solutions related to a function/class/file, ordered by time. \
+        Use to answer 'what did we discuss about X last week?' or 'when was this function last changed?'.")]
+    async fn conversation_timeline(&self, #[tool(aggr)] params: ConversationTimelineParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let limit = params.limit.unwrap_or(20) as u32;
+        let _days_back = params.days_back.unwrap_or(30);
+        let name = params.entity_name.clone();
+
+        // Search across all conversation entity types for mentions of this entity
+        let tables = ["decision", "problem", "solution", "conv_topic"];
+        let mut all_results: Vec<serde_json::Value> = Vec::new();
+
+        for table in &tables {
+            let query = format!(
+                "SELECT name, body, timestamp, kind, '{}' AS type \
+                 FROM {} WHERE body CONTAINS $name \
+                 ORDER BY timestamp DESC LIMIT $lim",
+                table, table
+            );
+            if let Ok(mut resp) = ctx.db.query(&query)
+                .bind(("name", name.clone()))
+                .bind(("lim", limit))
+                .await
+            {
+                let results: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
+                all_results.extend(results);
+            }
+        }
+
+        // Also check discussed_in relations
+        let link_query = "SELECT <-discussed_in<-decision.{name, body, timestamp} AS decisions, \
+                           <-discussed_in<-problem.{name, body, timestamp} AS problems, \
+                           <-discussed_in<-solution.{name, body, timestamp} AS solutions \
+                           FROM `function` WHERE name = $name LIMIT 1;";
+        if let Ok(mut resp) = ctx.db.query(link_query).bind(("name", name.clone())).await {
+            let linked: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
+            if !linked.is_empty() {
+                all_results.push(serde_json::json!({
+                    "type": "linked",
+                    "for_entity": name,
+                    "data": linked
+                }));
+            }
+        }
+
+        if all_results.is_empty() {
+            return format!("No conversation history found for '{}'. Run index_conversations first.", name);
+        }
+
+        let mut output = format!("## Timeline: '{}'\n\n", name);
+
+        for item in &all_results {
+            let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+            let item_name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let timestamp = item.get("timestamp").and_then(|v| v.as_str()).unwrap_or("?");
+            let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("");
+
+            let icon = match item_type {
+                "decision" => "[DECISION]",
+                "problem" => "[PROBLEM]",
+                "solution" => "[SOLUTION]",
+                "conv_topic" => "[TOPIC]",
+                "linked" => "[LINKED]",
+                _ => "[?]",
+            };
+
+            output.push_str(&format!("**{}** {} ({})\n", icon, item_name, timestamp));
+            if !body.is_empty() && body.len() > 10 {
+                let preview = if body.len() > 200 { &body[..200] } else { body };
+                output.push_str(&format!("  > {}\n", preview));
+            }
+            output.push('\n');
+        }
+
+        output
+    }
+
+    // ===== Semantic Search Tools =====
+
+    /// Generate embeddings for all functions in the graph
+    #[tool(description = "Generate vector embeddings for all functions that don't have them yet. \
+        Uses local FastEmbed by default (no external service needed). \
+        Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'.")]
+    async fn embed_functions(&self, #[tool(aggr)] params: EmbedParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let batch_size = params.batch_size.unwrap_or(100);
+        let provider_name = params.provider.as_deref().unwrap_or("fastembed");
+
+        let provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider_name {
+            "ollama" => {
+                Box::new(codescope_core::embeddings::OllamaProvider::new(
+                    Some("http://localhost:11434".into()),
+                    Some("nomic-embed-text".into()),
+                ))
+            }
+            "openai" => {
+                let api_key = match std::env::var("OPENAI_API_KEY") {
+                    Ok(k) => k,
+                    Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
+                };
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+            }
+            _ => {
+                // FastEmbed — local, no external service
+                match codescope_core::embeddings::FastEmbedProvider::new() {
+                    Ok(p) => Box::new(p),
+                    Err(e) => return format!("Error creating FastEmbed provider: {}", e),
+                }
+            }
+        };
+
+        let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(ctx.db, provider);
+
+        match pipeline.embed_functions(batch_size).await {
+            Ok(count) => format!(
+                "Embedded {} functions using {} ({} dimensions)",
+                count,
+                pipeline.provider_name(),
+                pipeline.dimensions()
+            ),
+            Err(e) => format!("Error embedding functions: {}", e),
+        }
+    }
+
+    /// Search for semantically similar code using vector embeddings
+    #[tool(description = "Search for code by meaning, not just name. Finds semantically similar functions \
+        using vector embeddings. Run embed_functions first to generate embeddings. \
+        Example: 'parse configuration file' finds all config-parsing functions regardless of naming.")]
+    async fn semantic_search(&self, #[tool(aggr)] params: SemanticSearchParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let limit = params.limit.unwrap_or(10);
+        let provider_name = params.provider.as_deref().unwrap_or("fastembed");
+
+        let provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider_name {
+            "ollama" => {
+                Box::new(codescope_core::embeddings::OllamaProvider::new(
+                    Some("http://localhost:11434".into()),
+                    Some("nomic-embed-text".into()),
+                ))
+            }
+            "openai" => {
+                let api_key = match std::env::var("OPENAI_API_KEY") {
+                    Ok(k) => k,
+                    Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
+                };
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+            }
+            _ => {
+                match codescope_core::embeddings::FastEmbedProvider::new() {
+                    Ok(p) => Box::new(p),
+                    Err(e) => return format!("Error creating FastEmbed provider: {}", e),
+                }
+            }
+        };
+
+        let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(ctx.db, provider);
+
+        match pipeline.semantic_search(&params.query, limit).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    return format!(
+                        "No semantic matches for '{}'. Run embed_functions first to generate embeddings.",
+                        params.query
+                    );
+                }
+                let mut output = format!("## Semantic Search: '{}'\n\n", params.query);
+                for (i, r) in results.iter().enumerate() {
+                    let score = r.score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "?".into());
+                    output.push_str(&format!(
+                        "{}. **{}** ({}) — score: {}\n",
+                        i + 1,
+                        r.name,
+                        r.file_path,
+                        score,
+                    ));
+                    if let Some(sig) = &r.signature {
+                        output.push_str(&format!("   `{}`\n", sig));
+                    }
+                }
+                output
+            }
+            Err(e) => format!("Semantic search error: {}", e),
+        }
+    }
 }
 
-/// Load known entity names from the graph for conversation-to-code linking
+/// Load known entity names from the graph for conversation-to-code linking.
+/// Queries all 11 entity tables to maximize linking coverage.
 async fn load_known_entities(db: &surrealdb::Surreal<surrealdb::engine::local::Db>) -> Vec<String> {
     let query = "SELECT name, qualified_name FROM `function`; \
                  SELECT name, qualified_name FROM class; \
-                 SELECT path AS name, path AS qualified_name FROM file;";
+                 SELECT path AS name, path AS qualified_name FROM file; \
+                 SELECT name, qualified_name FROM module; \
+                 SELECT name, qualified_name FROM variable; \
+                 SELECT name, qualified_name FROM import_decl; \
+                 SELECT name, qualified_name FROM config; \
+                 SELECT name, qualified_name FROM doc; \
+                 SELECT name, qualified_name FROM api; \
+                 SELECT name, qualified_name FROM infra; \
+                 SELECT name, qualified_name FROM package;";
+
+    let table_names = [
+        "function", "class", "file", "module", "variable",
+        "import_decl", "config", "doc", "api", "infra", "package",
+    ];
 
     match db.query(query).await {
         Ok(mut response) => {
             let mut entities = Vec::new();
 
-            for table_idx in 0..3 {
-                let table_name = match table_idx {
-                    0 => "function",
-                    1 => "class",
-                    2 => "file",
-                    _ => continue,
-                };
+            for (table_idx, table_name) in table_names.iter().enumerate() {
                 let results: Vec<serde_json::Value> = response.take(table_idx).unwrap_or_default();
                 for r in results {
                     if let (Some(name), Some(qname)) = (
                         r.get("name").and_then(|v| v.as_str()),
                         r.get("qualified_name").and_then(|v| v.as_str()),
                     ) {
-                        // Format: "table:name:qualified_name"
                         entities.push(format!("{}:{}:{}", table_name, name, qname));
                     }
                 }
@@ -1472,7 +1829,6 @@ async fn load_known_entities(db: &surrealdb::Surreal<surrealdb::engine::local::D
 }
 
 fn extract_path_from_question(question: &str) -> String {
-    // Find anything that looks like a file path
     for word in question.split_whitespace() {
         let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '\\' && c != '.' && c != '_' && c != '-');
         if clean.contains('.') && (clean.contains('/') || clean.contains('\\') || clean.ends_with(".rs") || clean.ends_with(".ts") || clean.ends_with(".py") || clean.ends_with(".go") || clean.ends_with(".java") || clean.ends_with(".js")) {
@@ -1480,4 +1836,217 @@ fn extract_path_from_question(question: &str) -> String {
         }
     }
     question.to_string()
+}
+
+/// Check if a conversation file is already indexed by comparing stored hash
+async fn check_conversation_hash(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    file_name: &str,
+) -> anyhow::Result<Option<String>> {
+    #[derive(serde::Deserialize)]
+    struct HashRecord {
+        hash: Option<String>,
+    }
+    let results: Vec<HashRecord> = db
+        .query("SELECT hash FROM conversation WHERE file_path = $name LIMIT 1")
+        .bind(("name", file_name.to_string()))
+        .await?
+        .take(0)?;
+    Ok(results.first().and_then(|r| r.hash.clone()))
+}
+
+/// Find the Claude projects directory matching a codebase path
+pub fn find_claude_project_dir(codebase_path: &std::path::Path, repo_name: &str) -> std::path::PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let claude_projects = home.join(".claude").join("projects");
+
+    let codebase_str = codebase_path.to_string_lossy()
+        .replace(['/', '\\', ':'], "-")
+        .replace("--", "-");
+
+    match std::fs::read_dir(&claude_projects) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.contains(repo_name) || codebase_str.contains(&name) {
+                    return entry.path();
+                }
+            }
+            claude_projects
+        }
+        Err(_) => claude_projects,
+    }
+}
+
+/// Build a concise conversation context summary from indexed conversations.
+/// This gets injected into ServerInfo.instructions so Claude sees it automatically.
+async fn build_context_summary(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    repo: &str,
+) -> String {
+    let mut sections = Vec::new();
+
+    // Recent decisions (last 10)
+    let decisions: Vec<serde_json::Value> = db
+        .query("SELECT name, body, timestamp FROM decision WHERE repo = $repo ORDER BY timestamp DESC LIMIT 10")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !decisions.is_empty() {
+        let mut s = "## Recent Decisions\n".to_string();
+        for d in &decisions {
+            let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let ts = d.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+            let date = if ts.len() >= 10 { &ts[..10] } else { ts };
+            s.push_str(&format!("- {}: {}\n", date, name));
+        }
+        sections.push(s);
+    }
+
+    // Recent problems (last 5 unsolved)
+    let problems: Vec<serde_json::Value> = db
+        .query("SELECT name, timestamp FROM problem WHERE repo = $repo ORDER BY timestamp DESC LIMIT 5")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !problems.is_empty() {
+        let mut s = "## Recent Problems\n".to_string();
+        for p in &problems {
+            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let ts = p.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+            let date = if ts.len() >= 10 { &ts[..10] } else { ts };
+            s.push_str(&format!("- {}: {}\n", date, name));
+        }
+        sections.push(s);
+    }
+
+    // Recent solutions (last 5)
+    let solutions: Vec<serde_json::Value> = db
+        .query("SELECT name, timestamp FROM solution WHERE repo = $repo ORDER BY timestamp DESC LIMIT 5")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !solutions.is_empty() {
+        let mut s = "## Recent Solutions\n".to_string();
+        for sol in &solutions {
+            let name = sol.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let ts = sol.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+            let date = if ts.len() >= 10 { &ts[..10] } else { ts };
+            s.push_str(&format!("- {}: {}\n", date, name));
+        }
+        sections.push(s);
+    }
+
+    // Session count
+    let stats: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM conversation WHERE repo = $repo GROUP ALL")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    let session_count = stats.first()
+        .and_then(|v| v.get("count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if session_count > 0 {
+        sections.push(format!("*{} conversation sessions indexed for this project.*", session_count));
+    }
+
+    if sections.is_empty() {
+        String::new()
+    } else {
+        format!("# Conversation Context\n\n{}", sections.join("\n"))
+    }
+}
+
+/// Generate CONTEXT.md in the project's .claude directory.
+/// Claude reads this automatically at session start.
+pub async fn generate_context_md(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    repo: &str,
+    codebase_path: &std::path::Path,
+) {
+    let summary = build_context_summary(db, repo).await;
+    if summary.is_empty() {
+        return;
+    }
+
+    let context_path = codebase_path.join(".claude").join("CONTEXT.md");
+    if let Some(parent) = context_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let content = format!(
+        "<!-- Auto-generated by Codescope. Do not edit manually. -->\n\
+         <!-- Updated: {} -->\n\n\
+         {}\n\n\
+         > Use `conversation_search` for deeper queries, `explore` for entity graph navigation.\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M"),
+        summary,
+    );
+
+    match std::fs::write(&context_path, &content) {
+        Ok(_) => tracing::info!("Generated CONTEXT.md at {}", context_path.display()),
+        Err(e) => tracing::warn!("Failed to write CONTEXT.md: {}", e),
+    }
+}
+
+/// Create cross-session topic links: sessions discussing the same code entity get co_discusses edges
+async fn link_cross_session_topics(
+    db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    _repo: &str,
+) -> usize {
+    // Find code entities discussed in multiple sessions
+    let query = "SELECT out AS entity, array::group(in) AS sessions \
+                 FROM discussed_in \
+                 GROUP BY out \
+                 HAVING count() > 1 \
+                 LIMIT 50;";
+
+    let results: Vec<serde_json::Value> = match db.query(query).await {
+        Ok(mut r) => r.take(0).unwrap_or_default(),
+        Err(_) => return 0,
+    };
+
+    let mut link_count = 0;
+    for row in &results {
+        let sessions = match row.get("sessions").and_then(|v| v.as_array()) {
+            Some(s) => s,
+            None => continue,
+        };
+        // Create pairwise co_discusses links (capped at 10 sessions per entity)
+        let capped: Vec<_> = sessions.iter().take(10).collect();
+        for i in 0..capped.len() {
+            for j in (i + 1)..capped.len() {
+                let from_id = capped[i].as_str().unwrap_or("");
+                let to_id = capped[j].as_str().unwrap_or("");
+                if !from_id.is_empty() && !to_id.is_empty() {
+                    let q = format!(
+                        "LET $existing = (SELECT * FROM co_discusses WHERE in = {} AND out = {} LIMIT 1); \
+                         IF !$existing THEN \
+                             RELATE {}->co_discusses->{} \
+                         END;",
+                        from_id, to_id, from_id, to_id
+                    );
+                    if db.query(&q).await.is_ok() {
+                        link_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    link_count
 }

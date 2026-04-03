@@ -189,14 +189,18 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
         writeln!(f, "  DB connected, MCP serving...")
     });
 
+    // Create MCP server BEFORE spawning background tasks so we can share context_summary
+    let mcp_server = server::GraphRagServer::new(db.clone(), repo_name.clone(), path.clone());
+
     // Background auto-index with parallel parsing
     if auto_index {
         let index_db = db.clone();
         let index_path = path.clone();
         let index_repo = repo_name.clone();
+        let mcp_handle = mcp_server.clone();
         tokio::spawn(async move {
             tracing::info!("Background indexing {}...", index_path.display());
-            let builder = codescope_core::graph::builder::GraphBuilder::new(index_db);
+            let builder = codescope_core::graph::builder::GraphBuilder::new(index_db.clone());
 
             // Phase 1: Collect + parse files in parallel (CPU-bound, rayon thread pool)
             let parse_path = index_path.clone();
@@ -252,10 +256,61 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             }
 
             tracing::info!("Background indexing complete: {} files", file_count);
+
+            // Phase 3: Auto-index conversations + memory files
+            let project_dir = server::find_claude_project_dir(&index_path, &index_repo);
+            tracing::info!("Auto-indexing conversations from {}", project_dir.display());
+
+            let known_entities: Vec<String> = Vec::new();
+
+            let mut jsonl_files = Vec::new();
+            collect_jsonl_files(&project_dir, &mut jsonl_files);
+
+            let mut conv_count = 0;
+            for jsonl_path in &jsonl_files {
+                match codescope_core::conversation::parse_conversation(jsonl_path, &index_repo, &known_entities) {
+                    Ok((entities, relations, _)) => {
+                        let _ = builder.insert_entities(&entities).await;
+                        let _ = builder.insert_relations(&relations).await;
+                        conv_count += 1;
+                    }
+                    Err(e) => {
+                        tracing::debug!("Conversation parse error {}: {}", jsonl_path.display(), e);
+                    }
+                }
+            }
+
+            // Index memory files
+            let memory_dir = project_dir.join("memory");
+            let mut mem_count = 0;
+            if memory_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "md").unwrap_or(false) {
+                            if let Ok((ents, rels)) = codescope_core::conversation::parse_memory_file(&path, &index_repo, &known_entities) {
+                                let _ = builder.insert_entities(&ents).await;
+                                let _ = builder.insert_relations(&rels).await;
+                                mem_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            tracing::info!(
+                "Conversation indexing: {} sessions, {} memory files",
+                conv_count, mem_count
+            );
+
+            // Phase 4: Generate CONTEXT.md + load context summary into MCP server
+            server::generate_context_md(&index_db, &index_repo, &index_path).await;
+            mcp_handle.load_context_summary().await;
+
+            tracing::info!("Context summary loaded into MCP server instructions");
         });
     }
 
-    let mcp_server = server::GraphRagServer::new(db, repo_name, path);
     let service = mcp_server.serve(rmcp::transport::stdio()).await?;
     tracing::info!("MCP server running on stdio");
     service.waiting().await?;
@@ -267,6 +322,11 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
 async fn run_daemon(bind: &str, port: u16) -> Result<()> {
     let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
     let state = Arc::new(daemon::DaemonState::new());
+
+    // Write PID file for stop command
+    let pid_path = pid_file_path(port);
+    let _ = std::fs::create_dir_all(pid_path.parent().unwrap());
+    std::fs::write(&pid_path, std::process::id().to_string())?;
 
     tracing::info!("Codescope daemon starting on {}", addr);
     eprintln!("Codescope daemon listening on http://{}", addr);
@@ -291,7 +351,17 @@ async fn run_daemon(bind: &str, port: u16) -> Result<()> {
         });
     }
 
+    // Cleanup PID file on exit
+    let _ = std::fs::remove_file(&pid_path);
+
     Ok(())
+}
+
+fn pid_file_path(port: u16) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join(format!("daemon-{}.pid", port))
 }
 
 /// Start daemon as a background process
@@ -339,18 +409,61 @@ fn start_daemon_background(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Stop daemon
+/// Stop daemon by reading PID file and killing the process
 async fn stop_daemon(port: u16) -> Result<()> {
-    let url = format!("http://127.0.0.1:{}/health", port);
-    match reqwest::get(&url).await {
-        Ok(_) => {
-            // TODO: implement graceful shutdown endpoint
-            eprintln!("Daemon is running on port {}. Kill the process to stop.", port);
-        }
+    let pid_path = pid_file_path(port);
+
+    let pid_str = match std::fs::read_to_string(&pid_path) {
+        Ok(s) => s.trim().to_string(),
         Err(_) => {
-            eprintln!("No daemon running on port {}", port);
+            eprintln!("No daemon PID file found for port {}. Is the daemon running?", port);
+            return Ok(());
+        }
+    };
+
+    let pid: u32 = match pid_str.parse() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Invalid PID in file: {}", pid_str);
+            let _ = std::fs::remove_file(&pid_path);
+            return Ok(());
+        }
+    };
+
+    // Kill the process
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let result = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+        match result {
+            Ok(output) if output.status.success() => {
+                eprintln!("Daemon (PID {}) stopped.", pid);
+            }
+            _ => {
+                eprintln!("Could not stop daemon (PID {}). Process may have already exited.", pid);
+            }
         }
     }
+
+    #[cfg(not(windows))]
+    {
+        use std::process::Command;
+        let result = Command::new("kill")
+            .args([&pid.to_string()])
+            .output();
+        match result {
+            Ok(output) if output.status.success() => {
+                eprintln!("Daemon (PID {}) stopped.", pid);
+            }
+            _ => {
+                eprintln!("Could not stop daemon (PID {}). Process may have already exited.", pid);
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(&pid_path);
     Ok(())
 }
 
@@ -372,3 +485,18 @@ async fn check_status(port: u16) -> Result<()> {
     }
     Ok(())
 }
+
+/// Recursively collect all .jsonl files in a directory
+fn collect_jsonl_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_jsonl_files(&path, out);
+            } else if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                out.push(path);
+            }
+        }
+    }
+}
+

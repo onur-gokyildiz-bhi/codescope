@@ -195,7 +195,7 @@ impl GraphBuilder {
 
     /// Get stats about the current graph
     pub async fn stats(&self) -> Result<IndexResult> {
-        let _response = self
+        let mut response = self
             .db
             .query(
                 "SELECT count() FROM file GROUP ALL;
@@ -208,7 +208,28 @@ impl GraphBuilder {
             )
             .await?;
 
-        Ok(IndexResult::default())
+        fn extract_count(result: Vec<serde_json::Value>) -> usize {
+            result
+                .first()
+                .and_then(|v| v.get("count"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize
+        }
+
+        let files: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        let functions: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+        let classes: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+        let _imports: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+        let _contains: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
+        let _calls: Vec<serde_json::Value> = response.take(5).unwrap_or_default();
+        let _import_rels: Vec<serde_json::Value> = response.take(6).unwrap_or_default();
+
+        Ok(IndexResult {
+            files_processed: extract_count(files),
+            entities_extracted: extract_count(functions) + extract_count(classes),
+            relations_created: 0, // Summed from edge tables but not critical
+            errors: vec![],
+        })
     }
 }
 
@@ -279,7 +300,7 @@ fn build_entity_set(entity: &CodeEntity) -> String {
         EntityKind::ConversationSession => format!(
             "SET name = {}, qualified_name = {}, kind = {}, \
              file_path = {}, repo = {}, language = {}, \
-             start_line = {}, end_line = {}, body = {}, hash = {}",
+             start_line = {}, end_line = {}, body = {}, hash = {}, timestamp = {}",
             surql_str(&entity.name),
             surql_str(&entity.qualified_name),
             surql_str(&format!("{:?}", entity.kind)),
@@ -290,6 +311,7 @@ fn build_entity_set(entity: &CodeEntity) -> String {
             entity.end_line,
             surql_opt_str(&entity.body),
             surql_opt_str(&entity.body_hash),
+            surql_opt_str(&entity.signature), // timestamp stored in signature field
         ),
         // All other entities: config, doc, api, db_entity, infra, package, conversation
         _ => format!(

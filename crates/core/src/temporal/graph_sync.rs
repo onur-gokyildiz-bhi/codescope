@@ -48,7 +48,8 @@ impl TemporalGraphSync {
         self.sync_commit_data(&commits, repo_name).await
     }
 
-    /// Sync pre-fetched commits into the graph (thread-safe, no git2 dependency)
+    /// Sync pre-fetched commits into the graph (thread-safe, no git2 dependency).
+    /// Idempotent: uses UPSERT for commits and checks for existing edges before creating.
     pub async fn sync_commit_data(
         &self,
         commits: &[CommitInfo],
@@ -60,7 +61,6 @@ impl TemporalGraphSync {
 
         let mut count = 0;
         for commit in commits {
-            // Create commit node
             let hash = commit.hash.clone();
             let author = commit.author.clone();
             let message = commit.message.lines().next().unwrap_or("").to_string();
@@ -68,11 +68,15 @@ impl TemporalGraphSync {
             let files_changed = commit.files_changed.len() as i64;
             let repo = repo_name.to_string();
 
+            // UPSERT commit by hash — idempotent, no duplicates
+            let sanitized_hash = hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
             let result = self.db
                 .query(
-                    "CREATE commit SET hash = $hash, author = $author, message = $msg, \
-                     timestamp = $ts, files_changed = $fc, repo = $repo"
-                        .to_string(),
+                    format!(
+                        "UPSERT commit:{} SET hash = $hash, author = $author, message = $msg, \
+                         timestamp = $ts, files_changed = $fc, repo = $repo",
+                        sanitized_hash
+                    ),
                 )
                 .bind(("hash", hash.clone()))
                 .bind(("author", author))
@@ -83,12 +87,11 @@ impl TemporalGraphSync {
                 .await;
 
             if let Err(e) = result {
-                // Might be duplicate (UNIQUE constraint)
-                debug!("Commit {} already exists or error: {}", &hash[..8], e);
+                debug!("Commit {} error: {}", &hash[..8], e);
                 continue;
             }
 
-            // Create modified_in edges: file -> modified_in -> commit
+            // Create modified_in edges with dedup: only if edge doesn't already exist
             for file_change in &commit.files_changed {
                 let file_path = file_change.path.clone();
                 let change_type = match file_change.change_type {
@@ -104,10 +107,12 @@ impl TemporalGraphSync {
                         "LET $file = (SELECT * FROM file WHERE path CONTAINS $path LIMIT 1); \
                          LET $commit = (SELECT * FROM commit WHERE hash = $hash LIMIT 1); \
                          IF $file AND $commit THEN \
-                             RELATE ($file[0].id)->modified_in->($commit[0].id) \
-                             SET change_type = $ct, timestamp = $ts \
-                         END;"
-                            .to_string(),
+                             LET $existing = (SELECT * FROM modified_in WHERE in = $file[0].id AND out = $commit[0].id LIMIT 1); \
+                             IF !$existing THEN \
+                                 RELATE ($file[0].id)->modified_in->($commit[0].id) \
+                                 SET change_type = $ct, timestamp = $ts \
+                             END \
+                         END;",
                     )
                     .bind(("path", file_path))
                     .bind(("hash", commit_hash))

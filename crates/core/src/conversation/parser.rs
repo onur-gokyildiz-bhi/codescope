@@ -24,6 +24,8 @@ pub struct ConversationParseResult {
     pub turns: Vec<ConversationTurn>,
     pub message_count: usize,
     pub file_hash: String,
+    pub first_timestamp: Option<String>,
+    pub last_timestamp: Option<String>,
 }
 
 pub struct ConversationParser;
@@ -41,6 +43,8 @@ impl ConversationParser {
         let mut turns = Vec::new();
         let mut session_id = String::new();
         let mut message_count = 0;
+        let mut first_timestamp: Option<String> = None;
+        let mut last_timestamp: Option<String> = None;
 
         for (line_idx, line_result) in reader.lines().enumerate() {
             let line = line_result?;
@@ -90,6 +94,14 @@ impl ConversationParser {
 
             message_count += 1;
 
+            // Track first/last timestamps
+            if let Some(ts) = &timestamp {
+                if first_timestamp.is_none() {
+                    first_timestamp = Some(ts.clone());
+                }
+                last_timestamp = Some(ts.clone());
+            }
+
             turns.push(ConversationTurn {
                 role: role.to_string(),
                 text,
@@ -116,6 +128,8 @@ impl ConversationParser {
             turns,
             message_count,
             file_hash,
+            first_timestamp,
+            last_timestamp,
         })
     }
 }

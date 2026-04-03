@@ -159,6 +159,7 @@ pub enum RelationKind {
     DiscussedIn,
     DecidedAbout,
     SolvesFor,
+    CoDiscusses,
 }
 
 impl RelationKind {
@@ -181,6 +182,7 @@ impl RelationKind {
             Self::DiscussedIn => "discussed_in",
             Self::DecidedAbout => "decided_about",
             Self::SolvesFor => "solves_for",
+            Self::CoDiscusses => "co_discusses",
         }
     }
 }

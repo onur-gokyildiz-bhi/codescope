@@ -22,6 +22,7 @@ pub struct ConvIndexResult {
     pub solutions: usize,
     pub topics: usize,
     pub code_links: usize,
+    pub skipped: usize,
 }
 
 /// Index a JSONL conversation transcript into entities and relations.
@@ -57,7 +58,7 @@ pub fn parse_conversation(
         end_line: parse_result.turns.len() as u32,
         start_col: 0,
         end_col: 0,
-        signature: None,
+        signature: parse_result.first_timestamp.clone(), // Store timestamp in signature field
         body: Some(format!("{} turns, {} messages", parse_result.turns.len(), parse_result.message_count)),
         body_hash: Some(parse_result.file_hash.clone()),
         language: "conversation".to_string(),
@@ -153,6 +154,48 @@ pub fn parse_conversation(
 
     result.sessions_indexed = 1;
     Ok((entities, relations, result))
+}
+
+/// Parse a memory markdown file into entities and relations.
+/// Uses the existing MarkdownParser but tags entities with language="memory".
+pub fn parse_memory_file(
+    md_path: &Path,
+    repo: &str,
+    known_entities: &[String],
+) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+    let content = std::fs::read_to_string(md_path)?;
+    let filename = md_path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown.md");
+
+    let md_parser = crate::parser::content::markdown_parser::MarkdownParser;
+    use crate::parser::content::ContentParser;
+    let (mut entities, mut relations) = md_parser.parse(filename, &content, repo)?;
+
+    // Tag all entities as "memory" to distinguish from repo docs
+    for entity in &mut entities {
+        entity.language = "memory".to_string();
+    }
+
+    // Link to code entities mentioned in section bodies
+    let linker = entity_linker::EntityLinker::new(known_entities);
+    for entity in &entities {
+        if let Some(body) = &entity.body {
+            let refs = linker.find_references(body);
+            for code_ref in &refs {
+                relations.push(CodeRelation {
+                    kind: RelationKind::DiscussedIn,
+                    from_entity: entity.qualified_name.clone(),
+                    to_entity: code_ref.qualified_name.clone(),
+                    from_table: entity.kind.table_name().to_string(),
+                    to_table: code_ref.entity_table.clone(),
+                    metadata: None,
+                });
+            }
+        }
+    }
+
+    Ok((entities, relations))
 }
 
 /// Find the most recent problem before this solution

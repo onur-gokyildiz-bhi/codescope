@@ -12,6 +12,7 @@ pub struct ClassifiedSegment {
     pub body: String,       // relevant text excerpt
     pub line_number: u32,
     pub confidence: f32,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +124,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     body: truncate_body(err_text, 400),
                     line_number: turn.line_number,
                     confidence: 0.9,
+                    timestamp: turn.timestamp.clone(),
                 });
                 recent_has_problem = true;
                 continue;
@@ -144,6 +146,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                 body: truncate_body(&turn.text, 400),
                 line_number: turn.line_number,
                 confidence: problem_score,
+                timestamp: turn.timestamp.clone(),
             });
             recent_has_problem = true;
             continue;
@@ -161,6 +164,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     body: truncate_body(&turn.text, 400),
                     line_number: turn.line_number,
                     confidence: boosted.min(1.0),
+                    timestamp: turn.timestamp.clone(),
                 });
                 recent_has_problem = false;
                 continue;
@@ -178,6 +182,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     body: truncate_body(&turn.text, 400),
                     line_number: turn.line_number,
                     confidence: decision_score,
+                    timestamp: turn.timestamp.clone(),
                 });
                 continue;
             }
@@ -203,6 +208,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                         body: truncate_body(&turn.text, 300),
                         line_number: turn.line_number,
                         confidence: 0.5,
+                        timestamp: turn.timestamp.clone(),
                     });
                 }
             }

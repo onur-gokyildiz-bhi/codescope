@@ -165,6 +165,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS language ON conversation TYPE string;
         DEFINE FIELD IF NOT EXISTS kind ON conversation TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS hash ON conversation TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS timestamp ON conversation TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS conv_qname ON conversation FIELDS qualified_name UNIQUE;
         DEFINE INDEX IF NOT EXISTS conv_repo ON conversation FIELDS repo;
 
@@ -178,6 +179,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON conv_topic TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS language ON conv_topic TYPE string;
         DEFINE FIELD IF NOT EXISTS kind ON conv_topic TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS timestamp ON conv_topic TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS topic_qname ON conv_topic FIELDS qualified_name UNIQUE;
 
         DEFINE TABLE IF NOT EXISTS decision SCHEMAFULL;
@@ -190,6 +192,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON decision TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS language ON decision TYPE string;
         DEFINE FIELD IF NOT EXISTS kind ON decision TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS timestamp ON decision TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS dec_qname ON decision FIELDS qualified_name UNIQUE;
         DEFINE INDEX IF NOT EXISTS dec_repo ON decision FIELDS repo;
 
@@ -203,6 +206,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON problem TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS language ON problem TYPE string;
         DEFINE FIELD IF NOT EXISTS kind ON problem TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS timestamp ON problem TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS prob_qname ON problem FIELDS qualified_name UNIQUE;
 
         DEFINE TABLE IF NOT EXISTS solution SCHEMAFULL;
@@ -215,6 +219,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON solution TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS language ON solution TYPE string;
         DEFINE FIELD IF NOT EXISTS kind ON solution TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS timestamp ON solution TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS sol_qname ON solution FIELDS qualified_name UNIQUE;
 
         -- === EDGE TABLES (TYPE RELATION required for RELATE statements) ===
@@ -240,6 +245,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE discussed_in TYPE RELATION SCHEMAFULL;
         DEFINE TABLE decided_about TYPE RELATION SCHEMAFULL;
         DEFINE TABLE solves_for TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE co_discusses TYPE RELATION SCHEMAFULL;
 
         -- === COMPOSITE INDEXES (performance: file_path+repo queries) ===
 
