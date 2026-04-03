@@ -258,6 +258,15 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
 
             tracing::info!("Background indexing complete: {} files", file_count);
 
+            // Phase 2.5: Resolve cross-file call targets
+            match builder.resolve_call_targets(&index_repo).await {
+                Ok(resolved) if resolved > 0 => {
+                    tracing::info!("Resolved {} cross-file call targets", resolved);
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("Call target resolution failed: {}", e),
+            }
+
             // Phase 3: Auto-index conversations + memory files
             let project_dir = server::find_claude_project_dir(&index_path, &index_repo);
             tracing::info!("Auto-indexing conversations from {}", project_dir.display());

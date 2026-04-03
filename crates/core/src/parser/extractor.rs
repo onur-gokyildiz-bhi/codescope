@@ -318,14 +318,18 @@ impl EntityExtractor {
             || kind == "invocation_expression"
         {
             if let Some(callee) = self.extract_callee_name(node, source) {
+                // Build qualified name for callee: assume same file first,
+                // cross-file resolution happens post-insert via resolve_call_targets
+                let callee_qname = format!("{}:{}:{}", self.repo, self.file_path, callee);
                 relations.push(CodeRelation {
                     kind: RelationKind::Calls,
                     from_entity: caller_qname.to_string(),
-                    to_entity: callee,
+                    to_entity: callee_qname,
                     from_table: "function".to_string(),
                     to_table: "function".to_string(),
                     metadata: Some(serde_json::json!({
                         "line": node.start_position().row + 1,
+                        "raw_callee": callee,
                     })),
                 });
             }

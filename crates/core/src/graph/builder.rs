@@ -193,6 +193,68 @@ impl GraphBuilder {
         Ok(())
     }
 
+    /// Resolve cross-file call targets.
+    ///
+    /// After indexing, many `calls` edges point to `function:repo_file_callee` where
+    /// callee was assumed to be in the same file. For cross-file calls, the target
+    /// doesn't exist. This method finds orphan targets and re-links them to matching
+    /// functions by name in the same repo.
+    pub async fn resolve_call_targets(&self, repo: &str) -> Result<usize> {
+        // Step 1: Find calls where the target function doesn't exist
+        // Step 2: For each orphan, find a function with matching name in the repo
+        // Step 3: Delete orphan edge, create new one pointing to correct target
+        //
+        // We do this in SurrealQL for efficiency:
+        let query = format!(
+            "LET $orphans = (SELECT id, in AS caller, out AS callee, \
+               out.name AS target_name, meta::id(out) AS target_id \
+             FROM calls \
+             WHERE out.name IS NULL AND meta::tb(out) = 'function');
+             RETURN array::len($orphans);",
+        );
+
+        let mut response = self.db.query(&query).await?;
+        let orphan_count: Option<i64> = response.take(1).unwrap_or(None);
+        let count = orphan_count.unwrap_or(0) as usize;
+
+        if count == 0 {
+            return Ok(0);
+        }
+
+        debug!("Found {} orphan call targets, attempting resolution...", count);
+
+        // Build a name→qualified_name index for all functions in the repo
+        let resolve_query = format!(
+            "LET $fns = (SELECT name, id FROM `function` WHERE repo = '{}');
+             LET $orphans = (SELECT id, in AS caller, meta::id(out) AS raw_target FROM calls WHERE out.name IS NULL AND meta::tb(out) = 'function');
+             FOR $o IN $orphans {{
+               LET $raw = $o.raw_target;
+               LET $parts = string::split($raw, '_');
+               LET $callee_name = array::last($parts);
+               LET $matches = (SELECT id FROM `function` WHERE name = $callee_name AND repo = '{}' LIMIT 1);
+               IF array::len($matches) > 0 {{
+                 LET $target = $matches[0].id;
+                 DELETE $o.id;
+                 RELATE ($o.caller)->calls->($target) SET line = 0;
+               }};
+             }};
+             RETURN 'done';",
+            repo.replace('\'', "\\'"),
+            repo.replace('\'', "\\'"),
+        );
+
+        match self.db.query(&resolve_query).await {
+            Ok(_) => {
+                debug!("Call target resolution completed for {} orphans", count);
+                Ok(count)
+            }
+            Err(e) => {
+                warn!("Call target resolution failed: {}", e);
+                Ok(0)
+            }
+        }
+    }
+
     /// Get stats about the current graph
     pub async fn stats(&self) -> Result<IndexResult> {
         let mut response = self
