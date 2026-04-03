@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codescope": {
+      "command": "C:\\Users\\onurg\\AppData\\Local\\codescope\\bin\\codescope-mcp.exe",
+      "args": ["C:\\Users\\onurg\\OneDrive\\Documents\\graph-rag", "--auto-index"]
+    }
+  }
+}

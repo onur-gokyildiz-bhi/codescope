@@ -18,3 +18,7 @@ schemars = { workspace = true }
 surrealdb = { workspace = true }
 ignore = { workspace = true }
 git2 = { workspace = true }
+dirs = "5"
+reqwest = { workspace = true }
+chrono = "0.4"
+rayon = { workspace = true }

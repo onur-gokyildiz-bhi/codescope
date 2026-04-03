@@ -21,7 +21,6 @@ impl ContentParser for SqlParser {
             language: "sql".to_string(),
         });
 
-        let upper_source = source.to_uppercase();
         let lines: Vec<&str> = source.lines().collect();
 
         for (i, line) in lines.iter().enumerate() {

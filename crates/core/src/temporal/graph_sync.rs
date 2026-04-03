@@ -1,7 +1,7 @@
 use anyhow::Result;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::git::{GitAnalyzer, CommitInfo, ChangeType};
 

@@ -1,10 +1,13 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use rmcp::ServiceExt;
 
+mod daemon;
 mod server;
 mod tools;
 
@@ -12,7 +15,10 @@ mod tools;
 #[command(name = "codescope-mcp")]
 #[command(about = "Codescope MCP Server — Code intelligence for AI agents")]
 struct Args {
-    /// Path to the codebase to analyze
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Path to the codebase to analyze (stdio mode shorthand)
     #[arg(default_value = ".")]
     path: PathBuf,
 
@@ -20,29 +26,77 @@ struct Args {
     #[arg(long)]
     repo: Option<String>,
 
-    /// Database path
-    #[arg(long)]
-    db_path: Option<PathBuf>,
-
     /// Auto-index on startup
     #[arg(long)]
     auto_index: bool,
+}
 
-    /// Embedding provider (ollama, openai, none)
-    #[arg(long, default_value = "none")]
-    embeddings: String,
+#[derive(Subcommand)]
+enum Command {
+    /// Run as stdio MCP server (default, one project per process)
+    Stdio {
+        /// Path to the codebase
+        #[arg(default_value = ".")]
+        path: PathBuf,
 
-    /// Ollama base URL
-    #[arg(long, default_value = "http://localhost:11434")]
-    ollama_url: String,
+        /// Repository name
+        #[arg(long)]
+        repo: Option<String>,
 
-    /// Ollama model for embeddings
-    #[arg(long, default_value = "nomic-embed-text")]
-    ollama_model: String,
+        /// Auto-index on startup
+        #[arg(long)]
+        auto_index: bool,
+    },
+
+    /// Run as SSE daemon (single process, multi-project)
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "3333")]
+        port: u16,
+
+        /// Bind address
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+    },
+
+    /// Start daemon in background
+    Start {
+        #[arg(long, default_value = "3333")]
+        port: u16,
+    },
+
+    /// Stop running daemon
+    Stop {
+        #[arg(long, default_value = "3333")]
+        port: u16,
+    },
+
+    /// Check daemon status
+    Status {
+        #[arg(long, default_value = "3333")]
+        port: u16,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Immediate startup log — before ANYTHING else
+    {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let log = home.join(".codescope").join("startup.log");
+        let _ = std::fs::create_dir_all(log.parent().unwrap());
+        let _ = std::fs::write(&log, format!(
+            "ALIVE at {}\nargs: {:?}\ncwd: {:?}\npid: {}\n",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            std::env::args().collect::<Vec<_>>(),
+            std::env::current_dir().ok(),
+            std::process::id(),
+        ));
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
@@ -51,70 +105,270 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let repo_name = args.repo.unwrap_or_else(|| {
-        args.path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
+    match args.command {
+        Some(Command::Serve { port, bind }) => {
+            run_daemon(&bind, port).await
+        }
+        Some(Command::Start { port }) => {
+            start_daemon_background(port)
+        }
+        Some(Command::Stop { port }) => {
+            stop_daemon(port).await
+        }
+        Some(Command::Status { port }) => {
+            check_status(port).await
+        }
+        Some(Command::Stdio { path, repo, auto_index }) => {
+            run_stdio(path, repo, auto_index).await
+        }
+        // No subcommand = backward-compatible stdio mode
+        None => {
+            run_stdio(args.path, args.repo, args.auto_index).await
+        }
+    }
+}
+
+/// Stdio mode — single project, one process (backward compatible)
+async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Result<()> {
+    // Debug log to file (always, for troubleshooting MCP startup)
+    let log_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_file = log_dir.join("mcp-debug.log");
+    let _ = std::fs::write(&log_file, format!(
+        "[{}] Starting codescope-mcp\n  path: {:?}\n  repo: {:?}\n  auto_index: {}\n  cwd: {:?}\n  pid: {}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        path, repo, auto_index,
+        std::env::current_dir().ok(),
+        std::process::id(),
+    ));
+
+    let repo_name = repo.unwrap_or_else(|| {
+        path.canonicalize()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "default".into())
     });
 
-    let db_path = args
-        .db_path
-        .unwrap_or_else(|| args.path.join(".graph-rag/db"));
+    let db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db")
+        .join(&repo_name);
 
-    tracing::info!("Starting graph-rag MCP server for repo '{}'", repo_name);
+    // Append to debug log
+    let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
+        use std::io::Write;
+        writeln!(f, "  repo_name: {}\n  db_path: {:?}", repo_name, db_path)
+    });
 
-    // Connect to SurrealDB
+    tracing::info!("Stdio mode: repo '{}', db: {}", repo_name, db_path.display());
+
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let db =
-        surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(db_path.to_string_lossy().as_ref())
-            .await?;
-    db.use_ns("graph_rag").use_db("code").await?;
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+        db_path.to_string_lossy().as_ref(),
+    )
+    .await {
+        Ok(db) => db,
+        Err(e) => {
+            let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
+                use std::io::Write;
+                writeln!(f, "  DB ERROR: {}", e)
+            });
+            return Err(e.into());
+        }
+    };
+    db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
 
-    // Auto-index if requested
-    if args.auto_index {
-        tracing::info!("Auto-indexing {}...", args.path.display());
-        let parser = codescope_core::parser::CodeParser::new();
-        let builder = codescope_core::graph::builder::GraphBuilder::new(db.clone());
+    let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
+        use std::io::Write;
+        writeln!(f, "  DB connected, MCP serving...")
+    });
 
-        let walker = ignore::WalkBuilder::new(&args.path)
-            .hidden(true)
-            .git_ignore(true)
-            .build();
+    // Background auto-index with parallel parsing
+    if auto_index {
+        let index_db = db.clone();
+        let index_path = path.clone();
+        let index_repo = repo_name.clone();
+        tokio::spawn(async move {
+            tracing::info!("Background indexing {}...", index_path.display());
+            let builder = codescope_core::graph::builder::GraphBuilder::new(index_db);
 
-        let mut files = 0;
-        for entry in walker {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let file_path = entry.path();
-            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
-                continue;
-            }
-            if let Ok((entities, relations)) = parser.parse_file(file_path, &repo_name) {
+            // Phase 1: Collect + parse files in parallel (CPU-bound, rayon thread pool)
+            let parse_path = index_path.clone();
+            let parse_repo = index_repo.clone();
+            let results = tokio::task::spawn_blocking(move || {
+                use rayon::prelude::*;
+                let parser = codescope_core::parser::CodeParser::new();
+                let walker = ignore::WalkBuilder::new(&parse_path)
+                    .hidden(true)
+                    .git_ignore(true)
+                    .build();
+
+                let files: Vec<std::path::PathBuf> = walker
+                    .flatten()
+                    .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+                    .filter(|e| {
+                        let fp = e.path();
+                        let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let fname = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        (parser.supports_extension(ext) || parser.supports_filename(fname))
+                            && !codescope_core::parser::should_skip_file(fp)
+                    })
+                    .map(|e| e.into_path())
+                    .collect();
+
+                tracing::info!("Found {} files to parse", files.len());
+
+                files
+                    .par_iter()
+                    .filter_map(|file_path| {
+                        let rel_path = file_path
+                            .strip_prefix(&parse_path)
+                            .unwrap_or(file_path)
+                            .to_string_lossy()
+                            .to_string()
+                            .replace('\\', "/");
+                        let content = std::fs::read_to_string(file_path).ok()?;
+                        parser
+                            .parse_source(std::path::Path::new(&rel_path), &content, &parse_repo)
+                            .ok()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
+
+            // Phase 2: Batch insert results (async DB operations)
+            let mut file_count = 0;
+            for (entities, relations) in results {
                 let _ = builder.insert_entities(&entities).await;
                 let _ = builder.insert_relations(&relations).await;
-                files += 1;
+                file_count += 1;
             }
-        }
-        tracing::info!("Indexed {} files", files);
+
+            tracing::info!("Background indexing complete: {} files", file_count);
+        });
     }
 
-    // Create and run the MCP server
-    let mcp_server = server::GraphRagServer::new(db, repo_name, args.path);
-
+    let mcp_server = server::GraphRagServer::new(db, repo_name, path);
     let service = mcp_server.serve(rmcp::transport::stdio()).await?;
     tracing::info!("MCP server running on stdio");
     service.waiting().await?;
 
+    Ok(())
+}
+
+/// Daemon mode — SSE server, multi-project
+async fn run_daemon(bind: &str, port: u16) -> Result<()> {
+    let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
+    let state = Arc::new(daemon::DaemonState::new());
+
+    tracing::info!("Codescope daemon starting on {}", addr);
+    eprintln!("Codescope daemon listening on http://{}", addr);
+
+    let mut sse_server = rmcp::transport::sse_server::SseServer::serve(addr).await?;
+
+    tracing::info!("SSE server ready, waiting for connections...");
+
+    while let Some(transport) = sse_server.next_transport().await {
+        let state = state.clone();
+        tokio::spawn(async move {
+            tracing::info!("New MCP connection");
+            let handler = server::GraphRagServer::new_daemon(state);
+            match handler.serve(transport).await {
+                Ok(service) => {
+                    if let Err(e) = service.waiting().await {
+                        tracing::error!("Connection error: {}", e);
+                    }
+                }
+                Err(e) => tracing::error!("Failed to serve connection: {}", e),
+            }
+        });
+    }
+
+    Ok(())
+}
+
+/// Start daemon as a background process
+fn start_daemon_background(port: u16) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let log_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("daemon.log");
+    std::fs::create_dir_all(log_path.parent().unwrap())?;
+    let log_file = std::fs::File::create(&log_path)?;
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        let child = Command::new(exe)
+            .args(["serve", "--port", &port.to_string()])
+            .env("RUST_LOG", "info")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(log_file))
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .spawn()?;
+        eprintln!("Codescope daemon started (PID {}) on port {}", child.id(), port);
+        eprintln!("Log: {}", log_path.display());
+    }
+
+    #[cfg(not(windows))]
+    {
+        use std::process::Command;
+        let child = Command::new(exe)
+            .args(["serve", "--port", &port.to_string()])
+            .env("RUST_LOG", "info")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(log_file))
+            .spawn()?;
+        eprintln!("Codescope daemon started (PID {}) on port {}", child.id(), port);
+        eprintln!("Log: {}", log_path.display());
+    }
+
+    Ok(())
+}
+
+/// Stop daemon
+async fn stop_daemon(port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{}/health", port);
+    match reqwest::get(&url).await {
+        Ok(_) => {
+            // TODO: implement graceful shutdown endpoint
+            eprintln!("Daemon is running on port {}. Kill the process to stop.", port);
+        }
+        Err(_) => {
+            eprintln!("No daemon running on port {}", port);
+        }
+    }
+    Ok(())
+}
+
+/// Check daemon status
+async fn check_status(port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{}/sse", port);
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            eprintln!("Codescope daemon is running on port {}", port);
+        }
+        _ => {
+            eprintln!("No daemon detected on port {}", port);
+        }
+    }
     Ok(())
 }

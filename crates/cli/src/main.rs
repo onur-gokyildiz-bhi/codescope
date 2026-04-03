@@ -17,7 +17,11 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Database path (default: .graph-rag/db in the target directory)
+    /// Repository name for DB isolation (default: current directory name)
+    #[arg(long, global = true)]
+    repo: Option<String>,
+
+    /// Override database path (default: ~/.codescope/db/<repo>/)
     #[arg(long, global = true)]
     db_path: Option<PathBuf>,
 }
@@ -28,10 +32,6 @@ enum Commands {
     Index {
         /// Path to the codebase to index
         path: PathBuf,
-
-        /// Repository name (default: directory name)
-        #[arg(long)]
-        repo: Option<String>,
 
         /// Clear existing data for this repo before indexing
         #[arg(long)]
@@ -112,21 +112,13 @@ enum Commands {
         /// Path to the git repository
         path: PathBuf,
 
-        /// Repository name
-        #[arg(long)]
-        repo: Option<String>,
-
         /// Number of recent commits to sync
         #[arg(long, default_value = "200")]
         limit: usize,
     },
 
     /// Detect code hotspots (high complexity + high churn)
-    Hotspots {
-        /// Repository name
-        #[arg(long, default_value = "default")]
-        repo: String,
-    },
+    Hotspots,
 
     /// List supported languages
     Languages,
@@ -161,33 +153,44 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Global repo name: --repo flag > current directory name
+    let global_repo = cli.repo.unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "default".into())
+    });
+
     match cli.command {
-        Commands::Index { path, repo, clean } => {
-            cmd_index(path, repo, clean, cli.db_path).await?;
+        Commands::Index { path, clean } => {
+            let repo_name = path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| global_repo.clone());
+            cmd_index(path, &repo_name, clean, cli.db_path).await?;
         }
         Commands::Search { query, limit } => {
-            cmd_search(&query, limit, cli.db_path).await?;
+            cmd_search(&query, limit, &global_repo, cli.db_path).await?;
         }
         Commands::Query { surql } => {
-            cmd_query(&surql, cli.db_path).await?;
+            cmd_query(&surql, &global_repo, cli.db_path).await?;
         }
         Commands::Stats => {
-            cmd_stats(cli.db_path).await?;
+            cmd_stats(&global_repo, cli.db_path).await?;
         }
         Commands::History { path, action } => {
             cmd_history(path, action)?;
         }
-        Commands::SyncHistory { path, repo, limit } => {
-            cmd_sync_history(path, repo, limit, cli.db_path).await?;
+        Commands::SyncHistory { path, limit } => {
+            cmd_sync_history(path, &global_repo, limit, cli.db_path).await?;
         }
-        Commands::Hotspots { repo } => {
-            cmd_hotspots(&repo, cli.db_path).await?;
+        Commands::Hotspots => {
+            cmd_hotspots(&global_repo, cli.db_path).await?;
         }
         Commands::Embed { provider, batch_size, ollama_url, model } => {
-            cmd_embed(&provider, batch_size, &ollama_url, &model, cli.db_path).await?;
+            cmd_embed(&provider, batch_size, &ollama_url, &model, &global_repo, cli.db_path).await?;
         }
         Commands::SemanticSearch { query, limit, provider, ollama_url, model } => {
-            cmd_semantic_search(&query, limit, &provider, &ollama_url, &model, cli.db_path).await?;
+            cmd_semantic_search(&query, limit, &provider, &ollama_url, &model, &global_repo, cli.db_path).await?;
         }
         Commands::Languages => {
             cmd_languages();
@@ -197,8 +200,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn connect_db(db_path: Option<PathBuf>) -> Result<surrealdb::Surreal<surrealdb::engine::local::Db>> {
-    let path = db_path.unwrap_or_else(|| PathBuf::from(".graph-rag/db"));
+/// Central DB path: ~/.codescope/db/<repo_name>/
+fn default_db_path(repo_name: &str) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db")
+        .join(repo_name)
+}
+
+async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surrealdb::Surreal<surrealdb::engine::local::Db>> {
+    let path = db_path.unwrap_or_else(|| default_db_path(repo_name));
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {
@@ -209,116 +221,146 @@ async fn connect_db(db_path: Option<PathBuf>) -> Result<surrealdb::Surreal<surre
         path.to_string_lossy().as_ref()
     ).await?;
 
-    db.use_ns("graph_rag").use_db("code").await?;
+    db.use_ns("codescope").use_db(repo_name).await?;
     schema::init_schema(&db).await?;
 
     Ok(db)
 }
 
-async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Option<PathBuf>) -> Result<()> {
+async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<PathBuf>) -> Result<()> {
     use codescope_core::graph::IncrementalIndexer;
+    use std::collections::HashMap;
+    use std::time::Instant;
 
-    let repo_name = repo.unwrap_or_else(|| {
-        path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unknown".into())
-    });
-
-    let db = connect_db(db_path).await?;
+    let start_time = Instant::now();
+    let db = connect_db(db_path, repo_name).await?;
     let builder = GraphBuilder::new(db.clone());
     let incremental = IncrementalIndexer::new(db.clone());
 
     if clean {
         println!("Full re-index: clearing existing data for '{}'...", repo_name);
-        builder.clear_repo(&repo_name).await?;
+        builder.clear_repo(repo_name).await?;
     } else {
         println!("Incremental index of {} as '{}'...", path.display(), repo_name);
-        // Clean up deleted files first
-        let deleted = incremental.cleanup_deleted_files(&path, &repo_name).await?;
+        let deleted = incremental.cleanup_deleted_files(&path, repo_name).await?;
         if deleted > 0 {
             println!("  Cleaned up {} deleted files", deleted);
         }
     }
 
-    let parser = CodeParser::new();
-
-    let mut total_entities = 0usize;
-    let mut total_relations = 0usize;
-    let mut files_processed = 0usize;
-    let mut files_skipped = 0usize;
-    let mut errors = Vec::new();
-
-    // Walk the directory, respecting .gitignore
+    // Phase 1: Collect all supported files
+    let collect_start = Instant::now();
+    let tmp_parser = CodeParser::new();
     let walker = ignore::WalkBuilder::new(&path)
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .build();
 
-    for entry in walker {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                errors.push(format!("Walk error: {}", e));
-                continue;
-            }
-        };
+    let all_files: Vec<PathBuf> = walker
+        .flatten()
+        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .filter(|e| {
+            let fp = e.path();
+            let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let fname = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            (tmp_parser.supports_extension(ext) || tmp_parser.supports_filename(fname))
+                && !codescope_core::parser::should_skip_file(fp)
+        })
+        .map(|e| e.into_path())
+        .collect();
+    drop(tmp_parser);
 
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-            continue;
-        }
+    println!(
+        "  Found {} supported files ({:.1}s)",
+        all_files.len(),
+        collect_start.elapsed().as_secs_f64()
+    );
 
-        let file_path = entry.path();
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+    // Phase 2: Pre-load known hashes for incremental comparison (single DB query)
+    let known_hashes: HashMap<String, String> = if !clean {
+        incremental
+            .load_file_hashes(repo_name)
+            .await
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
 
-        let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
-            continue;
-        }
+    // Phase 3: Parse files in parallel using rayon (CPU-bound work)
+    let parse_start = Instant::now();
+    let base_path = path.clone();
+    let repo_owned = repo_name.to_string();
+    let is_clean = clean;
 
-        // Skip build artifacts, node_modules, and large files (>512KB)
-        let path_str = file_path.to_string_lossy();
-        if path_str.contains("node_modules") || path_str.contains("/build/")
-            || path_str.contains("\\build\\") || path_str.contains(".dart_tool")
-            || path_str.contains("/target/") || path_str.contains("\\target\\")
-        {
-            continue;
-        }
-        let file_size = file_path.metadata().map(|m| m.len()).unwrap_or(0);
-        if file_size > 512_000 {
-            continue;
-        }
+    let parse_results = tokio::task::spawn_blocking(move || {
+        use codescope_core::graph::incremental::hash_content;
+        use rayon::prelude::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
-        // Get relative path
-        let rel_path = file_path
-            .strip_prefix(&path)
-            .unwrap_or(file_path)
-            .to_string_lossy()
-            .to_string()
-            .replace('\\', "/");
+        let parser = CodeParser::new();
+        let skipped = AtomicUsize::new(0);
 
-        // Incremental: skip unchanged files (unless --clean)
-        if !clean {
-            if let Ok(content) = std::fs::read_to_string(file_path) {
-                match incremental.needs_reindex(&rel_path, &content).await {
-                    Ok(false) => {
-                        files_skipped += 1;
-                        continue;
+        let results: Vec<(String, Result<(Vec<codescope_core::CodeEntity>, Vec<codescope_core::CodeRelation>), String>)> = all_files
+            .par_iter()
+            .filter_map(|file_path| {
+                let rel_path = file_path
+                    .strip_prefix(&base_path)
+                    .unwrap_or(file_path)
+                    .to_string_lossy()
+                    .to_string()
+                    .replace('\\', "/");
+
+                // Read file content once (used for both hashing and parsing)
+                let content = match std::fs::read_to_string(file_path) {
+                    Ok(c) => c,
+                    Err(e) => return Some((rel_path, Err(e.to_string()))),
+                };
+
+                // Incremental: skip unchanged files by comparing content hash
+                if !is_clean {
+                    let hash = hash_content(&content);
+                    if known_hashes.get(&rel_path) == Some(&hash) {
+                        skipped.fetch_add(1, Ordering::Relaxed);
+                        return None;
                     }
-                    Ok(true) => {
-                        // Delete old entities before re-indexing
-                        let _ = builder.delete_file_entities(&rel_path, &repo_name).await;
-                    }
-                    Err(_) => {} // On error, just re-index
                 }
-            }
-        }
 
-        match parser.parse_file(file_path, &repo_name) {
+                // Parse with relative path (ensures consistent paths in DB)
+                match parser.parse_source(std::path::Path::new(&rel_path), &content, &repo_owned) {
+                    Ok(result) => Some((rel_path, Ok(result))),
+                    Err(e) => Some((rel_path, Err(e.to_string()))),
+                }
+            })
+            .collect();
+
+        (results, skipped.load(Ordering::Relaxed))
+    })
+    .await?;
+
+    let (results, files_skipped) = parse_results;
+    println!(
+        "  Parsed {} files, {} unchanged ({:.1}s)",
+        results.len(),
+        files_skipped,
+        parse_start.elapsed().as_secs_f64()
+    );
+
+    // Phase 4: Batch insert results into DB (async, sequential for DB safety)
+    let insert_start = Instant::now();
+    let mut total_entities = 0usize;
+    let mut total_relations = 0usize;
+    let mut files_processed = 0usize;
+    let mut errors = Vec::new();
+
+    for (rel_path, result) in results {
+        match result {
             Ok((entities, relations)) => {
+                // Delete old entities for incremental re-index
+                if !clean {
+                    let _ = builder.delete_file_entities(&rel_path, repo_name).await;
+                }
+
                 let ent_count = entities.len();
                 let rel_count = relations.len();
 
@@ -329,8 +371,8 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
                 total_relations += rel_count;
                 files_processed += 1;
 
-                if files_processed % 50 == 0 {
-                    println!("  ... {} files processed", files_processed);
+                if files_processed % 100 == 0 {
+                    println!("  ... {} files indexed", files_processed);
                 }
             }
             Err(e) => {
@@ -339,14 +381,23 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
         }
     }
 
+    let total_time = start_time.elapsed();
     println!();
-    println!("Indexing complete!");
+    println!("Indexing complete! ({:.1}s total)", total_time.as_secs_f64());
     println!("  Files indexed:      {}", files_processed);
     if files_skipped > 0 {
         println!("  Files unchanged:    {}", files_skipped);
     }
     println!("  Entities extracted: {}", total_entities);
     println!("  Relations created:  {}", total_relations);
+    println!(
+        "  Parse time:         {:.1}s",
+        parse_start.elapsed().as_secs_f64()
+    );
+    println!(
+        "  Insert time:        {:.1}s",
+        insert_start.elapsed().as_secs_f64()
+    );
 
     if !errors.is_empty() {
         println!("  Errors:             {}", errors.len());
@@ -361,8 +412,8 @@ async fn cmd_index(path: PathBuf, repo: Option<String>, clean: bool, db_path: Op
     Ok(())
 }
 
-async fn cmd_search(query: &str, limit: usize, db_path: Option<PathBuf>) -> Result<()> {
-    let db = connect_db(db_path).await?;
+async fn cmd_search(query: &str, limit: usize, repo: &str, db_path: Option<PathBuf>) -> Result<()> {
+    let db = connect_db(db_path, repo).await?;
     let gq = GraphQuery::new(db);
 
     let results = gq.search_functions(query).await?;
@@ -388,8 +439,8 @@ async fn cmd_search(query: &str, limit: usize, db_path: Option<PathBuf>) -> Resu
     Ok(())
 }
 
-async fn cmd_query(surql: &str, db_path: Option<PathBuf>) -> Result<()> {
-    let db = connect_db(db_path).await?;
+async fn cmd_query(surql: &str, repo: &str, db_path: Option<PathBuf>) -> Result<()> {
+    let db = connect_db(db_path, repo).await?;
     let gq = GraphQuery::new(db);
 
     let result = gq.raw_query(surql).await?;
@@ -398,8 +449,8 @@ async fn cmd_query(surql: &str, db_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_stats(db_path: Option<PathBuf>) -> Result<()> {
-    let db = connect_db(db_path).await?;
+async fn cmd_stats(repo: &str, db_path: Option<PathBuf>) -> Result<()> {
+    let db = connect_db(db_path, repo).await?;
     let gq = GraphQuery::new(db);
 
     let stats = gq.stats().await?;
@@ -453,21 +504,15 @@ fn cmd_history(path: PathBuf, action: HistoryAction) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_sync_history(path: PathBuf, repo: Option<String>, limit: usize, db_path: Option<PathBuf>) -> Result<()> {
+async fn cmd_sync_history(path: PathBuf, repo_name: &str, limit: usize, db_path: Option<PathBuf>) -> Result<()> {
     use codescope_core::temporal::{GitAnalyzer, TemporalGraphSync};
 
-    let repo_name = repo.unwrap_or_else(|| {
-        path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "default".into())
-    });
-
-    let db = connect_db(db_path).await?;
+    let db = connect_db(db_path, repo_name).await?;
     let analyzer = GitAnalyzer::open(&path)?;
     let sync = TemporalGraphSync::new(db);
 
     println!("Syncing {} recent commits for '{}'...", limit, repo_name);
-    let count = sync.sync_commits(&analyzer, &repo_name, limit).await?;
+    let count = sync.sync_commits(&analyzer, repo_name, limit).await?;
     println!("Synced {} commits", count);
 
     Ok(())
@@ -476,7 +521,7 @@ async fn cmd_sync_history(path: PathBuf, repo: Option<String>, limit: usize, db_
 async fn cmd_hotspots(repo: &str, db_path: Option<PathBuf>) -> Result<()> {
     use codescope_core::temporal::TemporalGraphSync;
 
-    let db = connect_db(db_path).await?;
+    let db = connect_db(db_path, repo).await?;
     let sync = TemporalGraphSync::new(db);
 
     let hotspots = sync.calculate_hotspots(repo).await?;
@@ -508,11 +553,12 @@ async fn cmd_embed(
     batch_size: usize,
     ollama_url: &str,
     model: &str,
+    repo: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
     use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
 
-    let db = connect_db(db_path).await?;
+    let db = connect_db(db_path, repo).await?;
 
     let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
         "fastembed" => {
@@ -546,11 +592,12 @@ async fn cmd_semantic_search(
     provider: &str,
     ollama_url: &str,
     model: &str,
+    repo: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
     use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
 
-    let db = connect_db(db_path).await?;
+    let db = connect_db(db_path, repo).await?;
 
     let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
         "fastembed" => Box::new(FastEmbedProvider::from_name(model)?),

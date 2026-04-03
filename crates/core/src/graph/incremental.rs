@@ -88,6 +88,26 @@ impl IncrementalIndexer {
 
         Ok(deleted)
     }
+
+    /// Bulk-load all file hashes for a repo (single query instead of N+1).
+    /// Returns a map of relative_path -> content_hash for fast local comparison.
+    pub async fn load_file_hashes(
+        &self,
+        repo_name: &str,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let repo = repo_name.to_string();
+        let records: Vec<FileHashPathRecord> = self
+            .db
+            .query("SELECT path, hash FROM file WHERE repo = $repo")
+            .bind(("repo", repo))
+            .await?
+            .take(0)?;
+
+        Ok(records
+            .into_iter()
+            .filter_map(|r| r.hash.map(|h| (r.path, h)))
+            .collect())
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -98,6 +118,12 @@ struct FileHashRecord {
 #[derive(Debug, serde::Deserialize)]
 struct FilePathRecord {
     path: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct FileHashPathRecord {
+    path: String,
+    hash: Option<String>,
 }
 
 pub fn hash_content(content: &str) -> String {

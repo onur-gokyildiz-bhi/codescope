@@ -341,3 +341,102 @@ fn test_content_hash_consistency() {
     assert_eq!(hash1, hash2, "Same content should produce same hash");
     assert_ne!(hash1, hash3, "Different content should produce different hash");
 }
+
+// =====================================================
+// Conversation Indexing Tests
+// =====================================================
+
+#[test]
+fn test_conversation_parser_basic() {
+    use codescope_core::conversation::parse_conversation;
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = dir.path().join("test-session.jsonl");
+
+    // Write a minimal JSONL conversation
+    let mut f = std::fs::File::create(&jsonl_path).unwrap();
+    // User message asking about a problem
+    writeln!(f, r#"{{"type":"user","message":{{"role":"user","content":"The compile error in builder.rs — doesn't compile with the new changes"}},"timestamp":"2026-04-01T10:00:00Z","sessionId":"test-abc-123"}}"#).unwrap();
+    // Assistant finds the problem
+    writeln!(f, r#"{{"type":"assistant","message":{{"role":"assistant","content":"The problem is that the hash field on the file table requires TYPE string but content parsers create File entities with body_hash: None."}},"timestamp":"2026-04-01T10:01:00Z","sessionId":"test-abc-123"}}"#).unwrap();
+    // Assistant proposes a solution
+    writeln!(f, r#"{{"type":"assistant","message":{{"role":"assistant","content":"The fix is to change the schema from hash TYPE string to hash TYPE option<string>. I've updated schema.rs to use option<string> for the hash field."}},"timestamp":"2026-04-01T10:02:00Z","sessionId":"test-abc-123"}}"#).unwrap();
+    // Assistant makes a decision
+    writeln!(f, r#"{{"type":"assistant","message":{{"role":"assistant","content":"I decided to use UPSERT SET syntax instead of content JSON for all entity inserts. This avoids SurrealDB JSON parsing issues with nested quotes."}},"timestamp":"2026-04-01T10:03:00Z","sessionId":"test-abc-123"}}"#).unwrap();
+
+    let known_entities = vec![
+        "function:insert_entities:graph_rag::builder::insert_entities".to_string(),
+        "file:schema.rs:graph_rag::schema".to_string(),
+    ];
+
+    let (entities, relations, result) = parse_conversation(&jsonl_path, "test-repo", &known_entities).unwrap();
+
+    // Should have session + classified segments
+    assert!(result.sessions_indexed == 1, "Should index 1 session");
+    assert!(!entities.is_empty(), "Should produce entities, got {}", entities.len());
+    assert!(result.problems >= 1, "Should find at least 1 problem, got {}", result.problems);
+    assert!(result.solutions >= 1, "Should find at least 1 solution, got {}", result.solutions);
+    assert!(result.decisions >= 1, "Should find at least 1 decision, got {}", result.decisions);
+
+    // Session entity should exist
+    let session = entities.iter().find(|e| e.kind == EntityKind::ConversationSession);
+    assert!(session.is_some(), "Should have a ConversationSession entity");
+
+    // Should have contains relations (session -> segments)
+    let contains_rels: Vec<_> = relations.iter().filter(|r| r.kind == RelationKind::Contains).collect();
+    assert!(!contains_rels.is_empty(), "Should have Contains relations from session to segments");
+
+    // Solution-to-problem linking
+    let solves_rels: Vec<_> = relations.iter().filter(|r| r.kind == RelationKind::SolvesFor).collect();
+    assert!(!solves_rels.is_empty(), "Should have SolvesFor relation linking solution to problem");
+
+    println!("Conversation indexing test results:");
+    println!("  Entities: {}", entities.len());
+    println!("  Relations: {}", relations.len());
+    println!("  Decisions: {}", result.decisions);
+    println!("  Problems: {}", result.problems);
+    println!("  Solutions: {}", result.solutions);
+    println!("  Topics: {}", result.topics);
+    println!("  Code links: {}", result.code_links);
+}
+
+#[test]
+fn test_conversation_parser_tool_errors() {
+    use codescope_core::conversation::parse_conversation;
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().unwrap();
+    let jsonl_path = dir.path().join("test-errors.jsonl");
+
+    let mut f = std::fs::File::create(&jsonl_path).unwrap();
+    // Message with tool error
+    writeln!(f, r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"tool1","content":"error: cannot find type `Db` in module `engine::local`\n  --> src/graph/builder.rs:3:31","is_error":true}}]}},"timestamp":"2026-04-01T10:00:00Z","sessionId":"test-err-456"}}"#).unwrap();
+    // Assistant fixes it
+    writeln!(f, r#"{{"type":"assistant","message":{{"role":"assistant","content":"Fixed by adding the missing import: use surrealdb::engine::local::Db. The fix is to update the imports in builder.rs."}},"timestamp":"2026-04-01T10:01:00Z","sessionId":"test-err-456"}}"#).unwrap();
+
+    let (entities, _relations, result) = parse_conversation(&jsonl_path, "test-repo", &[]).unwrap();
+
+    assert!(result.problems >= 1, "Tool errors should be detected as problems, got {}", result.problems);
+    assert!(result.solutions >= 1, "Should find the fix as a solution, got {}", result.solutions);
+
+    // Verify entity types
+    let problems: Vec<_> = entities.iter().filter(|e| e.kind == EntityKind::Problem).collect();
+    assert!(!problems.is_empty(), "Should have Problem entities");
+}
+
+#[test]
+fn test_conversation_entity_table_names() {
+    assert_eq!(EntityKind::ConversationSession.table_name(), "conversation");
+    assert_eq!(EntityKind::ConversationTopic.table_name(), "conv_topic");
+    assert_eq!(EntityKind::Decision.table_name(), "decision");
+    assert_eq!(EntityKind::Problem.table_name(), "problem");
+    assert_eq!(EntityKind::Solution.table_name(), "solution");
+}
+
+#[test]
+fn test_conversation_relation_table_names() {
+    assert_eq!(RelationKind::DiscussedIn.table_name(), "discussed_in");
+    assert_eq!(RelationKind::DecidedAbout.table_name(), "decided_about");
+    assert_eq!(RelationKind::SolvesFor.table_name(), "solves_for");
+}

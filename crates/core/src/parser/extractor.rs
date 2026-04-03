@@ -308,7 +308,15 @@ impl EntityExtractor {
     ) {
         let node = cursor.node();
 
-        if node.kind() == "call_expression" || node.kind() == "method_invocation" {
+        // Cover call node types across all supported languages:
+        // Rust/TS/JS: call_expression   Python: call   Dart: invocation_expression
+        // Java: method_invocation   Go: call_expression   Elixir: call
+        let kind = node.kind();
+        if kind == "call_expression"
+            || kind == "method_invocation"
+            || kind == "call"
+            || kind == "invocation_expression"
+        {
             if let Some(callee) = self.extract_callee_name(node, source) {
                 relations.push(CodeRelation {
                     kind: RelationKind::Calls,
@@ -335,17 +343,24 @@ impl EntityExtractor {
     }
 
     fn extract_callee_name(&self, node: Node, source: &str) -> Option<String> {
-        // Try to get the function/method being called
-        if let Some(func) = node.child_by_field_name("function") {
-            return Some(func.utf8_text(source.as_bytes()).ok()?.trim().to_string());
+        // Try standard field names across languages
+        for field in &["function", "name", "method", "selector"] {
+            if let Some(child) = node.child_by_field_name(field) {
+                let text = child.utf8_text(source.as_bytes()).ok()?.trim().to_string();
+                if !text.is_empty() {
+                    // For dotted access like obj.method(), extract just the method name
+                    return Some(text.rsplit('.').next().unwrap_or(&text).to_string());
+                }
+            }
         }
-        if let Some(name) = node.child_by_field_name("name") {
-            return Some(name.utf8_text(source.as_bytes()).ok()?.trim().to_string());
-        }
-        // Fallback: first child
-        node.child(0)
+        // Fallback: first named child or first child
+        node.named_child(0)
+            .or_else(|| node.child(0))
             .and_then(|c| c.utf8_text(source.as_bytes()).ok())
-            .map(|s| s.trim().to_string())
+            .map(|s| {
+                let t = s.trim();
+                t.rsplit('.').next().unwrap_or(t).to_string()
+            })
     }
 
     fn extract_inheritance(

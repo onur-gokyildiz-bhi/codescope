@@ -11,7 +11,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE IF NOT EXISTS file SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS path ON file TYPE string;
         DEFINE FIELD IF NOT EXISTS language ON file TYPE string;
-        DEFINE FIELD IF NOT EXISTS hash ON file TYPE string;
+        DEFINE FIELD IF NOT EXISTS hash ON file TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS repo ON file TYPE string;
         DEFINE FIELD IF NOT EXISTS line_count ON file TYPE option<int>;
         DEFINE INDEX IF NOT EXISTS file_path ON file FIELDS path;
@@ -152,26 +152,111 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON package TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS pkg_qname ON package FIELDS qualified_name UNIQUE;
 
-        -- === EDGE TABLES ===
+        -- === CONVERSATION TABLES (Claude session transcripts) ===
 
-        DEFINE TABLE IF NOT EXISTS contains SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS calls SCHEMAFULL;
+        DEFINE TABLE IF NOT EXISTS conversation SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON conversation TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON conversation TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON conversation TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON conversation TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON conversation TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON conversation TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON conversation TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS language ON conversation TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON conversation TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS hash ON conversation TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS conv_qname ON conversation FIELDS qualified_name UNIQUE;
+        DEFINE INDEX IF NOT EXISTS conv_repo ON conversation FIELDS repo;
+
+        DEFINE TABLE IF NOT EXISTS conv_topic SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON conv_topic TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON conv_topic TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON conv_topic TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON conv_topic TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON conv_topic TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON conv_topic TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON conv_topic TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS language ON conv_topic TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON conv_topic TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS topic_qname ON conv_topic FIELDS qualified_name UNIQUE;
+
+        DEFINE TABLE IF NOT EXISTS decision SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON decision TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON decision TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON decision TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON decision TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON decision TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON decision TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON decision TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS language ON decision TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON decision TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS dec_qname ON decision FIELDS qualified_name UNIQUE;
+        DEFINE INDEX IF NOT EXISTS dec_repo ON decision FIELDS repo;
+
+        DEFINE TABLE IF NOT EXISTS problem SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON problem TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON problem TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON problem TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON problem TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON problem TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON problem TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON problem TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS language ON problem TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON problem TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS prob_qname ON problem FIELDS qualified_name UNIQUE;
+
+        DEFINE TABLE IF NOT EXISTS solution SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON solution TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON solution TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON solution TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON solution TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON solution TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON solution TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON solution TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS language ON solution TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON solution TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS sol_qname ON solution FIELDS qualified_name UNIQUE;
+
+        -- === EDGE TABLES (TYPE RELATION required for RELATE statements) ===
+
+        DEFINE TABLE contains TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE calls TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS line ON calls TYPE option<int>;
-        DEFINE TABLE IF NOT EXISTS imports SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS inherits SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS implements SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS uses SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS modified_in SCHEMAFULL;
+        DEFINE TABLE imports TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE inherits TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE implements TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE uses TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE modified_in TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS commit_hash ON modified_in TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS timestamp ON modified_in TYPE option<datetime>;
         DEFINE FIELD IF NOT EXISTS change_type ON modified_in TYPE option<string>;
-        DEFINE TABLE IF NOT EXISTS depends_on SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS configures SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS defines_endpoint SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS has_field SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS references SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS depends_on_package SCHEMAFULL;
-        DEFINE TABLE IF NOT EXISTS runs_script SCHEMAFULL;
+        DEFINE TABLE depends_on TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE configures TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE defines_endpoint TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE has_field TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE references TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE depends_on_package TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE runs_script TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE discussed_in TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE decided_about TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE solves_for TYPE RELATION SCHEMAFULL;
+
+        -- === COMPOSITE INDEXES (performance: file_path+repo queries) ===
+
+        DEFINE INDEX IF NOT EXISTS fn_file_repo ON `function` FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS fn_repo ON `function` FIELDS repo;
+        DEFINE INDEX IF NOT EXISTS class_file_repo ON class FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS class_repo ON class FIELDS repo;
+        DEFINE INDEX IF NOT EXISTS file_path_repo ON file FIELDS path, repo UNIQUE;
+        DEFINE INDEX IF NOT EXISTS mod_file_repo ON module FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS var_file_repo ON variable FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS imp_file_repo ON import_decl FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS cfg_file_repo ON config FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS doc_file_repo ON doc FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS api_file_repo ON api FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS db_file_repo ON db_entity FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS infra_file_repo ON infra FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS pkg_file_repo ON package FIELDS file_path, repo;
         ",
     )
     .await?;

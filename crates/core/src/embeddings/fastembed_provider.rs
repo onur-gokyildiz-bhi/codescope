@@ -10,7 +10,7 @@ use super::provider::EmbeddingProvider;
 pub struct FastEmbedProvider {
     model: Mutex<TextEmbedding>,
     dimensions: usize,
-    model_name: String,
+    _model_name: String,
 }
 
 impl FastEmbedProvider {
@@ -41,7 +41,7 @@ impl FastEmbedProvider {
         Ok(Self {
             model: Mutex::new(text_embedding),
             dimensions,
-            model_name,
+            _model_name: model_name,
         })
     }
 

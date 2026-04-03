@@ -21,7 +21,7 @@ surrealdb = { version = "2.3", features = ["kv-rocksdb"] }
 tree-sitter = "0.24"
 
 # MCP
-rmcp = { version = "0.1", features = ["server", "transport-io"] }
+rmcp = { version = "0.1", features = ["server", "transport-io", "transport-sse-server"] }
 
 # Async
 tokio = { version = "1", features = ["full"] }
@@ -57,6 +57,9 @@ hex = "0.4"
 # File walking
 walkdir = "2"
 ignore = "0.4"
+
+# Parallel processing
+rayon = "1.10"
 
 # JSON Schema (for MCP tool parameters)
 schemars = "0.8"

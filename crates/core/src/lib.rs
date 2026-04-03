@@ -3,6 +3,7 @@ pub mod graph;
 pub mod embeddings;
 pub mod temporal;
 pub mod crossrepo;
+pub mod conversation;
 
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +74,13 @@ pub enum EntityKind {
     Package,
     Dependency,
     Script,
+
+    // Conversation entities (Claude session transcripts)
+    ConversationSession,
+    ConversationTopic,
+    Decision,
+    Problem,
+    Solution,
 }
 
 impl EntityKind {
@@ -104,6 +112,13 @@ impl EntityKind {
 
             // Package
             Self::Package | Self::Dependency | Self::Script => "package",
+
+            // Conversation
+            Self::ConversationSession => "conversation",
+            Self::ConversationTopic => "conv_topic",
+            Self::Decision => "decision",
+            Self::Problem => "problem",
+            Self::Solution => "solution",
         }
     }
 }
@@ -139,6 +154,11 @@ pub enum RelationKind {
     References,
     DependsOnPackage,
     RunsScript,
+
+    // Conversation relations
+    DiscussedIn,
+    DecidedAbout,
+    SolvesFor,
 }
 
 impl RelationKind {
@@ -158,6 +178,9 @@ impl RelationKind {
             Self::References => "references",
             Self::DependsOnPackage => "depends_on_package",
             Self::RunsScript => "runs_script",
+            Self::DiscussedIn => "discussed_in",
+            Self::DecidedAbout => "decided_about",
+            Self::SolvesFor => "solves_for",
         }
     }
 }
