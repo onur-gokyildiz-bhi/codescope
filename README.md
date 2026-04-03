@@ -39,12 +39,17 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Features
 
-- **21 supported formats**: 12 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
+- **28 supported formats**: 19 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
-- **MCP server**: 11 tools for Claude Code, Cursor, and any MCP-compatible AI agent
+- **28 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
+- **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
+- **Conversation memory**: Auto-indexes Claude Code sessions — tracks decisions, problems, solutions, and links them to code entities
+- **Auto CONTEXT.md**: Generates a dynamic context file with recent decisions/problems so Claude sees your project history automatically
 - **Temporal analysis**: Git history tracking, hotspot detection, change coupling, contributor expertise maps
-- **Natural language queries**: Ask questions in plain English, get graph query results
-- **Semantic search**: Embed code with Ollama or OpenAI, search by meaning
+- **Semantic search**: Local embeddings with FastEmbed (zero deps), or Ollama/OpenAI — search code by meaning
+- **Incremental indexing**: Hash-based change detection, only re-parses modified files
+- **Daemon mode**: Multi-project HTTP/SSE server for concurrent AI agent connections
+- **Web UI**: Interactive D3.js force-directed graph visualization
 - **Benchmark suite**: Built-in benchmarking against traditional approaches
 
 ---
@@ -361,21 +366,81 @@ Claude will also **automatically use Codescope tools** when you ask code structu
 > What's the largest function?         → raw_query
 ```
 
-### Available MCP Tools
+### Daemon Mode (Multi-Project)
 
-| Tool | Description | Example |
-|------|-------------|---------|
-| `search_functions` | Search functions by name pattern | `{"query": "parse", "limit": 10}` |
-| `find_function` | Find function by exact name | `{"query": "main"}` |
-| `file_entities` | List all entities in a file | `{"file_path": "src/main.rs"}` |
-| `find_callers` | Find all callers of a function | `{"function_name": "handle_request"}` |
-| `find_callees` | Find all functions called by a function | `{"function_name": "main"}` |
-| `impact_analysis` | Analyze blast radius of changing a function | `{"function_name": "parse", "depth": 3}` |
-| `graph_stats` | Get graph statistics | (no params) |
-| `raw_query` | Execute raw SurrealQL | `{"query": "SELECT * FROM class LIMIT 5"}` |
-| `index_codebase` | Re-index the codebase | `{"clean": true}` |
-| `ask` | Natural language question | `{"question": "what are the largest functions?"}` |
-| `supported_languages` | List supported languages | (no params) |
+```bash
+# Start daemon (background, multi-project)
+codescope-mcp serve --port 3333
+
+# Start as background process
+codescope-mcp start --port 3333
+
+# Check status
+codescope-mcp status --port 3333
+
+# Stop daemon
+codescope-mcp stop --port 3333
+```
+
+### Available MCP Tools (28 tools)
+
+**Code Search & Navigation:**
+
+| Tool | Description |
+|------|-------------|
+| `search_functions` | Search functions by name pattern |
+| `find_function` | Find function by exact name |
+| `file_entities` | List all entities in a file |
+| `find_callers` | Find all callers of a function |
+| `find_callees` | Find all functions called by a function |
+| `impact_analysis` | Analyze blast radius of changing a function |
+
+**Obsidian-like Exploration:**
+
+| Tool | Description |
+|------|-------------|
+| `explore` | Full neighborhood of any entity — like Obsidian's local graph view |
+| `context_bundle` | Complete file context with cross-file links |
+| `backlinks` | Find everything that references a given entity |
+| `related` | Universal search across all entity types |
+
+**Semantic Search:**
+
+| Tool | Description |
+|------|-------------|
+| `embed_functions` | Generate vector embeddings (FastEmbed local, Ollama, or OpenAI) |
+| `semantic_search` | Search code by meaning, not just name |
+
+**Git & Temporal Analysis:**
+
+| Tool | Description |
+|------|-------------|
+| `sync_git_history` | Import git commits into the graph |
+| `hotspot_detection` | Find high-risk code (complexity x churn) |
+| `file_churn` | Most frequently changed files |
+| `change_coupling` | Files that always change together |
+| `review_diff` | Analyze a diff with graph context |
+| `suggest_reviewers` | Find best reviewers based on expertise |
+| `contributor_map` | Who knows which parts of the codebase |
+
+**Conversation Memory:**
+
+| Tool | Description |
+|------|-------------|
+| `index_conversations` | Index Claude Code JSONL sessions into the graph |
+| `conversation_search` | Search past decisions, problems, solutions |
+
+**Infrastructure:**
+
+| Tool | Description |
+|------|-------------|
+| `graph_stats` | Get graph statistics |
+| `raw_query` | Execute raw SurrealQL |
+| `ask` | Natural language question → SurrealQL |
+| `index_codebase` | Re-index (incremental by default) |
+| `init_project` | Initialize a project (daemon mode) |
+| `list_projects` | List open projects (daemon mode) |
+| `supported_languages` | List supported formats |
 
 ### Natural Language Query Examples
 
@@ -393,7 +458,7 @@ The `ask` tool translates plain English questions to SurrealQL:
 
 ## Supported Languages & Formats
 
-### Programming Languages (tree-sitter)
+### Programming Languages (19, tree-sitter)
 
 | Language | Extensions |
 |----------|-----------|
@@ -405,10 +470,17 @@ The `ask` tool translates plain English questions to SurrealQL:
 | Go | `.go` |
 | Java | `.java` |
 | C | `.c`, `.h` |
-| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
 | C# | `.cs` |
 | Ruby | `.rb` |
 | PHP | `.php` |
+| Swift | `.swift` |
+| Dart | `.dart` |
+| Zig | `.zig` |
+| Scala | `.scala`, `.sc` |
+| Haskell | `.hs` |
+| Elixir | `.ex`, `.exs` |
+| Lua | `.lua` |
 
 ### Content Formats (custom parsers)
 
@@ -442,6 +514,11 @@ The `ask` tool translates plain English questions to SurrealQL:
 | `package` | Package manifests | `name`, `kind` (Package/Dependency/Script) |
 | `db_entity` | SQL schema objects | `name`, `kind` (DbTable/DbView/DbIndex) |
 | `api` | API definitions | `name`, `kind` (ApiEndpoint/ApiSchema) |
+| `conversation` | Claude Code sessions | `name`, `hash`, `timestamp` |
+| `decision` | Decisions from conversations | `name`, `body`, `timestamp` |
+| `problem` | Problems from conversations | `name`, `body`, `timestamp` |
+| `solution` | Solutions from conversations | `name`, `body`, `timestamp` |
+| `conv_topic` | Discussion topics | `name`, `body`, `timestamp` |
 
 ### Relation Tables (Edges)
 
@@ -456,6 +533,11 @@ The `ask` tool translates plain English questions to SurrealQL:
 | `depends_on_package` | Package depends on package | myapp → express |
 | `has_field` | Schema has field | UserSchema → email |
 | `references` | Doc links to target | heading → url |
+| `modified_in` | Entity modified in commit | file → commit |
+| `discussed_in` | Entity discussed in conversation | decision → function |
+| `decided_about` | Decision about a code entity | decision → struct |
+| `solves_for` | Solution solves a problem | solution → problem |
+| `co_discusses` | Sessions discussing same entity | session → session |
 
 ### Common Query Patterns
 
@@ -537,28 +619,39 @@ codescope history /path/to/repo contributors
 
 ## Embedding & Semantic Search
 
-Codescope supports vector embeddings for semantic code search.
+Codescope supports vector embeddings for semantic code search with three providers.
 
-### Setup with Ollama (recommended, local)
+### FastEmbed (recommended, zero dependencies)
 
 ```bash
-# Install Ollama: https://ollama.ai
-ollama pull nomic-embed-text
-
-# Generate embeddings
-codescope embed --provider ollama
+# No setup needed — model downloads automatically on first use
+codescope embed --provider fastembed
 
 # Search by meaning
 codescope semantic-search "function that validates user input"
 ```
 
-### Setup with OpenAI
+FastEmbed runs entirely in-process using ONNX Runtime. No external services, no API keys, no Docker.
+
+### Ollama (local, larger models)
+
+```bash
+ollama pull nomic-embed-text
+codescope embed --provider ollama
+codescope semantic-search "function that validates user input"
+```
+
+### OpenAI (cloud)
 
 ```bash
 export OPENAI_API_KEY=sk-...
 codescope embed --provider openai --model text-embedding-3-small
 codescope semantic-search "error handling and retry logic"
 ```
+
+### Via MCP Tools (AI agents)
+
+AI agents can use `embed_functions` and `semantic_search` tools directly — no CLI needed.
 
 ---
 
@@ -599,13 +692,15 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed per-scenario results.
 codescope/
 ├── crates/
 │   ├── core/              # Graph engine, parsers, embeddings, temporal analysis
-│   │   ├── parser/        # tree-sitter + custom content parsers
-│   │   ├── graph/         # SurrealDB schema, builder, query engine
-│   │   ├── embeddings/    # Ollama/OpenAI vector embedding pipeline
-│   │   ├── temporal/      # Git history analysis
+│   │   ├── parser/        # tree-sitter (19 langs) + custom content parsers (9 formats)
+│   │   ├── graph/         # SurrealDB schema, builder, query, incremental indexer
+│   │   ├── embeddings/    # FastEmbed/Ollama/OpenAI vector embedding pipeline
+│   │   ├── temporal/      # Git history analysis + graph sync
+│   │   ├── conversation/  # Claude session parser, classifier, entity linker
 │   │   └── crossrepo/     # Multi-repository linking
 │   ├── cli/               # Command-line interface (codescope)
-│   ├── mcp-server/        # MCP server for AI agents (codescope-mcp)
+│   ├── mcp-server/        # MCP server + daemon mode (codescope-mcp)
+│   ├── web/               # Interactive D3.js graph visualization (codescope-web)
 │   └── bench/             # Benchmark suite (codescope-bench)
 ├── BENCHMARKS.md          # Detailed benchmark results
 └── CLAUDE.md              # Quick reference for AI assistants
@@ -614,16 +709,25 @@ codescope/
 **Tech stack:**
 - **Rust** — Core language, zero-cost abstractions
 - **SurrealDB 2.x** — Embedded graph + document + vector database (RocksDB backend)
-- **tree-sitter** — Incremental parsing for 12 programming languages
+- **tree-sitter** — Incremental parsing for 19 programming languages
+- **FastEmbed** — In-process ONNX embeddings (zero external deps)
 - **rmcp** — Official Rust MCP SDK for AI agent integration
 - **git2** — Native git history analysis
+- **rayon** — Parallel file parsing for fast indexing
+- **axum** — Web server for D3.js visualization
 
 ### Data Flow
 
 ```
-Source Files → tree-sitter / Custom Parsers → Entities + Relations → SurrealDB Graph
-                                                                          ↓
-                                              CLI / MCP Server ← SurrealQL Queries
+Source Files ──→ tree-sitter / Custom Parsers ──→ Entities + Relations ──→ SurrealDB Graph
+                                                                                ↓
+Claude Sessions ──→ JSONL Parser ──→ Decisions/Problems/Solutions ──────→ Linked to Code
+                                                                                ↓
+Memory Files ──→ Markdown Parser ──→ Knowledge Entities ───────────────→ Linked to Code
+                                                                                ↓
+                                              CLI / MCP / Web UI ← SurrealQL Queries
+                                                                                ↓
+                                              CONTEXT.md ← Auto-generated summary
 ```
 
 ---
@@ -666,11 +770,14 @@ How does Codescope compare to other code intelligence tools?
 |---------|-----------|---------------------|------------------|--------|----------------|----------------|
 | **Language** | Rust | C | Python | Python | Node.js | Python |
 | **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
-| **Languages** | 12 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
-| **MCP Server** | Yes (11 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
+| **Languages** | 19 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
+| **MCP Server** | Yes (28 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
 | **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
 | **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
 | **Local Embeddings** | Yes (FastEmbed, zero deps) | No | No | No | No (needs API key) | No |
+| **Conversation Memory** | Yes (auto-index Claude sessions) | No | No | No | No | No |
+| **Incremental Indexing** | Yes (hash-based) | No | No | No | No | No |
+| **Daemon Mode** | Yes (multi-project SSE) | No | No | No | No | No |
 | **Single Binary** | Yes | Yes | No | No | No | No |
 | **Config/Doc Parsing** | Yes (JSON, YAML, MD, Docker, SQL, Terraform, OpenAPI) | No | No | No | No | No |
 | **Semantic Search** | Yes (in-process) | No | No | No | Yes (external) | No |
@@ -690,11 +797,13 @@ How does Codescope compare to other code intelligence tools?
 
 ### What Makes Codescope Different
 
-1. **Graph + Embeddings in one tool** — Most tools offer structural analysis OR semantic search. Codescope does both in a single binary.
-2. **Zero external dependencies** — SurrealDB is embedded, FastEmbed runs in-process with ONNX Runtime. No Docker, no API keys, no external databases.
-3. **Beyond code** — Parses JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests. Others only handle source code.
-4. **Claude Code native** — 9 slash commands (`/cs-search`, `/cs-ask`, `/cs-impact`...) with Turkish + English natural language support.
-5. **Temporal analysis** — Git history integration for churn analysis, change coupling, contributor mapping.
+1. **Graph + Embeddings + Conversations** — Structural code graph, semantic search, AND conversation memory in a single binary. No other tool does all three.
+2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
+3. **Beyond code** — 28 formats: 19 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
+4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
+5. **Conversation memory** — Auto-indexes Claude Code sessions, extracts decisions/problems/solutions, links them to code entities. Auto-generates CONTEXT.md so Claude knows your project history.
+6. **Claude Code native** — 9 slash commands with Turkish + English natural language support.
+7. **Temporal analysis** — Git history integration for churn analysis, change coupling, hotspot detection, contributor mapping.
 
 ---
 
