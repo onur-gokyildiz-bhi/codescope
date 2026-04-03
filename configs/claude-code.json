@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codescope": {
+      "command": "codescope-mcp",
+      "args": [".", "--auto-index"]
+    }
+  }
+}

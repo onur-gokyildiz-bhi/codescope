@@ -70,3 +70,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 
 # Local embeddings (in-process, no external service needed)
 fastembed = "5"
+
+# File watching
+notify = "7"
+notify-debouncer-mini = "0.5"

@@ -205,6 +205,14 @@ pub struct SemanticSearchParams {
     pub provider: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeadCodeParams {
+    /// Minimum function size in lines to include (default: 3, filters out trivial getters)
+    pub min_lines: Option<u32>,
+    /// Maximum results (default: 50)
+    pub limit: Option<usize>,
+}
+
 impl GraphRagServer {
     /// Create for stdio mode — project ready immediately
     pub fn new(db: Surreal<Db>, repo_name: String, codebase_path: PathBuf) -> Self {
@@ -1782,6 +1790,73 @@ impl GraphRagServer {
                 output
             }
             Err(e) => format!("Semantic search error: {}", e),
+        }
+    }
+
+    // ===== Code Quality Tools =====
+
+    /// Find potentially dead code — functions with zero callers
+    #[tool(description = "Find dead code: functions that are never called by any other function. \
+        Filters out known entry points (main, test functions, handlers, constructors). \
+        Useful for codebase cleanup and reducing maintenance burden.")]
+    async fn find_dead_code(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let min_lines = params.min_lines.unwrap_or(3);
+        let limit = params.limit.unwrap_or(50);
+
+        // Find functions with zero incoming calls, excluding entry points
+        let query = format!(
+            "SELECT name, file_path, start_line, end_line, \
+                    (end_line - start_line) AS size \
+             FROM `function` \
+             WHERE count(<-calls) = 0 \
+               AND (end_line - start_line) >= {} \
+               AND name != 'main' \
+               AND !(name ~ '^test') \
+               AND !(name ~ '_test$') \
+               AND !(name ~ 'handler') \
+               AND !(name ~ '^new$') \
+               AND !(name ~ '^default$') \
+               AND !(name ~ '^from$') \
+               AND !(name ~ '^into$') \
+               AND !(name ~ '^drop$') \
+               AND !(name ~ '^fmt$') \
+               AND !(name ~ '^serialize$') \
+               AND !(name ~ '^deserialize$') \
+             ORDER BY size DESC \
+             LIMIT {}",
+            min_lines, limit
+        );
+
+        match ctx.db.query(&query).await {
+            Ok(mut response) => {
+                let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                if results.is_empty() {
+                    return "No dead code found (all functions have callers or are entry points).".into();
+                }
+
+                let mut output = format!("## Dead Code: {} potentially unused functions\n\n", results.len());
+                output.push_str("| # | Function | File | Lines | Size |\n");
+                output.push_str("|---|----------|------|-------|------|\n");
+
+                for (i, r) in results.iter().enumerate() {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let start = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let size = r.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!(
+                        "| {} | **{}** | {} | L{} | {} lines |\n",
+                        i + 1, name, fp, start, size
+                    ));
+                }
+
+                output.push_str(&format!(
+                    "\n*Filtered: min {} lines, excluded main/test/handler/trait impls.*",
+                    min_lines
+                ));
+                output
+            }
+            Err(e) => format!("Error finding dead code: {}", e),
         }
     }
 }

@@ -40,6 +40,9 @@ tree-sitter-lua = "0.5"
 tree-sitter-zig = "1.1"
 tree-sitter-elixir = "0.3"
 tree-sitter-haskell = "0.23"
+tree-sitter-ocaml = "0.24"
+tree-sitter-html = "0.23"
+tree-sitter-julia = "0.23"
 
 # Config parsing
 serde_yaml = "0.9"

@@ -147,6 +147,27 @@ impl LanguageRegistry {
             extensions: vec!["hs".into()],
         });
 
+        // OCaml
+        languages.push(LanguageConfig {
+            name: "ocaml".into(),
+            language: tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+            extensions: vec!["ml".into(), "mli".into()],
+        });
+
+        // HTML
+        languages.push(LanguageConfig {
+            name: "html".into(),
+            language: tree_sitter_html::LANGUAGE.into(),
+            extensions: vec!["html".into(), "htm".into()],
+        });
+
+        // Julia
+        languages.push(LanguageConfig {
+            name: "julia".into(),
+            language: tree_sitter_julia::LANGUAGE.into(),
+            extensions: vec!["jl".into()],
+        });
+
         Self { languages }
     }
 

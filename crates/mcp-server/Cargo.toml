@@ -24,3 +24,5 @@ chrono = "0.4"
 rayon = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }

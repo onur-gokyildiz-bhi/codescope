@@ -10,6 +10,7 @@ use rmcp::ServiceExt;
 mod daemon;
 mod server;
 mod tools;
+mod watcher;
 
 #[derive(Parser)]
 #[command(name = "codescope-mcp")]
@@ -308,6 +309,17 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             mcp_handle.load_context_summary().await;
 
             tracing::info!("Context summary loaded into MCP server instructions");
+
+            // Phase 5: Start file watcher for live re-indexing
+            match watcher::start_watcher(&index_path) {
+                Ok(rx) => {
+                    watcher::spawn_reindex_task(rx, index_db, index_repo, index_path);
+                    tracing::info!("File watcher active — changes will auto-reindex");
+                }
+                Err(e) => {
+                    tracing::warn!("File watcher failed to start: {}", e);
+                }
+            }
         });
     }
 

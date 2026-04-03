@@ -1,0 +1,8 @@
+# OpenAI Codex CLI — MCP server configuration
+# Add to ~/.codex/config.yaml
+mcp_servers:
+  codescope:
+    command: codescope-mcp
+    args:
+      - "."
+      - "--auto-index"
