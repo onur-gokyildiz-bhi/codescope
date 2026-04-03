@@ -217,9 +217,27 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
         std::fs::create_dir_all(parent)?;
     }
 
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
         path.to_string_lossy().as_ref()
-    ).await?;
+    ).await {
+        Ok(db) => db,
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("LOCK") || err_str.contains("being used") {
+                anyhow::bail!(
+                    "Database is locked by another process (MCP server or Web UI).\n\
+                     \n\
+                     Solutions:\n\
+                     1. Stop the other process first (codescope-mcp or codescope-web)\n\
+                     2. Use the MCP server's tools instead (they share the same DB connection)\n\
+                     3. Use the Web UI API: curl http://localhost:9090/api/search?q=...\n\
+                     \n\
+                     DB path: {}", path.display()
+                );
+            }
+            return Err(e.into());
+        }
+    };
 
     db.use_ns("codescope").use_db(repo_name).await?;
     schema::init_schema(&db).await?;

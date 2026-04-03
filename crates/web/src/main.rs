@@ -18,9 +18,13 @@ use codescope_core::graph::query::GraphQuery;
 #[command(name = "codescope-web")]
 #[command(about = "Codescope Web UI — Graph visualization dashboard")]
 struct Args {
-    /// Database path
-    #[arg(long, default_value = ".graph-rag/db")]
-    db_path: PathBuf,
+    /// Database path (default: ~/.codescope/db/{repo})
+    #[arg(long)]
+    db_path: Option<PathBuf>,
+
+    /// Repository name (used to find DB at ~/.codescope/db/{repo})
+    #[arg(long)]
+    repo: Option<String>,
 
     /// Port to listen on
     #[arg(long, default_value = "8080")]
@@ -39,16 +43,27 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    // Resolve DB path: explicit --db-path > --repo > default
+    let repo_name = args.repo.unwrap_or_else(|| "default".to_string());
+    let db_path = args.db_path.unwrap_or_else(|| {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".codescope")
+            .join("db")
+            .join(&repo_name)
+    });
+
     // Connect to SurrealDB
-    if let Some(parent) = args.db_path.parent() {
+    if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
-        args.db_path.to_string_lossy().as_ref(),
+        db_path.to_string_lossy().as_ref(),
     )
     .await?;
-    db.use_ns("graph_rag").use_db("code").await?;
+    db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
+    println!("DB: {} (ns: codescope, db: {})", db_path.display(), repo_name);
 
     let state = Arc::new(AppState {
         query: GraphQuery::new(db),
@@ -143,42 +158,30 @@ async fn api_graph(
                 let mut nodes = Vec::new();
                 let mut edges = Vec::new();
 
-                if let Some(arr) = result.as_array() {
-                    for item in arr {
-                        if let Some(inner) = item.as_array() {
-                            for row in inner {
-                                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let qname = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
-                                let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-                                nodes.push(GraphNode {
-                                    id: qname.to_string(),
-                                    name: name.to_string(),
-                                    kind: "function".to_string(),
-                                    file_path: fp.to_string(),
-                                });
-                            }
-                        }
-                    }
+                for row in flatten_result(&result) {
+                    let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let qname = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                    let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                    nodes.push(GraphNode {
+                        id: qname.to_string(),
+                        name: name.to_string(),
+                        kind: "function".to_string(),
+                        file_path: fp.to_string(),
+                    });
                 }
 
-                // Get call edges
-                let edge_query = "SELECT in.qualified_name AS source, out.qualified_name AS target FROM calls LIMIT 200";
+                // Get call edges with valid source/target
+                let edge_query = "SELECT in.qualified_name AS source, out.qualified_name AS target FROM calls WHERE out.qualified_name != NONE LIMIT 200";
                 if let Ok(edge_result) = state.query.raw_query(edge_query).await {
-                    if let Some(arr) = edge_result.as_array() {
-                        for item in arr {
-                            if let Some(inner) = item.as_array() {
-                                for row in inner {
-                                    let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
-                                    let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
-                                    if !src.is_empty() && !tgt.is_empty() {
-                                        edges.push(GraphEdge {
-                                            source: src.to_string(),
-                                            target: tgt.to_string(),
-                                            kind: "calls".to_string(),
-                                        });
-                                    }
-                                }
-                            }
+                    for row in flatten_result(&edge_result) {
+                        let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                        let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
+                        if !src.is_empty() && !tgt.is_empty() {
+                            edges.push(GraphEdge {
+                                source: src.to_string(),
+                                target: tgt.to_string(),
+                                kind: "calls".to_string(),
+                            });
                         }
                     }
                 }
@@ -188,79 +191,150 @@ async fn api_graph(
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
     } else {
-        // Centered graph: find callers and callees
+        // Centered graph: find the entity + all its neighbors
+        let safe = center.replace('\'', "");
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
+        let mut seen = std::collections::HashSet::new();
 
-        // Center node
-        nodes.push(GraphNode {
-            id: center.clone(),
-            name: center.clone(),
-            kind: "function".to_string(),
-            file_path: String::new(),
-        });
+        // Helper to add a node if not already seen
+        let mut add_node = |nodes: &mut Vec<GraphNode>, seen: &mut std::collections::HashSet<String>,
+                            id: &str, name: &str, kind: &str, fp: &str| {
+            if seen.insert(id.to_string()) {
+                nodes.push(GraphNode {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    kind: kind.to_string(),
+                    file_path: fp.to_string(),
+                });
+            }
+        };
 
-        // Callers
-        let caller_q = format!(
-            "SELECT in.name AS name, in.qualified_name AS qname, in.file_path AS file_path FROM calls WHERE out.name = '{}'",
-            center.replace('\'', "")
-        );
-        if let Ok(result) = state.query.raw_query(&caller_q).await {
-            if let Some(arr) = result.as_array() {
-                for item in arr {
-                    if let Some(inner) = item.as_array() {
-                        for row in inner {
-                            let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let qname = row.get("qname").and_then(|v| v.as_str()).unwrap_or(name);
-                            let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-                            nodes.push(GraphNode {
-                                id: qname.to_string(),
-                                name: name.to_string(),
-                                kind: "caller".to_string(),
-                                file_path: fp.to_string(),
-                            });
-                            edges.push(GraphEdge {
-                                source: qname.to_string(),
-                                target: center.clone(),
-                                kind: "calls".to_string(),
-                            });
-                        }
-                    }
+        // 1. Find center entity details (try function first, then class)
+        let mut center_id = safe.clone();
+        let mut center_fp = String::new();
+        let mut center_kind = "function".to_string();
+
+        let fn_q = format!("SELECT name, qualified_name, file_path FROM `function` WHERE name = '{}' LIMIT 1", safe);
+        if let Ok(result) = state.query.raw_query(&fn_q).await {
+            if let Some(row) = flatten_result(&result).first() {
+                center_id = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(&safe).to_string();
+                center_fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
+        }
+        if center_fp.is_empty() {
+            let cls_q = format!("SELECT name, qualified_name, file_path, kind FROM class WHERE name = '{}' LIMIT 1", safe);
+            if let Ok(result) = state.query.raw_query(&cls_q).await {
+                if let Some(row) = flatten_result(&result).first() {
+                    center_id = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(&safe).to_string();
+                    center_fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    center_kind = "class".to_string();
                 }
             }
         }
+        add_node(&mut nodes, &mut seen, &center_id, &safe, &center_kind, &center_fp);
 
-        // Callees
+        // 2. Callers (who calls this function)
+        let caller_q = format!(
+            "SELECT <-calls<-`function`.{{name, qualified_name, file_path}} AS callers FROM `function` WHERE name = '{}'",
+            safe
+        );
+        if let Ok(result) = state.query.raw_query(&caller_q).await {
+            extract_neighbors(&result, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true);
+        }
+
+        // 3. Callees (what this function calls)
         let callee_q = format!(
-            "SELECT out.name AS name, out.qualified_name AS qname, out.file_path AS file_path FROM calls WHERE in.name = '{}'",
-            center.replace('\'', "")
+            "SELECT ->calls->`function`.{{name, qualified_name, file_path}} AS callees FROM `function` WHERE name = '{}'",
+            safe
         );
         if let Ok(result) = state.query.raw_query(&callee_q).await {
-            if let Some(arr) = result.as_array() {
-                for item in arr {
-                    if let Some(inner) = item.as_array() {
-                        for row in inner {
-                            let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let qname = row.get("qname").and_then(|v| v.as_str()).unwrap_or(name);
-                            let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-                            nodes.push(GraphNode {
-                                id: qname.to_string(),
-                                name: name.to_string(),
-                                kind: "callee".to_string(),
-                                file_path: fp.to_string(),
-                            });
-                            edges.push(GraphEdge {
-                                source: center.clone(),
-                                target: qname.to_string(),
-                                kind: "calls".to_string(),
-                            });
-                        }
-                    }
+            extract_neighbors(&result, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false);
+        }
+
+        // 4. Sibling functions in same file
+        if !center_fp.is_empty() {
+            let sibling_q = format!(
+                "SELECT name, qualified_name, file_path FROM `function` WHERE file_path = '{}' AND name != '{}' LIMIT 15",
+                center_fp.replace('\'', ""), safe
+            );
+            if let Ok(result) = state.query.raw_query(&sibling_q).await {
+                for row in flatten_result(&result) {
+                    let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let qn = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                    let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                    add_node(&mut nodes, &mut seen, qn, name, "sibling", fp);
+                    edges.push(GraphEdge {
+                        source: center_id.clone(),
+                        target: qn.to_string(),
+                        kind: "same_file".to_string(),
+                    });
                 }
             }
+
+            // 5. File node
+            let file_id = format!("file:{}", center_fp);
+            add_node(&mut nodes, &mut seen, &file_id, &center_fp, "file", &center_fp);
+            edges.push(GraphEdge {
+                source: file_id,
+                target: center_id.clone(),
+                kind: "contains".to_string(),
+            });
         }
 
         Json(GraphData { nodes, edges }).into_response()
+    }
+}
+
+/// Flatten a SurrealDB raw_query result into a Vec of objects.
+/// raw_query returns Value::Array([Value::Array([...])]) or Value::Array([obj, obj...])
+fn flatten_result(result: &serde_json::Value) -> Vec<&serde_json::Value> {
+    let mut out = Vec::new();
+    if let Some(arr) = result.as_array() {
+        for item in arr {
+            if let Some(inner) = item.as_array() {
+                out.extend(inner.iter());
+            } else if item.is_object() {
+                out.push(item);
+            }
+        }
+    }
+    out
+}
+
+/// Extract neighbor nodes from a SurrealDB graph traversal result.
+fn extract_neighbors(
+    result: &serde_json::Value,
+    field: &str,
+    nodes: &mut Vec<GraphNode>,
+    edges: &mut Vec<GraphEdge>,
+    seen: &mut std::collections::HashSet<String>,
+    center_id: &str,
+    is_caller: bool,
+) {
+    for row in flatten_result(result) {
+        if let Some(neighbors) = row.get(field).and_then(|v| v.as_array()) {
+            for n in neighbors {
+                let name = n.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let qn = n.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                let fp = n.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                let kind = if is_caller { "caller" } else { "callee" };
+                if seen.insert(qn.to_string()) {
+                    nodes.push(GraphNode {
+                        id: qn.to_string(),
+                        name: name.to_string(),
+                        kind: kind.to_string(),
+                        file_path: fp.to_string(),
+                    });
+                }
+                let (src, tgt) = if is_caller {
+                    (qn.to_string(), center_id.to_string())
+                } else {
+                    (center_id.to_string(), qn.to_string())
+                };
+                edges.push(GraphEdge { source: src, target: tgt, kind: "calls".to_string() });
+            }
+        }
     }
 }
 
