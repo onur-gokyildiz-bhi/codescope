@@ -7,37 +7,100 @@
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; overflow: hidden; }
-#header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d; }
-#header h1 { font-size: 18px; color: #58a6ff; white-space: nowrap; }
-#search { flex: 1; padding: 8px 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 14px; outline: none; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+
+/* Header */
+#header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex-shrink: 0; }
+#header h1 { font-size: 16px; color: #58a6ff; white-space: nowrap; cursor: pointer; }
+#search-wrap { flex: 1; position: relative; }
+#search { width: 100%; padding: 7px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
 #search:focus { border-color: #58a6ff; }
-#stats { display: flex; gap: 12px; padding: 8px 20px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 12px; }
-.stat { background: #21262d; padding: 4px 10px; border-radius: 12px; }
+#search-results { position: absolute; top: 100%; left: 0; right: 0; background: #1c2128; border: 1px solid #30363d; border-radius: 0 0 6px 6px; max-height: 300px; overflow-y: auto; display: none; z-index: 20; }
+.search-item { padding: 8px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #21262d; }
+.search-item:hover { background: #21262d; }
+.search-item .si-name { color: #58a6ff; font-weight: 600; }
+.search-item .si-file { color: #8b949e; font-size: 11px; }
+
+/* Stats bar */
+#stats { display: flex; gap: 8px; padding: 6px 16px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 11px; flex-shrink: 0; flex-wrap: wrap; }
+.stat { background: #21262d; padding: 3px 8px; border-radius: 10px; }
 .stat b { color: #58a6ff; }
-#graph { width: 100vw; height: calc(100vh - 90px); }
+
+/* Main layout */
+#main { display: flex; flex: 1; overflow: hidden; }
+#graph { flex: 1; position: relative; }
 svg { width: 100%; height: 100%; }
-.node circle { stroke: #30363d; stroke-width: 1.5px; cursor: pointer; }
-.node text { font-size: 10px; fill: #8b949e; pointer-events: none; }
-.node:hover circle { stroke: #58a6ff; stroke-width: 2px; }
-.node:hover text { fill: #c9d1d9; }
-.link { stroke: #30363d; stroke-opacity: 0.6; }
-.link-label { font-size: 8px; fill: #484f58; }
-#tooltip { position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 12px; font-size: 12px; pointer-events: none; display: none; max-width: 300px; z-index: 10; }
-#tooltip .tt-name { font-size: 14px; font-weight: 600; color: #58a6ff; margin-bottom: 4px; }
-#tooltip .tt-file { color: #8b949e; font-size: 11px; }
-#tooltip .tt-kind { display: inline-block; background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-top: 4px; }
-#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 16px; color: #484f58; }
+#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 14px; color: #484f58; }
+
+/* Sidebar */
+#sidebar { width: 320px; background: #161b22; border-left: 1px solid #30363d; overflow-y: auto; flex-shrink: 0; display: none; }
+#sidebar.open { display: block; }
+#sidebar-header { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+#sidebar-header h2 { font-size: 14px; color: #58a6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sidebar-close { background: none; border: none; color: #8b949e; cursor: pointer; font-size: 18px; padding: 4px; }
+#sidebar-close:hover { color: #c9d1d9; }
+.sb-section { padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.sb-section h3 { font-size: 11px; text-transform: uppercase; color: #8b949e; margin-bottom: 6px; letter-spacing: 0.5px; }
+.sb-label { font-size: 12px; color: #8b949e; }
+.sb-value { font-size: 12px; color: #c9d1d9; word-break: break-all; }
+.sb-sig { font-size: 11px; color: #3fb950; font-family: 'Cascadia Code', 'Fira Code', monospace; background: #0d1117; padding: 6px 8px; border-radius: 4px; margin-top: 4px; overflow-x: auto; white-space: pre; }
+.sb-list { list-style: none; }
+.sb-list li { font-size: 12px; padding: 3px 0; cursor: pointer; color: #58a6ff; }
+.sb-list li:hover { text-decoration: underline; }
+
+/* Legend */
+#legend { position: absolute; bottom: 12px; left: 12px; background: #161b22ee; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 5; }
+.legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.legend-rect { width: 14px; height: 10px; border-radius: 2px; }
+
+/* Tooltip */
+#tooltip { position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 10px 12px; font-size: 12px; pointer-events: none; display: none; max-width: 300px; z-index: 10; }
+#tooltip .tt-name { font-size: 13px; font-weight: 600; color: #58a6ff; margin-bottom: 2px; }
+#tooltip .tt-file { color: #8b949e; font-size: 10px; }
+#tooltip .tt-kind { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; margin-top: 4px; }
+
+/* Nodes */
+.node circle { stroke-width: 1.5px; cursor: pointer; transition: stroke-width 0.15s; }
+.node rect { stroke-width: 1.5px; cursor: pointer; }
+.node text { font-size: 9px; fill: #8b949e; pointer-events: none; }
+.node:hover circle, .node:hover rect { stroke: #f0f6fc; stroke-width: 2.5px; }
+.node:hover text { fill: #f0f6fc; font-weight: 600; }
+
+/* Edges */
+.link-calls { stroke: #58a6ff; stroke-opacity: 0.4; }
+.link-same_file { stroke: #30363d; stroke-opacity: 0.3; stroke-dasharray: 4 2; }
+.link-contains { stroke: #3fb950; stroke-opacity: 0.3; stroke-dasharray: 2 2; }
 </style>
 </head>
 <body>
 <div id="header">
-  <h1>Codescope</h1>
-  <input id="search" type="text" placeholder="Search functions... (Enter to center graph)" />
+  <h1 onclick="loadGraph()">Codescope</h1>
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search functions, classes, files..." autocomplete="off" />
+    <div id="search-results"></div>
+  </div>
 </div>
 <div id="stats"></div>
-<div id="graph">
-  <div id="loading">Loading graph...</div>
+<div id="main">
+  <div id="graph">
+    <div id="loading">Loading graph...</div>
+    <div id="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Function</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#d2a8ff"></div> Class/Struct</div>
+      <div class="legend-item"><div class="legend-rect" style="background:#8b949e"></div> File</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f78166"></div> Caller</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Callee</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#7ee787"></div> Sibling</div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h2 id="sb-title">—</h2>
+      <button id="sidebar-close" onclick="closeSidebar()">&times;</button>
+    </div>
+    <div id="sidebar-content"></div>
+  </div>
 </div>
 <div id="tooltip">
   <div class="tt-name"></div>
@@ -47,14 +110,16 @@ svg { width: 100%; height: 100%; }
 
 <script>
 const colors = {
-  function: '#58a6ff', caller: '#f78166', callee: '#3fb950',
+  function: '#58a6ff', caller: '#f78166', callee: '#3fb950', sibling: '#7ee787',
   class: '#d2a8ff', file: '#8b949e', config: '#d29922',
   doc: '#79c0ff', api: '#f778ba', infra: '#ffa657', package: '#a5d6ff'
 };
 
 const tooltip = d3.select('#tooltip');
 let simulation, svg, g, link, node;
+let currentCenter = null;
 
+// === Stats ===
 async function loadStats() {
   try {
     const res = await fetch('/api/stats');
@@ -62,17 +127,69 @@ async function loadStats() {
     const labels = ['Files', 'Functions', 'Classes', 'Imports', 'Configs', 'Docs', 'Packages'];
     let html = '';
     if (Array.isArray(data)) {
-      data.forEach((arr, i) => {
-        const total = Array.isArray(arr) && arr[0] ? (arr[0].total || arr[0].count || 0) : 0;
-        if (total > 0) html += `<span class="stat"><b>${total}</b> ${labels[i] || ''}</span>`;
+      data.forEach((item, i) => {
+        let total = 0;
+        if (typeof item === 'object' && item !== null) {
+          total = item.total || item.count || 0;
+        }
+        if (total > 0) html += `<span class="stat"><b>${total.toLocaleString()}</b> ${labels[i] || ''}</span>`;
       });
     }
-    document.getElementById('stats').innerHTML = html;
+    document.getElementById('stats').innerHTML = html || '<span class="stat">Loading stats...</span>';
   } catch(e) { console.error('Stats error:', e); }
 }
 
+// === Search with live results ===
+let searchTimeout;
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { searchResults.style.display = 'none'; return; }
+  searchTimeout = setTimeout(() => liveSearch(q), 200);
+});
+
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    searchResults.style.display = 'none';
+    const q = searchInput.value.trim();
+    if (q) loadGraph(q);
+    else loadGraph();
+  }
+  if (e.key === 'Escape') searchResults.style.display = 'none';
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#search-wrap')) searchResults.style.display = 'none';
+});
+
+async function liveSearch(q) {
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!data.length) { searchResults.style.display = 'none'; return; }
+    searchResults.innerHTML = data.slice(0, 10).map(r =>
+      `<div class="search-item" onclick="selectSearchResult('${r.name.replace(/'/g, "\\'")}')">
+        <div class="si-name">${r.name}</div>
+        <div class="si-file">${r.file_path || ''} ${r.language ? '(' + r.language + ')' : ''}</div>
+      </div>`
+    ).join('');
+    searchResults.style.display = 'block';
+  } catch(e) { searchResults.style.display = 'none'; }
+}
+
+function selectSearchResult(name) {
+  searchInput.value = name;
+  searchResults.style.display = 'none';
+  loadGraph(name);
+}
+
+// === Graph ===
 async function loadGraph(center) {
   document.getElementById('loading').style.display = 'block';
+  currentCenter = center || null;
   try {
     const url = center ? `/api/graph?center=${encodeURIComponent(center)}` : '/api/graph';
     const res = await fetch(url);
@@ -87,47 +204,94 @@ async function loadGraph(center) {
 
 function renderGraph(data, center) {
   d3.select('#graph svg').remove();
-  const width = window.innerWidth;
-  const height = window.innerHeight - 90;
+  const container = document.getElementById('graph');
+  const width = container.clientWidth;
+  const height = container.clientHeight;
 
   svg = d3.select('#graph').append('svg').attr('width', width).attr('height', height);
+
+  // Arrow markers for directed edges
+  svg.append('defs').selectAll('marker')
+    .data(['calls', 'contains']).join('marker')
+    .attr('id', d => 'arrow-' + d)
+    .attr('viewBox', '0 -3 6 6').attr('refX', 18).attr('refY', 0)
+    .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-3L6,0L0,3')
+    .attr('fill', d => d === 'calls' ? '#58a6ff' : '#3fb950').attr('opacity', 0.5);
+
   g = svg.append('g');
 
   // Zoom
-  const zoom = d3.zoom().scaleExtent([0.1, 5]).on('zoom', e => g.attr('transform', e.transform));
+  const zoom = d3.zoom().scaleExtent([0.1, 6]).on('zoom', e => g.attr('transform', e.transform));
   svg.call(zoom);
 
-  // Deduplicate nodes
+  // Deduplicate
   const nodeMap = new Map();
   data.nodes.forEach(n => { if (!nodeMap.has(n.id)) nodeMap.set(n.id, n); });
   const nodes = Array.from(nodeMap.values());
   const nodeIds = new Set(nodes.map(n => n.id));
   const edges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-  link = g.append('g').selectAll('line').data(edges).join('line').attr('class', 'link').attr('stroke-width', 1);
+  // Edges
+  link = g.append('g').selectAll('line').data(edges).join('line')
+    .attr('class', d => 'link-' + (d.kind || 'calls'))
+    .attr('stroke-width', d => d.kind === 'calls' ? 1.5 : 1)
+    .attr('marker-end', d => d.kind === 'same_file' ? '' : `url(#arrow-${d.kind})`);
 
+  // Nodes
   node = g.append('g').selectAll('g').data(nodes).join('g').attr('class', 'node');
 
-  node.append('circle')
-    .attr('r', d => d.id === center ? 12 : 7)
-    .attr('fill', d => colors[d.kind] || colors.function)
-    .on('mouseover', (e, d) => {
-      tooltip.style('display', 'block');
-      tooltip.select('.tt-name').text(d.name);
-      tooltip.select('.tt-file').text(d.file_path || '');
-      tooltip.select('.tt-kind').text(d.kind);
-    })
-    .on('mousemove', e => tooltip.style('left', (e.pageX+12)+'px').style('top', (e.pageY-12)+'px'))
-    .on('mouseout', () => tooltip.style('display', 'none'))
-    .on('click', (e, d) => { document.getElementById('search').value = d.name; loadGraph(d.name); });
+  // File nodes = rectangles, others = circles
+  node.each(function(d) {
+    const el = d3.select(this);
+    if (d.kind === 'file') {
+      el.append('rect')
+        .attr('width', 16).attr('height', 10).attr('x', -8).attr('y', -5)
+        .attr('rx', 2).attr('fill', colors.file).attr('stroke', '#30363d');
+    } else {
+      const isCenter = center && d.name === center;
+      const r = isCenter ? 10 : (d.kind === 'sibling' ? 5 : 7);
+      el.append('circle')
+        .attr('r', r)
+        .attr('fill', colors[d.kind] || colors.function)
+        .attr('stroke', isCenter ? '#f0f6fc' : '#30363d');
+    }
+  });
 
-  node.append('text').attr('dx', 10).attr('dy', 4).text(d => d.name);
+  // Labels
+  node.append('text').attr('dx', d => d.kind === 'file' ? 12 : 10).attr('dy', 3)
+    .text(d => d.kind === 'file' ? shortPath(d.name) : d.name);
 
+  // Tooltip
+  node.on('mouseover', (e, d) => {
+    tooltip.style('display', 'block');
+    tooltip.select('.tt-name').text(d.name);
+    tooltip.select('.tt-file').text(d.file_path || '');
+    const kindEl = tooltip.select('.tt-kind');
+    kindEl.text(d.kind).style('background', (colors[d.kind] || '#21262d') + '33').style('color', colors[d.kind] || '#c9d1d9');
+  })
+  .on('mousemove', e => tooltip.style('left', (e.pageX+14)+'px').style('top', (e.pageY-14)+'px'))
+  .on('mouseout', () => tooltip.style('display', 'none'));
+
+  // Click: open sidebar or navigate
+  node.on('click', (e, d) => {
+    if (d.kind === 'file') {
+      // Show file in sidebar
+      openSidebar(d);
+    } else {
+      // Navigate to this entity
+      searchInput.value = d.name;
+      loadGraph(d.name);
+      openSidebar(d);
+    }
+  });
+
+  // Simulation
   simulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(edges).id(d => d.id).distance(80))
-    .force('charge', d3.forceManyBody().strength(-200))
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(d => d.kind === 'same_file' ? 50 : 100))
+    .force('charge', d3.forceManyBody().strength(d => d.name === center ? -400 : -150))
     .force('center', d3.forceCenter(width/2, height/2))
-    .force('collision', d3.forceCollide(20))
+    .force('collision', d3.forceCollide(22))
     .on('tick', () => {
       link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
           .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
@@ -139,18 +303,104 @@ function renderGraph(data, center) {
     .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
     .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
     .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  // Auto-open sidebar for center
+  if (center) {
+    const centerNode = nodes.find(n => n.name === center);
+    if (centerNode) openSidebar(centerNode);
+  }
 }
 
-// Search
-document.getElementById('search').addEventListener('keydown', async e => {
-  if (e.key === 'Enter') {
-    const q = e.target.value.trim();
-    if (q) loadGraph(q);
-    else loadGraph();
-  }
-});
+function shortPath(p) {
+  const parts = p.split('/');
+  return parts.length > 2 ? '.../' + parts.slice(-2).join('/') : p;
+}
 
-// Init
+// === Sidebar ===
+function openSidebar(d) {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sb-title').textContent = d.name;
+
+  let html = '';
+
+  // Type badge
+  html += `<div class="sb-section">
+    <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:${(colors[d.kind]||'#21262d')}22;color:${colors[d.kind]||'#c9d1d9'}">${d.kind}</span>
+  </div>`;
+
+  // File path
+  if (d.file_path) {
+    html += `<div class="sb-section">
+      <h3>File</h3>
+      <div class="sb-value">${d.file_path}</div>
+    </div>`;
+  }
+
+  // Signature (fetch from API)
+  if (d.kind === 'function' || d.kind === 'caller' || d.kind === 'callee' || d.kind === 'sibling') {
+    html += `<div class="sb-section" id="sb-signature"><h3>Signature</h3><div class="sb-label">Loading...</div></div>`;
+    html += `<div class="sb-section" id="sb-callers"><h3>Callers</h3><div class="sb-label">Loading...</div></div>`;
+    html += `<div class="sb-section" id="sb-callees"><h3>Callees</h3><div class="sb-label">Loading...</div></div>`;
+    fetchEntityDetails(d.name);
+  }
+
+  document.getElementById('sidebar-content').innerHTML = html;
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+async function fetchEntityDetails(name) {
+  try {
+    // Signature
+    const sigRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT signature, start_line, end_line FROM \`function\` WHERE name = '${name.replace(/'/g, "")}' LIMIT 1`)}`);
+    const sigData = await sigRes.json();
+    const sigEl = document.getElementById('sb-signature');
+    if (sigEl && sigData.length && sigData[0].signature) {
+      sigEl.innerHTML = `<h3>Signature</h3><div class="sb-sig">${escHtml(sigData[0].signature)}</div>
+        <div class="sb-label" style="margin-top:4px">Lines ${sigData[0].start_line}–${sigData[0].end_line} (${sigData[0].end_line - sigData[0].start_line} lines)</div>`;
+    } else if (sigEl) {
+      sigEl.innerHTML = '<h3>Signature</h3><div class="sb-label">—</div>';
+    }
+
+    // Callers
+    const callerRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT <-calls<-\`function\`.{name, file_path} AS callers FROM \`function\` WHERE name = '${name.replace(/'/g, "")}'`)}`);
+    const callerData = await callerRes.json();
+    const callerEl = document.getElementById('sb-callers');
+    if (callerEl) {
+      const callers = callerData[0]?.callers || [];
+      if (callers.length) {
+        callerEl.innerHTML = `<h3>Called By (${callers.length})</h3><ul class="sb-list">${callers.map(c =>
+          `<li onclick="selectSearchResult('${(c.name||'').replace(/'/g,"\\'")}')"> ${c.name} <span style="color:#8b949e;font-size:10px">${shortPath(c.file_path||'')}</span></li>`
+        ).join('')}</ul>`;
+      } else {
+        callerEl.innerHTML = '<h3>Called By</h3><div class="sb-label">None</div>';
+      }
+    }
+
+    // Callees
+    const calleeRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT ->calls->\`function\`.{name, file_path} AS callees FROM \`function\` WHERE name = '${name.replace(/'/g, "")}'`)}`);
+    const calleeData = await calleeRes.json();
+    const calleeEl = document.getElementById('sb-callees');
+    if (calleeEl) {
+      const callees = calleeData[0]?.callees || [];
+      if (callees.length) {
+        calleeEl.innerHTML = `<h3>Calls (${callees.length})</h3><ul class="sb-list">${callees.map(c =>
+          `<li onclick="selectSearchResult('${(c.name||'').replace(/'/g,"\\'")}')"> ${c.name} <span style="color:#8b949e;font-size:10px">${shortPath(c.file_path||'')}</span></li>`
+        ).join('')}</ul>`;
+      } else {
+        calleeEl.innerHTML = '<h3>Calls</h3><div class="sb-label">None</div>';
+      }
+    }
+  } catch(e) { console.error('Detail fetch error:', e); }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// === Init ===
 loadStats();
 loadGraph();
 </script>
