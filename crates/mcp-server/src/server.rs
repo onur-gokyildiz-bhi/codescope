@@ -213,6 +213,40 @@ pub struct DeadCodeParams {
     pub limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TeamPatternsParams {
+    /// Focus area: "imports", "naming", "structure", or "all" (default)
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EditPreflightParams {
+    /// File path being edited
+    pub file_path: String,
+    /// Name of the function/class being added or modified
+    pub entity_name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ManageAdrParams {
+    /// Action: "list", "create", "get"
+    pub action: String,
+    /// ADR title (for create)
+    pub title: Option<String>,
+    /// ADR body/decision text (for create)
+    pub body: Option<String>,
+    /// ADR ID (for get)
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CommunityDetectionParams {
+    /// Analysis type: "clusters", "bridges", "central", or "all" (default)
+    pub analysis: Option<String>,
+    /// Maximum results per analysis (default: 20)
+    pub limit: Option<usize>,
+}
+
 impl GraphRagServer {
     /// Create for stdio mode — project ready immediately
     pub fn new(db: Surreal<Db>, repo_name: String, codebase_path: PathBuf) -> Self {
@@ -1858,6 +1892,469 @@ impl GraphRagServer {
             }
             Err(e) => format!("Error finding dead code: {}", e),
         }
+    }
+
+    // ===== Team Intelligence Tools =====
+
+    /// Detect team coding patterns from the codebase
+    #[tool(description = "Detect team coding patterns: naming conventions, import styles, file structure patterns, \
+        and common architectural patterns. Analyzes the actual codebase to learn how the team codes. \
+        Use this to understand conventions before writing new code.")]
+    async fn team_patterns(&self, #[tool(aggr)] params: TeamPatternsParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let focus = params.focus.as_deref().unwrap_or("all");
+        let mut output = "## Team Coding Patterns\n\n".to_string();
+
+        // 1. Naming conventions
+        if focus == "all" || focus == "naming" {
+            let naming_q = "SELECT name, language, file_path FROM `function` LIMIT 200";
+            if let Ok(mut r) = ctx.db.query(naming_q).await {
+                let fns: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                let mut snake = 0; let mut camel = 0; let mut pascal = 0;
+                for f in &fns {
+                    let n = f.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    if n.contains('_') { snake += 1; }
+                    else if n.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) { camel += 1; }
+                    else { pascal += 1; }
+                }
+                let total = snake + camel + pascal;
+                if total > 0 {
+                    output.push_str("### Naming Conventions\n");
+                    output.push_str(&format!("- snake_case: {}% ({}/{})\n", snake*100/total, snake, total));
+                    output.push_str(&format!("- camelCase: {}% ({}/{})\n", camel*100/total, camel, total));
+                    output.push_str(&format!("- PascalCase: {}% ({}/{})\n\n", pascal*100/total, pascal, total));
+                }
+            }
+        }
+
+        // 2. Import style
+        if focus == "all" || focus == "imports" {
+            let import_q = "SELECT name, file_path, body FROM import_decl LIMIT 100";
+            if let Ok(mut r) = ctx.db.query(import_q).await {
+                let imports: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if !imports.is_empty() {
+                    output.push_str("### Import Patterns\n");
+                    let mut patterns: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for imp in &imports {
+                        let body = imp.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                        let pattern = if body.contains("from ") { "ES module (from)" }
+                            else if body.contains("require(") { "CommonJS (require)" }
+                            else if body.contains("use ") { "Rust (use)" }
+                            else if body.contains("import ") { "import statement" }
+                            else { "other" };
+                        *patterns.entry(pattern.to_string()).or_insert(0) += 1;
+                    }
+                    let mut sorted: Vec<_> = patterns.into_iter().collect();
+                    sorted.sort_by(|a,b| b.1.cmp(&a.1));
+                    for (p,c) in &sorted { output.push_str(&format!("- {}: {} occurrences\n", p, c)); }
+                    output.push('\n');
+                }
+            }
+        }
+
+        // 3. File structure patterns
+        if focus == "all" || focus == "structure" {
+            let struct_q = "SELECT language, count() AS cnt FROM file GROUP BY language ORDER BY cnt DESC LIMIT 10";
+            if let Ok(mut r) = ctx.db.query(struct_q).await {
+                let langs: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if !langs.is_empty() {
+                    output.push_str("### Language Distribution\n");
+                    for l in &langs {
+                        let lang = l.get("language").and_then(|v| v.as_str()).unwrap_or("?");
+                        let cnt = l.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
+                        output.push_str(&format!("- {}: {} files\n", lang, cnt));
+                    }
+                    output.push('\n');
+                }
+            }
+
+            // Average function size
+            let size_q = "SELECT math::mean(end_line - start_line) AS avg_size, \
+                          math::max(end_line - start_line) AS max_size \
+                          FROM `function`";
+            if let Ok(mut r) = ctx.db.query(size_q).await {
+                let stats: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if let Some(s) = stats.first() {
+                    let avg = s.get("avg_size").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let max = s.get("max_size").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("### Function Size\n- Average: {:.0} lines\n- Largest: {} lines\n\n", avg, max));
+                }
+            }
+
+            // Top-level directory structure
+            let dir_q = "SELECT file_path FROM file LIMIT 500";
+            if let Ok(mut r) = ctx.db.query(dir_q).await {
+                let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                let mut dirs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for f in &files {
+                    let fp = f.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                    if let Some(first) = fp.split('/').next() {
+                        *dirs.entry(first.to_string()).or_insert(0) += 1;
+                    }
+                }
+                let mut sorted: Vec<_> = dirs.into_iter().collect();
+                sorted.sort_by(|a,b| b.1.cmp(&a.1));
+                output.push_str("### Project Structure (top-level)\n");
+                for (d,c) in sorted.iter().take(10) { output.push_str(&format!("- {}/  ({} files)\n", d, c)); }
+            }
+        }
+
+        output
+    }
+
+    /// Pre-flight check before editing a file — validates against team patterns
+    #[tool(description = "Check if a planned edit aligns with team coding patterns. \
+        Call before writing code to avoid introducing inconsistencies. \
+        Returns warnings if naming, structure, or style deviates from the codebase norm.")]
+    async fn edit_preflight(&self, #[tool(aggr)] params: EditPreflightParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let mut warnings = Vec::new();
+        let mut info = Vec::new();
+
+        // 1. Check naming convention against file's language
+        let file_q = format!(
+            "SELECT language FROM file WHERE path CONTAINS '{}' LIMIT 1",
+            params.file_path.replace('\'', "")
+        );
+        let mut lang = "unknown".to_string();
+        if let Ok(mut r) = ctx.db.query(&file_q).await {
+            let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            if let Some(f) = files.first() {
+                lang = f.get("language").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            }
+        }
+
+        let name = &params.entity_name;
+        let has_underscore = name.contains('_');
+        let starts_lower = name.chars().next().map(|c| c.is_lowercase()).unwrap_or(true);
+
+        // Naming check
+        match lang.as_str() {
+            "rust" | "python" | "ruby" | "elixir" => {
+                if !has_underscore && name.len() > 3 && starts_lower {
+                    warnings.push(format!("Naming: '{}' uses camelCase but {} convention is snake_case", name, lang));
+                }
+            }
+            "typescript" | "javascript" | "java" | "dart" | "kotlin" | "go" => {
+                if has_underscore && starts_lower {
+                    warnings.push(format!("Naming: '{}' uses snake_case but {} convention is camelCase", name, lang));
+                }
+            }
+            _ => {}
+        }
+
+        // 2. Check sibling functions in the same file for consistency
+        let siblings_q = format!(
+            "SELECT name FROM `function` WHERE file_path CONTAINS '{}' LIMIT 20",
+            params.file_path.replace('\'', "")
+        );
+        if let Ok(mut r) = ctx.db.query(&siblings_q).await {
+            let siblings: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            let sibling_names: Vec<&str> = siblings.iter()
+                .filter_map(|s| s.get("name").and_then(|v| v.as_str()))
+                .collect();
+
+            if !sibling_names.is_empty() {
+                let snake_count = sibling_names.iter().filter(|n| n.contains('_')).count();
+                let ratio = snake_count as f32 / sibling_names.len() as f32;
+
+                if ratio > 0.7 && !has_underscore && name.len() > 3 {
+                    warnings.push(format!("Style: {}% of siblings use snake_case, but '{}' doesn't", (ratio*100.0) as u32, name));
+                } else if ratio < 0.3 && has_underscore {
+                    warnings.push(format!("Style: {}% of siblings use camelCase, but '{}' uses snake_case", ((1.0-ratio)*100.0) as u32, name));
+                }
+
+                info.push(format!("File has {} existing functions", sibling_names.len()));
+            }
+        }
+
+        // 3. Check file size
+        let size_q = format!(
+            "SELECT line_count FROM file WHERE path CONTAINS '{}' LIMIT 1",
+            params.file_path.replace('\'', "")
+        );
+        if let Ok(mut r) = ctx.db.query(&size_q).await {
+            let sizes: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            if let Some(s) = sizes.first() {
+                let lines = s.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                if lines > 500 {
+                    warnings.push(format!("File size: {} lines — consider splitting into smaller modules", lines));
+                }
+                info.push(format!("File is {} lines", lines));
+            }
+        }
+
+        let mut output = format!("## Edit Preflight: {} in {}\n\n", params.entity_name, params.file_path);
+        output.push_str(&format!("**Language:** {}\n\n", lang));
+
+        if warnings.is_empty() {
+            output.push_str("**All checks passed.** Edit aligns with team patterns.\n\n");
+        } else {
+            output.push_str(&format!("**{} warnings:**\n", warnings.len()));
+            for w in &warnings { output.push_str(&format!("- {} {}\n", "!!!", w)); }
+            output.push('\n');
+        }
+
+        if !info.is_empty() {
+            output.push_str("**Context:**\n");
+            for i in &info { output.push_str(&format!("- {}\n", i)); }
+        }
+
+        output
+    }
+
+    // ===== ADR Management =====
+
+    /// Manage Architecture Decision Records
+    #[tool(description = "Manage Architecture Decision Records (ADRs). Actions: \
+        'list' — show all recorded decisions, \
+        'create' — record a new architectural decision with title and body, \
+        'get' — retrieve a specific ADR by ID. \
+        ADRs are stored in the graph and linked to conversation history.")]
+    async fn manage_adr(&self, #[tool(aggr)] params: ManageAdrParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+
+        match params.action.as_str() {
+            "list" => {
+                let q = "SELECT name, body, timestamp, qualified_name FROM decision WHERE repo = $repo ORDER BY timestamp DESC LIMIT 50";
+                match ctx.db.query(q).bind(("repo", ctx.repo_name.clone())).await {
+                    Ok(mut r) => {
+                        let decisions: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                        if decisions.is_empty() {
+                            return "No ADRs found. Decisions are auto-extracted from conversations, or create one with action='create'.".into();
+                        }
+                        let mut output = format!("## Architecture Decision Records ({} total)\n\n", decisions.len());
+                        for (i, d) in decisions.iter().enumerate() {
+                            let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                            let ts = d.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+                            let body = d.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                            let date = if ts.len() >= 10 { &ts[..10] } else { ts };
+                            output.push_str(&format!("### ADR-{:03}: {}\n", i+1, name));
+                            if !date.is_empty() { output.push_str(&format!("*Date: {}*\n\n", date)); }
+                            if body.len() > 200 {
+                                output.push_str(&format!("{}...\n\n", &body[..200]));
+                            } else if !body.is_empty() {
+                                output.push_str(&format!("{}\n\n", body));
+                            }
+                        }
+                        output
+                    }
+                    Err(e) => format!("Error listing ADRs: {}", e),
+                }
+            }
+            "create" => {
+                let title = params.title.as_deref().unwrap_or("Untitled Decision");
+                let body = params.body.as_deref().unwrap_or("");
+                let qname = format!("{}:adr:{}", ctx.repo_name, title.to_lowercase().replace(' ', "_").chars().take(60).collect::<String>());
+                let ts = chrono::Utc::now().to_rfc3339();
+
+                let q = "UPSERT decision SET name = $name, qualified_name = $qname, \
+                         body = $body, repo = $repo, language = 'adr', \
+                         file_path = 'adr', start_line = 0, end_line = 0, \
+                         timestamp = $ts";
+                match ctx.db.query(q)
+                    .bind(("name", title.to_string()))
+                    .bind(("qname", qname))
+                    .bind(("body", body.to_string()))
+                    .bind(("repo", ctx.repo_name.clone()))
+                    .bind(("ts", ts))
+                    .await
+                {
+                    Ok(_) => format!("ADR created: **{}**", title),
+                    Err(e) => format!("Error creating ADR: {}", e),
+                }
+            }
+            "get" => {
+                let id = params.id.as_deref().unwrap_or("");
+                let q = "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
+                match ctx.db.query(q).bind(("search", id.to_string())).bind(("repo", ctx.repo_name.clone())).await {
+                    Ok(mut r) => {
+                        let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                        if let Some(d) = results.first() {
+                            serde_json::to_string_pretty(d).unwrap_or_else(|_| "Error formatting".into())
+                        } else {
+                            format!("No ADR found matching '{}'", id)
+                        }
+                    }
+                    Err(e) => format!("Error: {}", e),
+                }
+            }
+            _ => "Invalid action. Use 'list', 'create', or 'get'.".into(),
+        }
+    }
+
+    // ===== Shared Memory =====
+
+    /// Save a persistent memory note that survives across sessions
+    #[tool(description = "Save a persistent memory note that survives across sessions and is shared between all agents \
+        (Claude Code, Cursor, etc.) connected to this project. Use for recording: preferences, conventions, \
+        important context, architectural notes, TODOs. Memories are searchable via conversation_search.")]
+    async fn memory_save(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let text = &params.question;
+        let ts = chrono::Utc::now().to_rfc3339();
+        let slug = text.to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+            .chars().take(60).collect::<String>();
+        let qname = format!("{}:memory:{}", ctx.repo_name, slug);
+
+        let q = "UPSERT conv_topic SET name = $name, qualified_name = $qname, \
+                 body = $body, repo = $repo, language = 'memory', kind = 'shared_memory', \
+                 file_path = 'memory', start_line = 0, end_line = 0, timestamp = $ts";
+        match ctx.db.query(q)
+            .bind(("name", text.chars().take(100).collect::<String>()))
+            .bind(("qname", qname))
+            .bind(("body", text.to_string()))
+            .bind(("repo", ctx.repo_name.clone()))
+            .bind(("ts", ts))
+            .await
+        {
+            Ok(_) => format!("Memory saved. Accessible by all agents connected to '{}'.", ctx.repo_name),
+            Err(e) => format!("Error saving memory: {}", e),
+        }
+    }
+
+    /// Search shared memories and conversation history
+    #[tool(description = "Search shared memories, decisions, and conversation history across all sessions. \
+        Returns memories saved by any agent, plus auto-extracted decisions/problems/solutions.")]
+    async fn memory_search(&self, #[tool(aggr)] params: SearchParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let limit = params.limit.unwrap_or(20) as i64;
+        let safe = params.query.replace('\'', "");
+
+        let q = "SELECT name, body, kind, timestamp, 'memory' AS source FROM conv_topic \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
+                 UNION \
+                 SELECT name, body, 'decision' AS kind, timestamp, 'conversation' AS source FROM decision \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
+                 UNION \
+                 SELECT name, body, 'problem' AS kind, timestamp, 'conversation' AS source FROM problem \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
+                 UNION \
+                 SELECT name, body, 'solution' AS kind, timestamp, 'conversation' AS source FROM solution \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
+                 ORDER BY timestamp DESC LIMIT $lim";
+
+        match ctx.db.query(q)
+            .bind(("repo", ctx.repo_name.clone()))
+            .bind(("search", safe))
+            .bind(("lim", limit))
+            .await
+        {
+            Ok(mut r) => {
+                let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if results.is_empty() {
+                    return format!("No memories found for '{}'", params.query);
+                }
+                let mut output = format!("## Memory Search: '{}' ({} results)\n\n", params.query, results.len());
+                for item in &results {
+                    let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                    let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                    let ts = item.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+                    let date = if ts.len() >= 10 { &ts[..10] } else { ts };
+                    let icon = match kind {
+                        "shared_memory" => "[MEMORY]",
+                        "decision" => "[DECISION]",
+                        "problem" => "[PROBLEM]",
+                        "solution" => "[SOLUTION]",
+                        _ => "[NOTE]",
+                    };
+                    output.push_str(&format!("**{}** {} _{}_\n", icon, name, date));
+                    if !body.is_empty() {
+                        let preview = if body.len() > 150 { &body[..150] } else { body };
+                        output.push_str(&format!("> {}\n\n", preview));
+                    }
+                }
+                output
+            }
+            Err(e) => format!("Error searching memory: {}", e),
+        }
+    }
+
+    // ===== Graph Analytics =====
+
+    /// Detect code communities and architectural boundaries
+    #[tool(description = "Detect code communities, bridge modules, and central nodes in the codebase graph. \
+        'clusters' — find groups of tightly-connected files, \
+        'bridges' — find modules that connect separate clusters (high betweenness), \
+        'central' — find the most connected/important entities (PageRank-like), \
+        'all' — run all analyses.")]
+    async fn community_detection(&self, #[tool(aggr)] params: CommunityDetectionParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let analysis = params.analysis.as_deref().unwrap_or("all");
+        let limit = params.limit.unwrap_or(20);
+        let mut output = "## Code Community Analysis\n\n".to_string();
+
+        // 1. Clusters — files grouped by mutual call relationships
+        if analysis == "all" || analysis == "clusters" {
+            let q = "SELECT file_path, count(->calls) AS out_calls, count(<-calls) AS in_calls, \
+                     (count(->calls) + count(<-calls)) AS total_edges \
+                     FROM `function` WHERE file_path != NONE \
+                     GROUP BY file_path ORDER BY total_edges DESC LIMIT $lim";
+            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+                let clusters: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if !clusters.is_empty() {
+                    output.push_str("### Most Connected Files (Cluster Centers)\n\n");
+                    output.push_str("| File | Outgoing | Incoming | Total |\n|------|----------|----------|-------|\n");
+                    for c in &clusters {
+                        let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                        let out_c = c.get("out_calls").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let in_c = c.get("in_calls").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let total = c.get("total_edges").and_then(|v| v.as_u64()).unwrap_or(0);
+                        output.push_str(&format!("| {} | {} | {} | {} |\n", fp, out_c, in_c, total));
+                    }
+                    output.push('\n');
+                }
+            }
+        }
+
+        // 2. Bridge modules — files that import from and are imported by many different files
+        if analysis == "all" || analysis == "bridges" {
+            let q = "SELECT name, file_path, \
+                     count(<-calls) AS callers, count(->calls) AS callees, \
+                     (count(<-calls) * count(->calls)) AS bridge_score \
+                     FROM `function` \
+                     WHERE count(<-calls) > 0 AND count(->calls) > 0 \
+                     ORDER BY bridge_score DESC LIMIT $lim";
+            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+                let bridges: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if !bridges.is_empty() {
+                    output.push_str("### Bridge Functions (Connect Different Parts)\n\n");
+                    output.push_str("| Function | File | Callers | Callees | Bridge Score |\n|----------|------|---------|---------|-------------|\n");
+                    for b in &bridges {
+                        let name = b.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let fp = b.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                        let callers = b.get("callers").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let callees = b.get("callees").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let score = b.get("bridge_score").and_then(|v| v.as_u64()).unwrap_or(0);
+                        output.push_str(&format!("| **{}** | {} | {} | {} | {} |\n", name, fp, callers, callees, score));
+                    }
+                    output.push('\n');
+                }
+            }
+        }
+
+        // 3. Central entities — most referenced/called (PageRank-like)
+        if analysis == "all" || analysis == "central" {
+            let q = "SELECT name, file_path, count(<-calls) AS in_degree \
+                     FROM `function` ORDER BY in_degree DESC LIMIT $lim";
+            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+                let central: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if !central.is_empty() {
+                    output.push_str("### Most Central Functions (Highest In-Degree)\n\n");
+                    output.push_str("| # | Function | File | Called By |\n|---|----------|------|-----------|\n");
+                    for (i, c) in central.iter().enumerate() {
+                        let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                        let deg = c.get("in_degree").and_then(|v| v.as_u64()).unwrap_or(0);
+                        output.push_str(&format!("| {} | **{}** | {} | {} |\n", i+1, name, fp, deg));
+                    }
+                }
+            }
+        }
+
+        output
     }
 }
 

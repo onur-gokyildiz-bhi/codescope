@@ -5,141 +5,166 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Codescope — Knowledge Graph Explorer</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.module.js" type="importmap-shim"></script>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #c9d1d9;
+  --text-dim: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f78166;
+  --purple: #d2a8ff; --orange: #ffa657; --pink: #f778ba; --yellow: #d29922;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text); overflow:hidden; height:100vh; display:flex; flex-direction:column; }
 
 /* Header */
-#header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d; flex-shrink: 0; }
-#header h1 { font-size: 16px; color: #58a6ff; white-space: nowrap; cursor: pointer; }
-#search-wrap { flex: 1; position: relative; }
-#search { width: 100%; padding: 7px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 13px; outline: none; }
-#search:focus { border-color: #58a6ff; }
-#search-results { position: absolute; top: 100%; left: 0; right: 0; background: #1c2128; border: 1px solid #30363d; border-radius: 0 0 6px 6px; max-height: 300px; overflow-y: auto; display: none; z-index: 20; }
-.search-item { padding: 8px 12px; cursor: pointer; font-size: 12px; border-bottom: 1px solid #21262d; }
-.search-item:hover { background: #21262d; }
-.search-item .si-name { color: #58a6ff; font-weight: 600; }
-.search-item .si-file { color: #8b949e; font-size: 11px; }
+#header { display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; z-index:10; }
+#logo { font-size:15px; font-weight:700; color:var(--accent); cursor:pointer; white-space:nowrap; }
+#logo span { font-weight:400; color:var(--text-dim); font-size:12px; margin-left:4px; }
+#search-wrap { flex:1; position:relative; }
+#search { width:100%; padding:6px 10px 6px 30px; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:12px; outline:none; }
+#search:focus { border-color:var(--accent); }
+#search-icon { position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--text-dim); font-size:12px; pointer-events:none; }
+#search-results { position:absolute; top:100%; left:0; right:0; background:#1c2128; border:1px solid var(--border); border-top:none; border-radius:0 0 6px 6px; max-height:280px; overflow-y:auto; display:none; z-index:20; }
+.sr-item { padding:6px 10px; cursor:pointer; border-bottom:1px solid #21262d; }
+.sr-item:hover { background:#21262d; }
+.sr-name { color:var(--accent); font-size:12px; font-weight:600; }
+.sr-file { color:var(--text-dim); font-size:10px; }
+#view-toggle { display:flex; gap:2px; background:var(--bg); border-radius:6px; padding:2px; }
+.vt-btn { padding:4px 10px; font-size:11px; border:none; border-radius:4px; cursor:pointer; color:var(--text-dim); background:transparent; }
+.vt-btn.active { background:var(--border); color:var(--text); }
 
-/* Stats bar */
-#stats { display: flex; gap: 8px; padding: 6px 16px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 11px; flex-shrink: 0; flex-wrap: wrap; }
-.stat { background: #21262d; padding: 3px 8px; border-radius: 10px; }
-.stat b { color: #58a6ff; }
+/* Stats */
+#stats { display:flex; gap:6px; padding:5px 14px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
+.stat { background:#21262d; padding:2px 8px; border-radius:10px; font-size:10px; }
+.stat b { color:var(--accent); }
 
-/* Main layout */
-#main { display: flex; flex: 1; overflow: hidden; }
-#graph { flex: 1; position: relative; }
-svg { width: 100%; height: 100%; }
-#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 14px; color: #484f58; }
+/* Main */
+#main { display:flex; flex:1; overflow:hidden; }
+#graph-container { flex:1; position:relative; }
+#graph-container canvas, #graph-container svg { position:absolute; top:0; left:0; width:100%; height:100%; }
+#loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:13px; color:var(--text-dim); z-index:5; }
 
 /* Sidebar */
-#sidebar { width: 320px; background: #161b22; border-left: 1px solid #30363d; overflow-y: auto; flex-shrink: 0; display: none; }
-#sidebar.open { display: block; }
-#sidebar-header { padding: 12px 16px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
-#sidebar-header h2 { font-size: 14px; color: #58a6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#sidebar-close { background: none; border: none; color: #8b949e; cursor: pointer; font-size: 18px; padding: 4px; }
-#sidebar-close:hover { color: #c9d1d9; }
-.sb-section { padding: 10px 16px; border-bottom: 1px solid #21262d; }
-.sb-section h3 { font-size: 11px; text-transform: uppercase; color: #8b949e; margin-bottom: 6px; letter-spacing: 0.5px; }
-.sb-label { font-size: 12px; color: #8b949e; }
-.sb-value { font-size: 12px; color: #c9d1d9; word-break: break-all; }
-.sb-sig { font-size: 11px; color: #3fb950; font-family: 'Cascadia Code', 'Fira Code', monospace; background: #0d1117; padding: 6px 8px; border-radius: 4px; margin-top: 4px; overflow-x: auto; white-space: pre; }
-.sb-list { list-style: none; }
-.sb-list li { font-size: 12px; padding: 3px 0; cursor: pointer; color: #58a6ff; }
-.sb-list li:hover { text-decoration: underline; }
+#sidebar { width:300px; background:var(--surface); border-left:1px solid var(--border); overflow-y:auto; flex-shrink:0; display:none; font-size:12px; }
+#sidebar.open { display:block; }
+.sb-head { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.sb-head h2 { font-size:13px; color:var(--accent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.sb-close { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:2px 6px; }
+.sb-close:hover { color:var(--text); }
+.sb-section { padding:8px 14px; border-bottom:1px solid #21262d; }
+.sb-section h3 { font-size:10px; text-transform:uppercase; color:var(--text-dim); margin-bottom:4px; letter-spacing:.5px; }
+.sb-badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:10px; }
+.sb-sig { font-size:10px; color:var(--green); font-family:'Cascadia Code','Fira Code',monospace; background:var(--bg); padding:5px 7px; border-radius:4px; margin-top:3px; overflow-x:auto; white-space:pre; }
+.sb-list { list-style:none; }
+.sb-list li { padding:2px 0; cursor:pointer; color:var(--accent); font-size:11px; }
+.sb-list li:hover { text-decoration:underline; }
+.sb-list .dim { color:var(--text-dim); font-size:9px; }
 
 /* Legend */
-#legend { position: absolute; bottom: 12px; left: 12px; background: #161b22ee; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 5; }
-.legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-.legend-rect { width: 14px; height: 10px; border-radius: 2px; }
+#legend { position:absolute; bottom:10px; left:10px; background:var(--surface)ee; border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:10px; z-index:5; }
+.lg-item { display:flex; align-items:center; gap:5px; margin:2px 0; }
+.lg-dot { width:8px; height:8px; border-radius:50%; }
+.lg-rect { width:12px; height:8px; border-radius:2px; }
+
+/* Minimap */
+#minimap { position:absolute; bottom:10px; right:10px; width:150px; height:100px; background:var(--surface)dd; border:1px solid var(--border); border-radius:6px; z-index:5; overflow:hidden; }
 
 /* Tooltip */
-#tooltip { position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 10px 12px; font-size: 12px; pointer-events: none; display: none; max-width: 300px; z-index: 10; }
-#tooltip .tt-name { font-size: 13px; font-weight: 600; color: #58a6ff; margin-bottom: 2px; }
-#tooltip .tt-file { color: #8b949e; font-size: 10px; }
-#tooltip .tt-kind { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; margin-top: 4px; }
+#tooltip { position:absolute; background:#1c2128; border:1px solid var(--border); border-radius:6px; padding:8px 10px; font-size:11px; pointer-events:none; display:none; max-width:280px; z-index:15; }
+.tt-name { font-weight:600; color:var(--accent); }
+.tt-file { color:var(--text-dim); font-size:9px; margin-top:1px; }
+.tt-badge { display:inline-block; padding:0 4px; border-radius:3px; font-size:9px; margin-top:2px; }
 
-/* Nodes */
-.node circle { stroke-width: 1.5px; cursor: pointer; transition: stroke-width 0.15s; }
-.node rect { stroke-width: 1.5px; cursor: pointer; }
-.node text { font-size: 9px; fill: #8b949e; pointer-events: none; }
-.node:hover circle, .node:hover rect { stroke: #f0f6fc; stroke-width: 2.5px; }
-.node:hover text { fill: #f0f6fc; font-weight: 600; }
-
-/* Edges */
-.link-calls { stroke: #58a6ff; stroke-opacity: 0.4; }
-.link-same_file { stroke: #30363d; stroke-opacity: 0.3; stroke-dasharray: 4 2; }
-.link-contains { stroke: #3fb950; stroke-opacity: 0.3; stroke-dasharray: 2 2; }
+/* Nodes & edges */
+.node circle,.node rect { cursor:pointer; transition:stroke-width .1s; }
+.node text { font-size:8px; fill:var(--text-dim); pointer-events:none; }
+.node:hover circle,.node:hover rect { stroke:#f0f6fc; stroke-width:2.5px; }
+.node:hover text { fill:#f0f6fc; font-weight:600; }
+.node.highlighted circle { stroke:var(--yellow); stroke-width:3px; animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{stroke-opacity:1} 50%{stroke-opacity:.4} }
+.link-calls { stroke:var(--accent); stroke-opacity:.35; }
+.link-same_file { stroke:var(--border); stroke-opacity:.2; stroke-dasharray:3 2; }
+.link-contains { stroke:var(--green); stroke-opacity:.2; stroke-dasharray:2 2; }
 </style>
 </head>
 <body>
 <div id="header">
-  <h1 onclick="loadGraph()">Codescope</h1>
+  <div id="logo" onclick="loadGraph()">Codescope<span>Knowledge Graph</span></div>
   <div id="search-wrap">
+    <span id="search-icon">&#128269;</span>
     <input id="search" type="text" placeholder="Search functions, classes, files..." autocomplete="off" />
     <div id="search-results"></div>
+  </div>
+  <div id="view-toggle">
+    <button class="vt-btn active" onclick="setView('graph')">Graph</button>
+    <button class="vt-btn" onclick="setView('table')">Table</button>
   </div>
 </div>
 <div id="stats"></div>
 <div id="main">
-  <div id="graph">
+  <div id="graph-container">
     <div id="loading">Loading graph...</div>
     <div id="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Function</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#d2a8ff"></div> Class/Struct</div>
-      <div class="legend-item"><div class="legend-rect" style="background:#8b949e"></div> File</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f78166"></div> Caller</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Callee</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#7ee787"></div> Sibling</div>
+      <div class="lg-item"><div class="lg-dot" style="background:var(--accent)"></div> Function</div>
+      <div class="lg-item"><div class="lg-dot" style="background:var(--purple)"></div> Class/Struct</div>
+      <div class="lg-item"><div class="lg-rect" style="background:var(--text-dim)"></div> File</div>
+      <div class="lg-item"><div class="lg-dot" style="background:var(--red)"></div> Caller</div>
+      <div class="lg-item"><div class="lg-dot" style="background:var(--green)"></div> Callee</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#7ee787"></div> Sibling</div>
+      <div class="lg-item"><div class="lg-dot" style="background:var(--orange)"></div> Config/Infra</div>
     </div>
+    <canvas id="minimap"></canvas>
   </div>
   <div id="sidebar">
-    <div id="sidebar-header">
-      <h2 id="sb-title">—</h2>
-      <button id="sidebar-close" onclick="closeSidebar()">&times;</button>
-    </div>
-    <div id="sidebar-content"></div>
+    <div class="sb-head"><h2 id="sb-title">-</h2><button class="sb-close" onclick="closeSidebar()">&times;</button></div>
+    <div id="sb-content"></div>
   </div>
 </div>
-<div id="tooltip">
-  <div class="tt-name"></div>
-  <div class="tt-file"></div>
-  <div class="tt-kind"></div>
-</div>
+<div id="tooltip"><div class="tt-name"></div><div class="tt-file"></div><div class="tt-badge"></div></div>
 
 <script>
-const colors = {
-  function: '#58a6ff', caller: '#f78166', callee: '#3fb950', sibling: '#7ee787',
-  class: '#d2a8ff', file: '#8b949e', config: '#d29922',
-  doc: '#79c0ff', api: '#f778ba', infra: '#ffa657', package: '#a5d6ff'
+const C = {
+  function:'#58a6ff', caller:'#f78166', callee:'#3fb950', sibling:'#7ee787',
+  class:'#d2a8ff', file:'#8b949e', config:'#d29922', doc:'#79c0ff',
+  api:'#f778ba', infra:'#ffa657', package:'#a5d6ff'
+};
+
+// Architecture layer detection
+function detectLayer(name, fp) {
+  const n = (name + ' ' + fp).toLowerCase();
+  if (n.match(/handler|controller|route|endpoint|api/)) return 'api';
+  if (n.match(/service|usecase|domain|logic/)) return 'service';
+  if (n.match(/repo|model|schema|migration|db|query/)) return 'data';
+  if (n.match(/component|page|view|widget|screen|ui/)) return 'ui';
+  if (n.match(/util|helper|common|shared|lib/)) return 'util';
+  if (n.match(/test|spec|mock|fixture/)) return 'test';
+  if (n.match(/config|env|setting/)) return 'config';
+  return 'other';
+}
+
+const layerColors = {
+  api:'#f78166', service:'#58a6ff', data:'#d2a8ff', ui:'#3fb950',
+  util:'#8b949e', test:'#d29922', config:'#ffa657', other:'#484f58'
 };
 
 const tooltip = d3.select('#tooltip');
-let simulation, svg, g, link, node;
-let currentCenter = null;
+let simulation, svg, g, currentView = 'graph', currentCenter = null;
 
 // === Stats ===
 async function loadStats() {
   try {
-    const res = await fetch('/api/stats');
-    const data = await res.json();
-    const labels = ['Files', 'Functions', 'Classes', 'Imports', 'Configs', 'Docs', 'Packages'];
-    let html = '';
-    if (Array.isArray(data)) {
-      data.forEach((item, i) => {
-        let total = 0;
-        if (typeof item === 'object' && item !== null) {
-          total = item.total || item.count || 0;
-        }
-        if (total > 0) html += `<span class="stat"><b>${total.toLocaleString()}</b> ${labels[i] || ''}</span>`;
-      });
-    }
-    document.getElementById('stats').innerHTML = html || '<span class="stat">Loading stats...</span>';
-  } catch(e) { console.error('Stats error:', e); }
+    const r = await fetch('/api/stats');
+    const d = await r.json();
+    const labels = ['Files','Functions','Classes','Imports','Configs','Docs','Packages'];
+    let h = '';
+    if (Array.isArray(d)) d.forEach((item,i) => {
+      const t = (typeof item==='object'&&item) ? (item.total||item.count||0) : 0;
+      if (t>0) h += `<span class="stat"><b>${t.toLocaleString()}</b> ${labels[i]||''}</span>`;
+    });
+    document.getElementById('stats').innerHTML = h || '';
+  } catch(e) {}
 }
 
-// === Search with live results ===
+// === Search ===
 let searchTimeout;
 const searchInput = document.getElementById('search');
 const searchResults = document.getElementById('search-results');
@@ -147,173 +172,173 @@ const searchResults = document.getElementById('search-results');
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimeout);
   const q = searchInput.value.trim();
-  if (q.length < 2) { searchResults.style.display = 'none'; return; }
-  searchTimeout = setTimeout(() => liveSearch(q), 200);
+  if (q.length < 2) { searchResults.style.display='none'; return; }
+  searchTimeout = setTimeout(() => liveSearch(q), 150);
 });
-
 searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    searchResults.style.display = 'none';
-    const q = searchInput.value.trim();
-    if (q) loadGraph(q);
-    else loadGraph();
-  }
-  if (e.key === 'Escape') searchResults.style.display = 'none';
+  if (e.key==='Enter') { searchResults.style.display='none'; const q=searchInput.value.trim(); if(q) loadGraph(q); else loadGraph(); }
+  if (e.key==='Escape') searchResults.style.display='none';
 });
-
-document.addEventListener('click', e => {
-  if (!e.target.closest('#search-wrap')) searchResults.style.display = 'none';
-});
+document.addEventListener('click', e => { if(!e.target.closest('#search-wrap')) searchResults.style.display='none'; });
 
 async function liveSearch(q) {
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    if (!data.length) { searchResults.style.display = 'none'; return; }
-    searchResults.innerHTML = data.slice(0, 10).map(r =>
-      `<div class="search-item" onclick="selectSearchResult('${r.name.replace(/'/g, "\\'")}')">
-        <div class="si-name">${r.name}</div>
-        <div class="si-file">${r.file_path || ''} ${r.language ? '(' + r.language + ')' : ''}</div>
-      </div>`
-    ).join('');
-    searchResults.style.display = 'block';
-  } catch(e) { searchResults.style.display = 'none'; }
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    if (!d.length) { searchResults.style.display='none'; return; }
+    searchResults.innerHTML = d.slice(0,12).map(r => {
+      const layer = detectLayer(r.name, r.file_path||'');
+      return `<div class="sr-item" onclick="nav('${r.name.replace(/'/g,"\\'")}')">
+        <span class="sr-name">${esc(r.name)}</span>
+        <span style="color:${layerColors[layer]};font-size:9px;margin-left:4px">${layer}</span>
+        <div class="sr-file">${esc(r.file_path||'')} ${r.language?'('+r.language+')':''}</div>
+      </div>`;
+    }).join('');
+    searchResults.style.display='block';
+  } catch(e) { searchResults.style.display='none'; }
 }
 
-function selectSearchResult(name) {
-  searchInput.value = name;
-  searchResults.style.display = 'none';
-  loadGraph(name);
-}
+function nav(name) { searchInput.value=name; searchResults.style.display='none'; loadGraph(name); }
 
 // === Graph ===
 async function loadGraph(center) {
-  document.getElementById('loading').style.display = 'block';
-  currentCenter = center || null;
+  document.getElementById('loading').style.display='block';
+  currentCenter = center||null;
   try {
     const url = center ? `/api/graph?center=${encodeURIComponent(center)}` : '/api/graph';
-    const res = await fetch(url);
-    const data = await res.json();
-    document.getElementById('loading').style.display = 'none';
+    const r = await fetch(url);
+    const data = await r.json();
+    document.getElementById('loading').style.display='none';
     renderGraph(data, center);
-  } catch(e) {
-    document.getElementById('loading').textContent = 'Error loading graph';
-    console.error(e);
-  }
+  } catch(e) { document.getElementById('loading').textContent='Error loading graph'; }
 }
 
 function renderGraph(data, center) {
-  d3.select('#graph svg').remove();
-  const container = document.getElementById('graph');
-  const width = container.clientWidth;
-  const height = container.clientHeight;
+  d3.select('#graph-container svg').remove();
+  const container = document.getElementById('graph-container');
+  const W = container.clientWidth, H = container.clientHeight;
+  svg = d3.select('#graph-container').append('svg').attr('width',W).attr('height',H);
 
-  svg = d3.select('#graph').append('svg').attr('width', width).attr('height', height);
-
-  // Arrow markers for directed edges
-  svg.append('defs').selectAll('marker')
-    .data(['calls', 'contains']).join('marker')
-    .attr('id', d => 'arrow-' + d)
-    .attr('viewBox', '0 -3 6 6').attr('refX', 18).attr('refY', 0)
-    .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
-    .append('path').attr('d', 'M0,-3L6,0L0,3')
-    .attr('fill', d => d === 'calls' ? '#58a6ff' : '#3fb950').attr('opacity', 0.5);
+  // Defs: arrows + glow
+  const defs = svg.append('defs');
+  ['calls','contains'].forEach(t => {
+    defs.append('marker').attr('id','arr-'+t).attr('viewBox','0 -3 6 6')
+      .attr('refX',16).attr('refY',0).attr('markerWidth',5).attr('markerHeight',5).attr('orient','auto')
+      .append('path').attr('d','M0,-3L6,0L0,3').attr('fill',t==='calls'?'#58a6ff':'#3fb950').attr('opacity',.4);
+  });
+  // Glow filter
+  const filt = defs.append('filter').attr('id','glow');
+  filt.append('feGaussianBlur').attr('stdDeviation','3').attr('result','blur');
+  filt.append('feMerge').selectAll('feMergeNode').data(['blur','SourceGraphic']).join('feMergeNode').attr('in',d=>d);
 
   g = svg.append('g');
+  svg.call(d3.zoom().scaleExtent([.05,8]).on('zoom', e => { g.attr('transform',e.transform); updateMinimap(); }));
 
-  // Zoom
-  const zoom = d3.zoom().scaleExtent([0.1, 6]).on('zoom', e => g.attr('transform', e.transform));
-  svg.call(zoom);
-
-  // Deduplicate
+  // Dedup
   const nodeMap = new Map();
-  data.nodes.forEach(n => { if (!nodeMap.has(n.id)) nodeMap.set(n.id, n); });
+  data.nodes.forEach(n => { if(!nodeMap.has(n.id)) nodeMap.set(n.id,n); });
   const nodes = Array.from(nodeMap.values());
-  const nodeIds = new Set(nodes.map(n => n.id));
-  const edges = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+  const nodeIds = new Set(nodes.map(n=>n.id));
+  const edges = data.edges.filter(e => nodeIds.has(e.source)&&nodeIds.has(e.target));
+
+  // Enrich nodes with layer
+  nodes.forEach(n => { n.layer = detectLayer(n.name, n.file_path||''); });
 
   // Edges
-  link = g.append('g').selectAll('line').data(edges).join('line')
-    .attr('class', d => 'link-' + (d.kind || 'calls'))
-    .attr('stroke-width', d => d.kind === 'calls' ? 1.5 : 1)
-    .attr('marker-end', d => d.kind === 'same_file' ? '' : `url(#arrow-${d.kind})`);
+  const link = g.append('g').selectAll('line').data(edges).join('line')
+    .attr('class',d=>'link-'+(d.kind||'calls'))
+    .attr('stroke-width',d=>d.kind==='calls'?1.5:1)
+    .attr('marker-end',d=>d.kind==='same_file'?'':`url(#arr-${d.kind})`);
 
   // Nodes
-  node = g.append('g').selectAll('g').data(nodes).join('g').attr('class', 'node');
+  const node = g.append('g').selectAll('g').data(nodes).join('g').attr('class','node');
 
-  // File nodes = rectangles, others = circles
   node.each(function(d) {
     const el = d3.select(this);
-    if (d.kind === 'file') {
-      el.append('rect')
-        .attr('width', 16).attr('height', 10).attr('x', -8).attr('y', -5)
-        .attr('rx', 2).attr('fill', colors.file).attr('stroke', '#30363d');
+    const isCenter = center && d.name===center;
+    if (d.kind==='file') {
+      el.append('rect').attr('width',14).attr('height',9).attr('x',-7).attr('y',-4.5)
+        .attr('rx',2).attr('fill',C.file).attr('stroke','#30363d').attr('stroke-width',1);
     } else {
-      const isCenter = center && d.name === center;
-      const r = isCenter ? 10 : (d.kind === 'sibling' ? 5 : 7);
-      el.append('circle')
-        .attr('r', r)
-        .attr('fill', colors[d.kind] || colors.function)
-        .attr('stroke', isCenter ? '#f0f6fc' : '#30363d');
+      const r = isCenter ? 11 : (d.kind==='sibling'?4:6);
+      const color = C[d.kind] || layerColors[d.layer] || C.function;
+      el.append('circle').attr('r',r).attr('fill',color)
+        .attr('stroke',isCenter?'#f0f6fc':'#30363d').attr('stroke-width',isCenter?2:1);
+      if (isCenter) el.select('circle').attr('filter','url(#glow)');
     }
   });
 
   // Labels
-  node.append('text').attr('dx', d => d.kind === 'file' ? 12 : 10).attr('dy', 3)
-    .text(d => d.kind === 'file' ? shortPath(d.name) : d.name);
+  node.append('text').attr('dx',d=>d.kind==='file'?10:9).attr('dy',3)
+    .text(d=>d.kind==='file'?shortPath(d.name):d.name)
+    .style('font-size',d=>(center&&d.name===center)?'10px':'8px')
+    .style('fill',d=>(center&&d.name===center)?'#f0f6fc':'#8b949e');
 
   // Tooltip
-  node.on('mouseover', (e, d) => {
-    tooltip.style('display', 'block');
+  node.on('mouseover',(e,d)=>{
+    tooltip.style('display','block');
     tooltip.select('.tt-name').text(d.name);
-    tooltip.select('.tt-file').text(d.file_path || '');
-    const kindEl = tooltip.select('.tt-kind');
-    kindEl.text(d.kind).style('background', (colors[d.kind] || '#21262d') + '33').style('color', colors[d.kind] || '#c9d1d9');
+    tooltip.select('.tt-file').text(d.file_path||'');
+    const badge = tooltip.select('.tt-badge');
+    badge.text(`${d.kind} / ${d.layer}`).style('background',(layerColors[d.layer]||'#21262d')+'33').style('color',layerColors[d.layer]||'#c9d1d9');
   })
-  .on('mousemove', e => tooltip.style('left', (e.pageX+14)+'px').style('top', (e.pageY-14)+'px'))
-  .on('mouseout', () => tooltip.style('display', 'none'));
+  .on('mousemove',e=>tooltip.style('left',(e.pageX+12)+'px').style('top',(e.pageY-12)+'px'))
+  .on('mouseout',()=>tooltip.style('display','none'));
 
-  // Click: open sidebar or navigate
-  node.on('click', (e, d) => {
-    if (d.kind === 'file') {
-      // Show file in sidebar
-      openSidebar(d);
-    } else {
-      // Navigate to this entity
-      searchInput.value = d.name;
-      loadGraph(d.name);
-      openSidebar(d);
-    }
+  // Click
+  node.on('click',(e,d)=>{
+    if (d.kind!=='file') { searchInput.value=d.name; loadGraph(d.name); }
+    openSidebar(d);
   });
 
   // Simulation
   simulation = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(edges).id(d => d.id).distance(d => d.kind === 'same_file' ? 50 : 100))
-    .force('charge', d3.forceManyBody().strength(d => d.name === center ? -400 : -150))
-    .force('center', d3.forceCenter(width/2, height/2))
-    .force('collision', d3.forceCollide(22))
-    .on('tick', () => {
-      link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-          .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    .force('link',d3.forceLink(edges).id(d=>d.id).distance(d=>d.kind==='same_file'?40:90))
+    .force('charge',d3.forceManyBody().strength(d=>d.name===center?-500:-120))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(18))
+    .force('x',d3.forceX(W/2).strength(.02))
+    .force('y',d3.forceY(H/2).strength(.02))
+    .on('tick',()=>{
+      link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      node.attr('transform',d=>`translate(${d.x},${d.y})`);
     });
 
-  // Drag
   node.call(d3.drag()
-    .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
-    .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+    .on('start',(e,d)=>{if(!e.active)simulation.alphaTarget(.3).restart();d.fx=d.x;d.fy=d.y;})
+    .on('drag',(e,d)=>{d.fx=e.x;d.fy=e.y;})
+    .on('end',(e,d)=>{if(!e.active)simulation.alphaTarget(0);d.fx=null;d.fy=null;}));
 
-  // Auto-open sidebar for center
-  if (center) {
-    const centerNode = nodes.find(n => n.name === center);
-    if (centerNode) openSidebar(centerNode);
-  }
+  if (center) { const cn=nodes.find(n=>n.name===center); if(cn) openSidebar(cn); }
+
+  // Minimap
+  setTimeout(()=>updateMinimap(),1500);
 }
 
-function shortPath(p) {
-  const parts = p.split('/');
-  return parts.length > 2 ? '.../' + parts.slice(-2).join('/') : p;
+function shortPath(p) { const s=p.split('/'); return s.length>2?'...'+'/'+s.slice(-2).join('/'):p; }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// === Minimap ===
+function updateMinimap() {
+  const canvas = document.getElementById('minimap');
+  if (!canvas || !simulation) return;
+  const ctx = canvas.getContext('2d');
+  const nodes = simulation.nodes();
+  if (!nodes.length) return;
+
+  canvas.width = 150; canvas.height = 100;
+  ctx.fillStyle = '#161b22'; ctx.fillRect(0,0,150,100);
+
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  nodes.forEach(n=>{if(n.x<minX)minX=n.x;if(n.x>maxX)maxX=n.x;if(n.y<minY)minY=n.y;if(n.y>maxY)maxY=n.y;});
+  const pad=20, rW=maxX-minX+pad*2, rH=maxY-minY+pad*2;
+  const scale = Math.min(140/rW, 90/rH);
+
+  nodes.forEach(n=>{
+    const x=(n.x-minX+pad)*scale+5, y=(n.y-minY+pad)*scale+5;
+    ctx.fillStyle = C[n.kind] || layerColors[n.layer] || '#484f58';
+    ctx.beginPath(); ctx.arc(x,y,1.5,0,Math.PI*2); ctx.fill();
+  });
 }
 
 // === Sidebar ===
@@ -321,86 +346,86 @@ function openSidebar(d) {
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sb-title').textContent = d.name;
 
-  let html = '';
-
-  // Type badge
-  html += `<div class="sb-section">
-    <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:${(colors[d.kind]||'#21262d')}22;color:${colors[d.kind]||'#c9d1d9'}">${d.kind}</span>
+  const lc = layerColors[d.layer]||'#21262d';
+  let h = `<div class="sb-section">
+    <span class="sb-badge" style="background:${(C[d.kind]||'#21262d')}22;color:${C[d.kind]||'#c9d1d9'}">${d.kind}</span>
+    <span class="sb-badge" style="background:${lc}22;color:${lc};margin-left:4px">${d.layer} layer</span>
   </div>`;
 
-  // File path
-  if (d.file_path) {
-    html += `<div class="sb-section">
-      <h3>File</h3>
-      <div class="sb-value">${d.file_path}</div>
-    </div>`;
-  }
+  if (d.file_path) h += `<div class="sb-section"><h3>File</h3><div style="color:var(--text);word-break:break-all">${esc(d.file_path)}</div></div>`;
 
-  // Signature (fetch from API)
-  if (d.kind === 'function' || d.kind === 'caller' || d.kind === 'callee' || d.kind === 'sibling') {
-    html += `<div class="sb-section" id="sb-signature"><h3>Signature</h3><div class="sb-label">Loading...</div></div>`;
-    html += `<div class="sb-section" id="sb-callers"><h3>Callers</h3><div class="sb-label">Loading...</div></div>`;
-    html += `<div class="sb-section" id="sb-callees"><h3>Callees</h3><div class="sb-label">Loading...</div></div>`;
-    fetchEntityDetails(d.name);
+  if (['function','caller','callee','sibling'].includes(d.kind)) {
+    h += `<div class="sb-section" id="sb-sig"><h3>Signature</h3><div style="color:var(--text-dim)">Loading...</div></div>`;
+    h += `<div class="sb-section" id="sb-callers"><h3>Called By</h3><div style="color:var(--text-dim)">Loading...</div></div>`;
+    h += `<div class="sb-section" id="sb-callees"><h3>Calls</h3><div style="color:var(--text-dim)">Loading...</div></div>`;
+    fetchDetails(d.name);
   }
-
-  document.getElementById('sidebar-content').innerHTML = html;
+  document.getElementById('sb-content').innerHTML = h;
 }
 
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
-}
+function closeSidebar() { document.getElementById('sidebar').classList.remove('open'); }
 
-async function fetchEntityDetails(name) {
+async function fetchDetails(name) {
+  const safe = name.replace(/'/g,'');
   try {
-    // Signature
-    const sigRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT signature, start_line, end_line FROM \`function\` WHERE name = '${name.replace(/'/g, "")}' LIMIT 1`)}`);
-    const sigData = await sigRes.json();
-    const sigEl = document.getElementById('sb-signature');
-    if (sigEl && sigData.length && sigData[0].signature) {
-      sigEl.innerHTML = `<h3>Signature</h3><div class="sb-sig">${escHtml(sigData[0].signature)}</div>
-        <div class="sb-label" style="margin-top:4px">Lines ${sigData[0].start_line}–${sigData[0].end_line} (${sigData[0].end_line - sigData[0].start_line} lines)</div>`;
-    } else if (sigEl) {
-      sigEl.innerHTML = '<h3>Signature</h3><div class="sb-label">—</div>';
+    const [sigR, callerR, calleeR] = await Promise.all([
+      fetch(`/api/query?q=${encodeURIComponent(`SELECT signature,start_line,end_line FROM \`function\` WHERE name='${safe}' LIMIT 1`)}`),
+      fetch(`/api/query?q=${encodeURIComponent(`SELECT <-calls<-\`function\`.{name,file_path} AS callers FROM \`function\` WHERE name='${safe}'`)}`),
+      fetch(`/api/query?q=${encodeURIComponent(`SELECT ->calls->\`function\`.{name,file_path} AS callees FROM \`function\` WHERE name='${safe}'`)}`)
+    ]);
+    const [sig,caller,callee] = await Promise.all([sigR.json(),callerR.json(),calleeR.json()]);
+
+    const sigEl = document.getElementById('sb-sig');
+    if (sigEl) {
+      if (sig[0]?.signature) {
+        sigEl.innerHTML = `<h3>Signature</h3><div class="sb-sig">${esc(sig[0].signature)}</div>
+          <div style="color:var(--text-dim);font-size:10px;margin-top:3px">Lines ${sig[0].start_line}-${sig[0].end_line} (${sig[0].end_line-sig[0].start_line} lines)</div>`;
+      } else sigEl.innerHTML = '<h3>Signature</h3><div style="color:var(--text-dim)">-</div>';
     }
 
-    // Callers
-    const callerRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT <-calls<-\`function\`.{name, file_path} AS callers FROM \`function\` WHERE name = '${name.replace(/'/g, "")}'`)}`);
-    const callerData = await callerRes.json();
-    const callerEl = document.getElementById('sb-callers');
-    if (callerEl) {
-      const callers = callerData[0]?.callers || [];
-      if (callers.length) {
-        callerEl.innerHTML = `<h3>Called By (${callers.length})</h3><ul class="sb-list">${callers.map(c =>
-          `<li onclick="selectSearchResult('${(c.name||'').replace(/'/g,"\\'")}')"> ${c.name} <span style="color:#8b949e;font-size:10px">${shortPath(c.file_path||'')}</span></li>`
+    const renderList = (el,items,label) => {
+      if (!el) return;
+      if (items?.length) {
+        el.innerHTML = `<h3>${label} (${items.length})</h3><ul class="sb-list">${items.map(c=>
+          `<li onclick="nav('${(c.name||'').replace(/'/g,"\\'")}')"> ${esc(c.name||'?')} <span class="dim">${shortPath(c.file_path||'')}</span></li>`
         ).join('')}</ul>`;
-      } else {
-        callerEl.innerHTML = '<h3>Called By</h3><div class="sb-label">None</div>';
-      }
-    }
-
-    // Callees
-    const calleeRes = await fetch(`/api/query?q=${encodeURIComponent(`SELECT ->calls->\`function\`.{name, file_path} AS callees FROM \`function\` WHERE name = '${name.replace(/'/g, "")}'`)}`);
-    const calleeData = await calleeRes.json();
-    const calleeEl = document.getElementById('sb-callees');
-    if (calleeEl) {
-      const callees = calleeData[0]?.callees || [];
-      if (callees.length) {
-        calleeEl.innerHTML = `<h3>Calls (${callees.length})</h3><ul class="sb-list">${callees.map(c =>
-          `<li onclick="selectSearchResult('${(c.name||'').replace(/'/g,"\\'")}')"> ${c.name} <span style="color:#8b949e;font-size:10px">${shortPath(c.file_path||'')}</span></li>`
-        ).join('')}</ul>`;
-      } else {
-        calleeEl.innerHTML = '<h3>Calls</h3><div class="sb-label">None</div>';
-      }
-    }
-  } catch(e) { console.error('Detail fetch error:', e); }
+      } else el.innerHTML = `<h3>${label}</h3><div style="color:var(--text-dim)">None</div>`;
+    };
+    renderList(document.getElementById('sb-callers'), caller[0]?.callers, 'Called By');
+    renderList(document.getElementById('sb-callees'), callee[0]?.callees, 'Calls');
+  } catch(e) {}
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// === View toggle ===
+function setView(v) {
+  currentView = v;
+  document.querySelectorAll('.vt-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===v));
+  if (v==='table') loadTable();
+  else { document.getElementById('graph-container').innerHTML='<div id="loading">Loading graph...</div><div id="legend"></div><canvas id="minimap"></canvas>'; loadGraph(currentCenter); }
 }
 
-// === Init ===
+async function loadTable() {
+  const container = document.getElementById('graph-container');
+  container.innerHTML = '<div style="padding:14px;overflow:auto;height:100%"><table id="fn-table" style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid #30363d;text-align:left"><th style="padding:6px">Name</th><th>File</th><th>Lines</th><th>Layer</th></tr></thead><tbody></tbody></table></div>';
+  try {
+    const r = await fetch('/api/search?q=');
+    // Get all functions via raw query
+    const r2 = await fetch(`/api/query?q=${encodeURIComponent("SELECT name,file_path,start_line,end_line,(end_line-start_line) AS size FROM `function` ORDER BY size DESC LIMIT 100")}`);
+    const data = await r2.json();
+    const tbody = document.querySelector('#fn-table tbody');
+    tbody.innerHTML = data.map(d => {
+      const layer = detectLayer(d.name, d.file_path||'');
+      return `<tr style="border-bottom:1px solid #21262d;cursor:pointer" onclick="nav('${(d.name||'').replace(/'/g,"\\'")}')">
+        <td style="padding:5px;color:#58a6ff;font-weight:600">${esc(d.name||'?')}</td>
+        <td style="color:#8b949e">${esc(d.file_path||'')}</td>
+        <td>${d.size||0}</td>
+        <td><span style="color:${layerColors[layer]}">${layer}</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e) { container.innerHTML = '<div style="padding:20px;color:#f78166">Error loading table</div>'; }
+}
+
+// Init
 loadStats();
 loadGraph();
 </script>
