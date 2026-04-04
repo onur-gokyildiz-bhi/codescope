@@ -5,7 +5,7 @@ use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 
 /// Shared daemon state — manages DB connections for all projects.
-/// Each project gets its own SurrealKv directory under ~/.codescope/db/<repo>/.
+/// Each project gets its own RocksDB directory under ~/.codescope/db/<repo>/.
 pub struct DaemonState {
     dbs: tokio::sync::RwLock<HashMap<String, Surreal<Db>>>,
     base_db_path: PathBuf,
@@ -24,7 +24,7 @@ impl DaemonState {
     }
 
     /// Get or create a DB connection for a repo.
-    /// Each repo has its own SurrealKv directory — no lock contention.
+    /// Each repo has its own RocksDB directory — no lock contention.
     pub async fn get_db(&self, repo_name: &str) -> Result<Surreal<Db>> {
         // Check cache first
         {
@@ -42,7 +42,7 @@ impl DaemonState {
 
         tracing::info!("Opening DB for repo '{}' at {}", repo_name, db_path.display());
 
-        let db = Surreal::new::<surrealdb::engine::local::SurrealKv>(
+        let db = Surreal::new::<surrealdb::engine::local::RocksDb>(
             db_path.to_string_lossy().as_ref(),
         )
         .await?;

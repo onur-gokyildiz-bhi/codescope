@@ -169,7 +169,7 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
         db_path.to_string_lossy().as_ref(),
     )
     .await {
@@ -248,18 +248,13 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             .await
             .unwrap_or_default();
 
-            // Phase 2: Cross-file buffered insert (async DB operations)
-            // Accumulate across files for fewer, larger DB round-trips
-            let mut all_entities = Vec::with_capacity(results.len() * 10);
-            let mut all_relations = Vec::with_capacity(results.len() * 15);
+            // Phase 2: Per-file insert (BATCH_SIZE=200 optimizes within each file)
             let mut file_count = 0;
             for (entities, relations) in results {
-                all_entities.extend(entities);
-                all_relations.extend(relations);
+                let _ = builder.insert_entities(&entities).await;
+                let _ = builder.insert_relations(&relations).await;
                 file_count += 1;
             }
-            let _ = builder.insert_entities(&all_entities).await;
-            let _ = builder.insert_relations(&all_relations).await;
 
             tracing::info!("Background indexing complete: {} files", file_count);
 

@@ -430,18 +430,21 @@ fn escape_table(name: &str) -> String {
 }
 
 /// Sanitize a string to be a valid SurrealDB record ID.
-/// Replaces all special characters with underscores, collapses doubles,
-/// and trims leading/trailing underscores.
+/// Only allows ASCII alphanumeric + underscore. All other characters
+/// (including Unicode like em-dash, Turkish ö/ı/ü, CJK, etc.) are
+/// replaced with underscores. Collapses runs and trims edges.
 fn sanitize_id(s: &str) -> String {
-    s.replace(
-        [
-            '/', '\\', ':', '.', ' ', '<', '>', '"', '\'', '(', ')', ',', ';', '{', '}', '[',
-            ']', '-', '`', '~', '!', '@', '#', '$', '%', '^', '&', '*', '+', '=', '|', '?',
-        ],
-        "_",
-    )
-    .replace("__", "_")
-    .replace("__", "_") // Second pass for triple underscores
-    .trim_matches('_')
-    .to_string()
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            result.push(c);
+        } else {
+            result.push('_');
+        }
+    }
+    // Collapse consecutive underscores
+    while result.contains("__") {
+        result = result.replace("__", "_");
+    }
+    result.trim_matches('_').to_string()
 }

@@ -233,18 +233,18 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
         std::fs::create_dir_all(parent)?;
     }
 
-    // Migrate from old RocksDB format if needed
-    if path.join("CURRENT").exists() || path.join("LOCK").exists() {
-        let backup = path.with_extension("rocksdb.bak");
+    // Migrate from SurrealKV format if needed (clog/manifest dirs)
+    if path.join("clog").exists() || path.join("manifest").exists() {
+        let backup = path.with_extension("surrealkv.bak");
         eprintln!(
-            "⚠ Old RocksDB data detected at {}.\n  Moving to {} — will re-index with SurrealKV.",
+            "⚠ Old SurrealKV data detected at {}.\n  Moving to {} — will re-index with RocksDB.",
             path.display(), backup.display()
         );
         let _ = std::fs::rename(&path, &backup);
         std::fs::create_dir_all(&path)?;
     }
 
-    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
         path.to_string_lossy().as_ref()
     ).await {
         Ok(db) => db,
@@ -384,17 +384,14 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
         parse_start.elapsed().as_secs_f64()
     );
 
-    // Phase 4: Cross-file buffered insert into DB
-    // Accumulate entities/relations across files and flush in large batches
-    // for ~4x throughput improvement over per-file inserts.
-    const FLUSH_THRESHOLD: usize = 500;
+    // Phase 4: Insert results into DB per-file (BATCH_SIZE=200 optimizes within each file)
+    // Note: cross-file buffering was tested but SurrealKV WAL doesn't reliably
+    // persist large burst writes on process exit. Per-file inserts are safer.
     let insert_start = Instant::now();
     let mut total_entities = 0usize;
     let mut total_relations = 0usize;
     let mut files_processed = 0usize;
     let mut errors = Vec::new();
-    let mut entity_buf: Vec<codescope_core::CodeEntity> = Vec::with_capacity(FLUSH_THRESHOLD);
-    let mut relation_buf: Vec<codescope_core::CodeRelation> = Vec::with_capacity(FLUSH_THRESHOLD);
 
     for (rel_path, result) in results {
         match result {
@@ -404,21 +401,15 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
                     let _ = builder.delete_file_entities(&rel_path, repo_name).await;
                 }
 
-                total_entities += entities.len();
-                total_relations += relations.len();
-                entity_buf.extend(entities);
-                relation_buf.extend(relations);
-                files_processed += 1;
+                let ent_count = entities.len();
+                let rel_count = relations.len();
 
-                // Flush when buffer is large enough
-                if entity_buf.len() >= FLUSH_THRESHOLD {
-                    builder.insert_entities(&entity_buf).await?;
-                    entity_buf.clear();
-                }
-                if relation_buf.len() >= FLUSH_THRESHOLD {
-                    builder.insert_relations(&relation_buf).await?;
-                    relation_buf.clear();
-                }
+                builder.insert_entities(&entities).await?;
+                builder.insert_relations(&relations).await?;
+
+                total_entities += ent_count;
+                total_relations += rel_count;
+                files_processed += 1;
 
                 if files_processed % 100 == 0 {
                     println!("  ... {} files indexed", files_processed);
@@ -428,14 +419,6 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
                 errors.push(format!("{}: {}", rel_path, e));
             }
         }
-    }
-
-    // Flush remaining buffered items
-    if !entity_buf.is_empty() {
-        builder.insert_entities(&entity_buf).await?;
-    }
-    if !relation_buf.is_empty() {
-        builder.insert_relations(&relation_buf).await?;
     }
 
     let total_time = start_time.elapsed();
@@ -465,6 +448,19 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
             println!("    ... and {} more", errors.len() - 10);
         }
     }
+
+    // Verify data was actually persisted
+    let verify: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM file GROUP ALL")
+        .await?
+        .take(0)
+        .unwrap_or_default();
+    let db_file_count = verify
+        .first()
+        .and_then(|v| v.get("count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    println!("  DB verify:          {} files in DB", db_file_count);
 
     Ok(())
 }
