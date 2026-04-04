@@ -64,7 +64,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.target }}-release-
 
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} -p codescope -p codescope-mcp
+        run: cargo build --release --target ${{ matrix.target }} -p codescope -p codescope-mcp -p codescope-web
         env:
           RUST_MIN_STACK: "16777216"
 
@@ -74,6 +74,7 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/codescope dist/
           cp target/${{ matrix.target }}/release/codescope-mcp dist/
+          cp target/${{ matrix.target }}/release/codescope-web dist/
           cp README.md LICENSE dist/
           cd dist
           tar czf ../codescope-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
@@ -85,6 +86,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "target/${{ matrix.target }}/release/codescope.exe" dist/
           Copy-Item "target/${{ matrix.target }}/release/codescope-mcp.exe" dist/
+          Copy-Item "target/${{ matrix.target }}/release/codescope-web.exe" dist/
           Copy-Item README.md dist/
           Copy-Item LICENSE dist/
           Compress-Archive -Path dist/* -DestinationPath "codescope-${{ github.ref_name }}-${{ matrix.target }}.zip"
@@ -119,10 +121,11 @@ jobs:
           Rust-native code intelligence engine powered by SurrealDB knowledge graphs.
 
           ### What's included
-          - **codescope** — CLI tool for indexing and querying code
-          - **codescope-mcp** — MCP server for AI agent integration (Cursor, Claude Code, etc.)
+          - **codescope** — CLI: index, search, query, init, install
+          - **codescope-mcp** — MCP server for AI agents (Claude Code, Cursor, Zed, etc.)
+          - **codescope-web** — Web UI with interactive graph visualization
 
-          ### Installation
+          ### One-line install
 
           **Windows (PowerShell):**
           ```powershell
@@ -134,21 +137,19 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
           ```
 
-          **Manual download:** Download the archive for your platform below, extract, and add to PATH.
+          ### Quick Start
+          ```bash
+          cd your-project
+          codescope init          # creates .mcp.json + indexes codebase
+          # That's it! Claude Code now has 36 code intelligence tools.
+          ```
 
           ### Supported Platforms
           | Platform | Archive |
           |----------|---------|
           | Windows x64 | `codescope-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip` |
           | Linux x64 | `codescope-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
-          | macOS ARM (Apple Silicon) | `codescope-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
-
-          ### Quick Start
-          ```bash
-          codescope index ./my-project --repo my-project
-          codescope search "handleRequest"
-          codescope stats
-          ```
+          | macOS ARM | `codescope-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
           NOTES
 
       - name: Create Release

@@ -842,9 +842,11 @@ fn cmd_install() -> Result<()> {
         .map(|p| p.to_path_buf());
 
     let install_dir = if cfg!(windows) {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".local")
+        // Match install.ps1: %LOCALAPPDATA%\codescope\bin
+        std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("AppData").join("Local"))
+            .join("codescope")
             .join("bin")
     } else {
         dirs::home_dir()
@@ -905,7 +907,14 @@ fn cmd_install() -> Result<()> {
 fn find_mcp_binary() -> Option<PathBuf> {
     let exe_name = if cfg!(windows) { "codescope-mcp.exe" } else { "codescope-mcp" };
 
-    // Check ~/.local/bin
+    // Check platform-specific install dir
+    if cfg!(windows) {
+        let win_path = std::env::var("LOCALAPPDATA").ok()
+            .map(|d| PathBuf::from(d).join("codescope").join("bin").join(exe_name));
+        if let Some(ref p) = win_path {
+            if p.exists() { return Some(p.clone()); }
+        }
+    }
     let local_bin = dirs::home_dir()
         .map(|h| h.join(".local").join("bin").join(exe_name));
     if let Some(ref p) = local_bin {

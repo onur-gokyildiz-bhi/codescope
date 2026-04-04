@@ -69,10 +69,12 @@ tar xzf "$TEMP_DIR/$ARCHIVE" -C "$TEMP_DIR"
 
 # Install
 mkdir -p "$INSTALL_DIR"
-cp "$TEMP_DIR/codescope" "$INSTALL_DIR/codescope"
-cp "$TEMP_DIR/codescope-mcp" "$INSTALL_DIR/codescope-mcp"
-chmod +x "$INSTALL_DIR/codescope"
-chmod +x "$INSTALL_DIR/codescope-mcp"
+for bin in codescope codescope-mcp codescope-web; do
+    if [ -f "$TEMP_DIR/$bin" ]; then
+        cp "$TEMP_DIR/$bin" "$INSTALL_DIR/$bin"
+        chmod +x "$INSTALL_DIR/$bin"
+    fi
+done
 
 # Check PATH
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -120,12 +122,12 @@ echo ""
 echo "  Installed:"
 echo "    codescope     -> $INSTALL_DIR/codescope"
 echo "    codescope-mcp -> $INSTALL_DIR/codescope-mcp"
+echo "    codescope-web -> $INSTALL_DIR/codescope-web"
 echo ""
 echo "  Quick start:"
-echo "    codescope index ./my-project --repo my-project"
-echo "    codescope search \"handleRequest\""
-echo "    codescope stats"
+echo "    cd your-project"
+echo "    codescope init        # indexes + sets up MCP for Claude Code"
 echo ""
-echo "  MCP server (for Cursor/Claude Code):"
-echo "    codescope-mcp ./my-project --auto-index"
+echo "  That's it! Open the project in Claude Code and"
+echo "  Codescope starts automatically with 36 MCP tools."
 echo ""

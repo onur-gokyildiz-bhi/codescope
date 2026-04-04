@@ -63,8 +63,12 @@ if (Test-Path $tempExtract) { Remove-Item -Recurse -Force $tempExtract }
 Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
 
 # Copy binaries
-Copy-Item "$tempExtract\codescope.exe" "$INSTALL_DIR\codescope.exe" -Force
-Copy-Item "$tempExtract\codescope-mcp.exe" "$INSTALL_DIR\codescope-mcp.exe" -Force
+foreach ($bin in @("codescope.exe", "codescope-mcp.exe", "codescope-web.exe")) {
+    $src = Join-Path $tempExtract $bin
+    if (Test-Path $src) {
+        Copy-Item $src "$INSTALL_DIR\$bin" -Force
+    }
+}
 
 # Cleanup
 Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
@@ -88,14 +92,14 @@ Write-Host ""
 Write-Host "  Installed:" -ForegroundColor Cyan
 Write-Host "    codescope.exe     -> $INSTALL_DIR\codescope.exe"
 Write-Host "    codescope-mcp.exe -> $INSTALL_DIR\codescope-mcp.exe"
+Write-Host "    codescope-web.exe -> $INSTALL_DIR\codescope-web.exe"
 Write-Host ""
 Write-Host "  Quick start:" -ForegroundColor Cyan
-Write-Host "    codescope index .\my-project --repo my-project"
-Write-Host "    codescope search `"handleRequest`""
-Write-Host "    codescope stats"
+Write-Host "    cd your-project"
+Write-Host "    codescope init"
 Write-Host ""
-Write-Host "  MCP server (for Cursor/Claude Code):" -ForegroundColor Cyan
-Write-Host "    codescope-mcp .\my-project --auto-index"
+Write-Host "  That's it! Open the project in Claude Code and" -ForegroundColor Green
+Write-Host "  Codescope starts automatically with 36 MCP tools." -ForegroundColor Green
 Write-Host ""
 Write-Host "  NOTE: Restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
 Write-Host ""
