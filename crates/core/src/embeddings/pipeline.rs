@@ -171,6 +171,96 @@ impl EmbeddingPipeline {
         Ok(count)
     }
 
+    /// Filtered semantic search — combines structured SurrealDB WHERE clause with BQ+cosine reranking.
+    /// Pass an optional extra_where clause like "AND file_path CONTAINS 'src/graph/'" to narrow candidates.
+    pub async fn filtered_semantic_search(
+        &self,
+        query: &str,
+        limit: usize,
+        extra_where: Option<&str>,
+    ) -> Result<Vec<SemanticSearchResult>> {
+        let query_embedding = self.provider.embed(query).await?;
+        let query_bq = binary_quantize(&query_embedding);
+
+        let where_clause = extra_where.unwrap_or("");
+
+        // Load binary embeddings with optional filter
+        let q = format!(
+            "SELECT id, name, qualified_name, signature, file_path, start_line, end_line, binary_embedding \
+             FROM `function` WHERE binary_embedding IS NOT NONE {}",
+            where_clause
+        );
+        let candidates: Vec<BQRecord> = self.db.query(&q).await?.take(0)?;
+
+        if candidates.is_empty() {
+            // Fallback: try cosine-only search
+            return self.cosine_only_search(&query_embedding, limit).await;
+        }
+
+        // Same BQ + cosine 2-stage as regular search
+        let rerank_k = (limit * 5).max(50).min(candidates.len());
+        let mut scored: Vec<(usize, u32)> = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let bq_bytes: Vec<u8> = c.binary_embedding.iter().map(|&v| v as u8).collect();
+                (i, hamming_distance(&query_bq, &bq_bytes))
+            })
+            .collect();
+
+        scored.sort_unstable_by_key(|&(_, dist)| dist);
+        scored.truncate(rerank_k);
+
+        debug!(
+            "Filtered BQ search: {} candidates → top {} (filter: {})",
+            candidates.len(), scored.len(), where_clause
+        );
+
+        // Load full f32 embeddings for top candidates and rerank by cosine similarity
+        let candidate_ids: Vec<String> = scored.iter()
+            .map(|&(i, _)| candidates[i].id.to_string())
+            .collect();
+        let id_list = candidate_ids.iter()
+            .map(|id| format!("function:{}", id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let q2 = format!(
+            "SELECT id, embedding FROM `function` WHERE id IN [{}]", id_list
+        );
+        let full_records: Vec<FullEmbeddingRecord> = self.db.query(&q2).await?.take(0)?;
+
+        // Build a map of id → embedding for fast lookup
+        let emb_map: std::collections::HashMap<String, &Vec<f32>> = full_records.iter()
+            .map(|r| (r.id.to_string(), &r.embedding))
+            .collect();
+
+        let mut results: Vec<(SemanticSearchResult, f64)> = Vec::new();
+        for &(cand_idx, hamming) in scored.iter() {
+            let c = &candidates[cand_idx];
+            if let Some(emb) = emb_map.get(&c.id.to_string()) {
+                let score = cosine_similarity(&query_embedding, emb) as f64;
+                results.push((
+                    SemanticSearchResult {
+                        name: c.name.clone(),
+                        qualified_name: c.qualified_name.clone(),
+                        signature: c.signature.clone(),
+                        file_path: c.file_path.clone(),
+                        start_line: c.start_line,
+                        end_line: c.end_line,
+                        score: Some(score),
+                        hamming_distance: Some(hamming),
+                    },
+                    score,
+                ));
+            }
+            if results.len() >= limit * 2 { break; }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+        Ok(results.into_iter().map(|(r, _)| r).collect())
+    }
+
     /// Two-stage semantic search using Binary Quantization.
     ///
     /// Stage 1 (Coarse): Load all binary embeddings, compute Hamming distance in Rust.

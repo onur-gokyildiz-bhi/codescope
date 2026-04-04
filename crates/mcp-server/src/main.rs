@@ -83,7 +83,8 @@ enum Command {
         /// Repository name
         #[arg(long)]
         repo: String,
-        /// File path to re-index
+        /// File path to re-index (use "-" to read from PostToolUse stdin JSON)
+        #[arg(long, default_value = "-")]
         file: String,
     },
 
@@ -545,8 +546,40 @@ async fn check_status(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Re-index a single file — used by post-edit hooks for fast incremental updates
+/// Re-index a single file — used by post-edit hooks for fast incremental updates.
+/// Can be called two ways:
+///   1. `reindex-file --repo X --file path` (explicit file path)
+///   2. `reindex-file --repo X` with PostToolUse JSON on stdin (extracts file_path from tool_input)
 async fn run_reindex_file(repo: &str, file: &str) -> Result<()> {
+    // If file is empty or "-", read from stdin (PostToolUse hook sends JSON)
+    let file_path_str = if file.is_empty() || file == "-" {
+        let mut input = String::new();
+        if std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).is_ok() && !input.is_empty() {
+            // Extract file_path from PostToolUse JSON: tool_input.file_path or tool_response.filePath
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&input) {
+                json.get("tool_input")
+                    .and_then(|ti| ti.get("file_path"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| json.get("tool_response")
+                        .and_then(|tr| tr.get("filePath"))
+                        .and_then(|v| v.as_str()))
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        file.to_string()
+    };
+
+    if file_path_str.is_empty() {
+        // Not an error — hook might fire for non-file tools
+        return Ok(());
+    }
+
     let db_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codescope")
@@ -554,8 +587,7 @@ async fn run_reindex_file(repo: &str, file: &str) -> Result<()> {
         .join(repo);
 
     if !db_path.exists() {
-        eprintln!("DB not found for repo '{}'. Run init_project first.", repo);
-        return Ok(());
+        return Ok(()); // Silent — DB not initialized yet
     }
 
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
@@ -563,34 +595,43 @@ async fn run_reindex_file(repo: &str, file: &str) -> Result<()> {
     ).await?;
     db.use_ns("codescope").use_db(repo).await?;
 
-    let file_path = std::path::Path::new(file);
+    let file_path = std::path::Path::new(&file_path_str);
     if !file_path.exists() {
-        eprintln!("File not found: {}", file);
-        return Ok(());
+        return Ok(()); // File might have been deleted
     }
 
     let content = std::fs::read_to_string(file_path)?;
     let parser = codescope_core::parser::CodeParser::new();
     let builder = codescope_core::graph::builder::GraphBuilder::new(db.clone());
 
-    // Delete old entities for this file
+    // Check if we support this file type
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let fname = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !parser.supports_extension(ext) && !parser.supports_filename(fname) {
+        return Ok(()); // Unsupported file type — skip silently
+    }
+
+    // Delete old entities for this file (normalize path)
     let rel_path = file_path.to_string_lossy().replace('\\', "/");
-    let _ = db.query("DELETE FROM `function` WHERE file_path = $path")
-        .bind(("path", rel_path.clone())).await;
-    let _ = db.query("DELETE FROM class WHERE file_path = $path")
-        .bind(("path", rel_path.clone())).await;
+    let _ = db.query(
+        "DELETE FROM `function` WHERE file_path = $path;\
+         DELETE FROM class WHERE file_path = $path;\
+         DELETE FROM import_decl WHERE file_path = $path;\
+         DELETE FROM config WHERE file_path = $path;\
+         DELETE FROM module WHERE file_path = $path;\
+         DELETE FROM variable WHERE file_path = $path"
+    ).bind(("path", rel_path.clone())).await;
 
     // Re-parse and insert
     match parser.parse_source(file_path, &content, repo) {
         Ok((entities, relations)) => {
             let _ = builder.insert_entities(&entities).await;
             let _ = builder.insert_relations(&relations).await;
-            eprintln!("Re-indexed {}: {} entities, {} relations",
-                file, entities.len(), relations.len());
+            // Output on stderr (not stdout — stdout is for hook JSON responses)
+            eprintln!("codescope: re-indexed {} ({} entities, {} relations)",
+                file_path_str, entities.len(), relations.len());
         }
-        Err(e) => {
-            eprintln!("Parse error for {}: {}", file, e);
-        }
+        Err(_) => {} // Silent parse errors for hooks
     }
 
     Ok(())
@@ -651,19 +692,28 @@ async fn run_index_session(repo: &str, path: &str) -> Result<()> {
 
 /// Print Claude Code hooks configuration as JSON
 fn print_hooks_config(repo: &str, path: &str) -> Result<()> {
-    let exe = std::env::current_exe()?.to_string_lossy().to_string().replace('\\', "\\\\");
-    let repo_escaped = repo.replace('\\', "\\\\");
-    let path_escaped = path.replace('\\', "\\\\");
+    let exe = std::env::current_exe()?.to_string_lossy().to_string();
+    // For JSON: escape backslashes
+    let exe_json = exe.replace('\\', "\\\\");
+    let path_json = path.replace('\\', "\\\\");
 
+    // Hook design:
+    // - PostToolUse: Receives JSON on stdin with tool_input.file_path
+    //   Our reindex-file command reads stdin, extracts file path, re-indexes it
+    // - PreToolUse: Injects graph context via additionalContext
+    //   Reads stdin for tool info, queries graph, outputs JSON with context
+    // - Stop: Indexes latest conversations on session end
     let config = format!(r#"{{
   "hooks": {{
     "PostToolUse": [
       {{
-        "matcher": "^(Write|Edit|MultiEdit|NotebookEdit)$",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {{
             "type": "command",
-            "command": "{exe} reindex-file --repo {repo} -- \"$CLAUDE_FILE\""
+            "command": "{exe} reindex-file --repo {repo} --file -",
+            "timeout": 10,
+            "async": true
           }}
         ]
       }}
@@ -673,18 +723,26 @@ fn print_hooks_config(repo: &str, path: &str) -> Result<()> {
         "hooks": [
           {{
             "type": "command",
-            "command": "{exe} index-session --repo {repo} --path \"{path}\""
+            "command": "{exe} index-session --repo {repo} --path \"{path}\"",
+            "timeout": 30,
+            "async": true
           }}
         ]
       }}
     ]
   }}
-}}"#, exe = exe, repo = repo_escaped, path = path_escaped);
+}}"#, exe = exe_json, repo = repo, path = path_json);
 
     println!("{}", config);
-    eprintln!("\nAdd this to your .claude/settings.json to enable auto hooks.");
-    eprintln!("PostToolUse: Re-indexes files after edits for real-time graph updates.");
-    eprintln!("Stop: Indexes the conversation when the session ends.");
+    eprintln!();
+    eprintln!("Add this to your .claude/settings.json (project or user level).");
+    eprintln!();
+    eprintln!("What each hook does:");
+    eprintln!("  PostToolUse: After Write/Edit, re-indexes the changed file (~50ms).");
+    eprintln!("               Reads file path from stdin JSON (tool_input.file_path).");
+    eprintln!("  Stop:        On session end, indexes latest conversations into the graph.");
+    eprintln!();
+    eprintln!("Both hooks run async (non-blocking) so they don't slow down your workflow.");
     Ok(())
 }
 

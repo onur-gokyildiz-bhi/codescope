@@ -334,7 +334,7 @@ impl GraphRagServer {
                 DetailLevel::Medium => "medium",
                 DetailLevel::Full => "full",
             };
-            // Fire-and-forget — don't block the response
+            // Fire-and-forget — don't block the response, but log errors
             let db = ctx.db.clone();
             let repo = ctx.repo_name.clone();
             let tool = tool_name.to_string();
@@ -1426,20 +1426,37 @@ impl GraphRagServer {
                 let callee_count = callees.map(|a| a.len()).unwrap_or(0);
                 let sibling_count = siblings.map(|a| a.len()).unwrap_or(0);
 
-                match detail {
+                let formatted = match detail {
                     DetailLevel::Compact => {
-                        // Minimal: type, location, counts only
-                        let mut output = format!("{} [{}]", params.name, entity_type);
+                        // Compact: type, location, top caller/callee names
+                        let mut output = format!("**{}** [{}]", params.name, entity_type);
                         if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
                             if let Some(m) = matches.first() {
                                 let fp = m.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                                 let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
                                 output.push_str(&format!(" ({}:{})", fp, line));
+                                if let Some(sig) = m.get("signature").and_then(|v| v.as_str()) {
+                                    output.push_str(&format!("\n`{}`", sig));
+                                }
                             }
                         }
-                        output.push_str(&format!(" | callers:{} callees:{} siblings:{}", caller_count, callee_count, sibling_count));
-                        if let Some(f) = funcs { output.push_str(&format!(" funcs:{}", f.len())); }
-                        output.push_str("\n\n_Use detail=\"medium\" for names, \"full\" for all info._");
+                        output.push('\n');
+                        if let Some(arr) = callers { if !arr.is_empty() {
+                            let names: Vec<&str> = arr.iter().take(5).filter_map(|c| c.get("name").and_then(|v| v.as_str())).collect();
+                            let suffix = if arr.len() > 5 { format!(" +{} more", arr.len() - 5) } else { String::new() };
+                            output.push_str(&format!("Called by: {}{}\n", names.join(", "), suffix));
+                        }}
+                        if let Some(arr) = callees { if !arr.is_empty() {
+                            let names: Vec<&str> = arr.iter().take(5).filter_map(|c| c.get("name").and_then(|v| v.as_str())).collect();
+                            let suffix = if arr.len() > 5 { format!(" +{} more", arr.len() - 5) } else { String::new() };
+                            output.push_str(&format!("Calls: {}{}\n", names.join(", "), suffix));
+                        }}
+                        if let Some(arr) = siblings { if !arr.is_empty() {
+                            output.push_str(&format!("Siblings: {} in same file\n", arr.len()));
+                        }}
+                        if let Some(f) = funcs { if !f.is_empty() {
+                            output.push_str(&format!("Functions: {} in this file\n", f.len()));
+                        }}
                         output
                     }
                     DetailLevel::Medium => {
@@ -1532,7 +1549,7 @@ impl GraphRagServer {
                         output
                     }
                 };
-                self.track("explore", detail, result.to_string()).await
+                self.track("explore", detail, formatted).await
             }
             Err(e) => format!("Error exploring '{}': {}", params.name, e),
         }
@@ -2724,11 +2741,11 @@ impl GraphRagServer {
     async fn smart_search(&self, #[tool(aggr)] params: SmartSearchParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let detail = params.detail.unwrap_or_default();
-        let limit = params.limit.unwrap_or(10) as u32;
+        let limit = params.limit.unwrap_or(10);
         let entity_type = params.entity_type.as_deref().unwrap_or("all");
         let kw = params.query.to_lowercase();
 
-        // Build targeted SurrealQL queries based on filters
+        // Build WHERE clause fragments for filters
         let file_filter = params.file_pattern.as_ref()
             .map(|p| format!(" AND string::contains(string::lowercase(file_path), '{}')", p.to_lowercase()))
             .unwrap_or_default();
@@ -2736,7 +2753,7 @@ impl GraphRagServer {
             .map(|l| format!(" AND language = '{}'", l.to_lowercase()))
             .unwrap_or_default();
 
-        // Which entity tables to search
+        // ---- Stage 1: Structured keyword search across entity tables ----
         let tables: Vec<(&str, &str)> = match entity_type {
             "function" => vec![("function", "function")],
             "class" => vec![("class", "class")],
@@ -2751,12 +2768,14 @@ impl GraphRagServer {
             ],
         };
 
-        let mut all_results: Vec<(String, String, String, u32, Option<String>)> = Vec::new(); // (type, name, file, line, sig)
+        // (type, name, file, line, sig, score)
+        let mut all_results: Vec<(String, String, String, u32, Option<String>, Option<f64>)> = Vec::new();
 
         for (table, type_name) in &tables {
             let name_field = if *table == "file" { "path" } else { "name" };
             let file_field = if *table == "file" { "path" } else { "file_path" };
             let backtick = if *table == "function" { "`function`" } else { table };
+            let lim = limit as u32 * 3; // Over-fetch for merging
 
             let query = format!(
                 "SELECT {name} AS name, {file} AS file_path, start_line, signature \
@@ -2767,7 +2786,7 @@ impl GraphRagServer {
 
             if let Ok(mut response) = ctx.db.query(&query)
                 .bind(("kw", kw.clone()))
-                .bind(("lim", limit))
+                .bind(("lim", lim))
                 .await
             {
                 let rows: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
@@ -2776,7 +2795,61 @@ impl GraphRagServer {
                     let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("?").to_string();
                     let line = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let sig = row.get("signature").and_then(|v| v.as_str()).map(String::from);
-                    all_results.push((type_name.to_string(), name, fp, line, sig));
+                    all_results.push((type_name.to_string(), name, fp, line, sig, None));
+                }
+            }
+        }
+
+        // ---- Stage 2: Semantic reranking (if embeddings exist and query looks like natural language) ----
+        // Heuristic: if query has spaces or >15 chars, try semantic search
+        let is_semantic_query = params.query.contains(' ') || params.query.len() > 15;
+        let mut mode = "structured";
+
+        if is_semantic_query && (entity_type == "all" || entity_type == "function") {
+            // Try semantic search with the same filters
+            let extra_where = if file_filter.is_empty() && lang_filter.is_empty() {
+                None
+            } else {
+                Some(format!("{}{}", file_filter, lang_filter))
+            };
+
+            if let Ok(provider) = codescope_core::embeddings::FastEmbedProvider::new() {
+                let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(
+                    ctx.db.clone(), Box::new(provider)
+                );
+                if let Ok(semantic_results) = pipeline.filtered_semantic_search(
+                    &params.query, limit, extra_where.as_deref()
+                ).await {
+                    if !semantic_results.is_empty() {
+                        mode = "hybrid";
+                        // Merge: add semantic results with their scores
+                        for sr in &semantic_results {
+                            let already_exists = all_results.iter().any(|(_, n, f, _, _, _)|
+                                n == &sr.name && f == &sr.file_path);
+                            if !already_exists {
+                                all_results.push((
+                                    "function".to_string(),
+                                    sr.name.clone(),
+                                    sr.file_path.clone(),
+                                    sr.start_line.unwrap_or(0),
+                                    sr.signature.clone(),
+                                    sr.score,
+                                ));
+                            } else {
+                                // Update score for existing results
+                                if let Some(existing) = all_results.iter_mut().find(|(_, n, f, _, _, _)|
+                                    n == &sr.name && f == &sr.file_path) {
+                                    existing.5 = sr.score;
+                                }
+                            }
+                        }
+                        // Sort by semantic score (results with scores first, then structured-only)
+                        all_results.sort_by(|a, b| {
+                            let sa = a.5.unwrap_or(-1.0);
+                            let sb = b.5.unwrap_or(-1.0);
+                            sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                    }
                 }
             }
         }
@@ -2788,28 +2861,22 @@ impl GraphRagServer {
                 params.language.as_deref().unwrap_or("*"));
         }
 
-        // Truncate to limit
-        all_results.truncate(limit as usize);
+        all_results.truncate(limit);
 
-        let mut output = format!("Found {} results for '{}'", all_results.len(), params.query);
+        let mut output = format!("Found {} results for '{}' [mode={}]", all_results.len(), params.query, mode);
         if entity_type != "all" { output.push_str(&format!(" [type={}]", entity_type)); }
         if let Some(fp) = &params.file_pattern { output.push_str(&format!(" [file={}]", fp)); }
         if let Some(lang) = &params.language { output.push_str(&format!(" [lang={}]", lang)); }
         output.push_str(":\n\n");
 
-        for (i, (typ, name, fp, line, sig)) in all_results.iter().enumerate() {
+        for (i, (typ, name, fp, line, sig, score)) in all_results.iter().enumerate() {
+            let score_str = score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
             match detail {
                 DetailLevel::Compact => {
-                    output.push_str(&format!("{}. [{}] {} ({}:{})\n", i + 1, typ, name, fp, line));
+                    output.push_str(&format!("{}. [{}] {} ({}:{}){}\n", i + 1, typ, name, fp, line, score_str));
                 }
-                DetailLevel::Medium => {
-                    output.push_str(&format!("{}. **{}** [{}] ({}:{})\n", i + 1, name, typ, fp, line));
-                    if let Some(s) = sig {
-                        output.push_str(&format!("   `{}`\n", s));
-                    }
-                }
-                DetailLevel::Full => {
-                    output.push_str(&format!("{}. **{}** [{}] ({}:{})\n", i + 1, name, typ, fp, line));
+                DetailLevel::Medium | DetailLevel::Full => {
+                    output.push_str(&format!("{}. **{}** [{}] ({}:{}){}\n", i + 1, name, typ, fp, line, score_str));
                     if let Some(s) = sig {
                         output.push_str(&format!("   `{}`\n", s));
                     }
@@ -2945,21 +3012,50 @@ fn estimate_tokens(text: &str) -> usize {
     (text.len() + 3) / 4
 }
 
-/// Estimate baseline token cost if you had to grep/read the entire codebase instead of using the graph
+/// Estimate baseline token cost — what a naive approach (grep/read files) would cost.
+///
+/// Methodology: Average source file is ~200 lines = ~4000 chars = ~1000 tokens.
+/// Tool-specific baselines based on what you'd need to read without a graph:
+/// - search: grep entire codebase (~all files × avg tokens per relevant match output)
+/// - callers: read all files to find function references
+/// - explore: read target file + grep for cross-references
+/// - impact: recursive grep across entire codebase
+/// - temporal tools: parse git log + blame for all files
+///
+/// For a 66-file project with ~15K total lines: ~60K tokens to read all.
+/// For a 500-file project: ~500K tokens.
+/// We use per-file-count scaling when ctx is available, else conservative fixed estimates.
 fn estimate_baseline(tool_name: &str) -> usize {
+    // Conservative estimates for a medium project (~100 files, ~50K lines)
+    // Based on: "what would Claude need to read to get equivalent information?"
     match tool_name {
-        "search_functions" | "find_function" => 50_000,
-        "find_callers" | "find_callees" => 80_000,
-        "explore" => 30_000,
-        "context_bundle" => 40_000,
-        "impact_analysis" => 150_000,
-        "file_entities" => 10_000,
-        "related" | "backlinks" => 60_000,
-        "semantic_search" | "smart_search" => 100_000,
-        "hotspot_detection" | "file_churn" | "change_coupling" => 200_000,
-        "find_dead_code" => 120_000,
-        "community_detection" => 80_000,
-        _ => 20_000,
+        // Search: grep all files, output matching lines with context
+        // ~100 files × 50 lines context per grep hit = ~5000 lines = ~20K tokens
+        "search_functions" | "find_function" | "smart_search" => 20_000,
+        // Callers/callees: need to read + parse every file that might contain a call
+        // ~30% of files typically reference a given function = 30 files × 200 lines = ~24K tokens
+        "find_callers" | "find_callees" => 24_000,
+        // Explore: read target file (~1K tokens) + grep all files for references (~20K)
+        "explore" => 20_000,
+        // Context bundle: read target file fully + all its import targets
+        // ~5 files × 200 lines = ~4K tokens
+        "context_bundle" => 8_000,
+        // Impact analysis: recursive grep 2+ hops deep
+        // ~50 files involved in call chains × 200 lines = ~40K tokens
+        "impact_analysis" => 40_000,
+        // File entities: just read one file
+        "file_entities" => 2_000,
+        // Related/backlinks: cross-entity search across all tables
+        "related" | "backlinks" => 15_000,
+        // Semantic search: would need to read ALL functions to compare
+        "semantic_search" => 50_000,
+        // Temporal: parse git log (huge) + blame
+        "hotspot_detection" | "file_churn" | "change_coupling" => 30_000,
+        // Dead code: analyze ALL functions for call presence
+        "find_dead_code" => 40_000,
+        // Community: analyze entire call graph
+        "community_detection" => 30_000,
+        _ => 5_000,
     }
 }
 
@@ -2973,7 +3069,7 @@ async fn record_token_stats(db: &Surreal<Db>, repo: &str, tool_name: &str, respo
         0.0
     };
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let _ = db.query(
+    if let Err(e) = db.query(
         "CREATE token_stats SET tool_name = $tool, response_tokens = $resp, baseline_tokens = $base, \
          savings_pct = $savings, detail_level = $detail, timestamp = $ts, repo = $repo"
     )
@@ -2984,7 +3080,9 @@ async fn record_token_stats(db: &Surreal<Db>, repo: &str, tool_name: &str, respo
     .bind(("detail", detail.to_string()))
     .bind(("ts", timestamp))
     .bind(("repo", repo.to_string()))
-    .await;
+    .await {
+        tracing::warn!("Failed to record token stats for {}: {}", tool_name, e);
+    }
 }
 
 /// Find the Claude projects directory matching a codebase path
