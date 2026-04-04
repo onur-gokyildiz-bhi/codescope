@@ -217,25 +217,29 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
         std::fs::create_dir_all(parent)?;
     }
 
-    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+    // Migrate from old RocksDB format if needed
+    if path.join("CURRENT").exists() || path.join("LOCK").exists() {
+        let backup = path.with_extension("rocksdb.bak");
+        eprintln!(
+            "⚠ Old RocksDB data detected at {}.\n  Moving to {} — will re-index with SurrealKV.",
+            path.display(), backup.display()
+        );
+        let _ = std::fs::rename(&path, &backup);
+        std::fs::create_dir_all(&path)?;
+    }
+
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
         path.to_string_lossy().as_ref()
     ).await {
         Ok(db) => db,
         Err(e) => {
-            let err_str = e.to_string();
-            if err_str.contains("LOCK") || err_str.contains("being used") {
-                anyhow::bail!(
-                    "Database is locked by another process (MCP server or Web UI).\n\
-                     \n\
-                     Solutions:\n\
-                     1. Stop the other process first (codescope-mcp or codescope-web)\n\
-                     2. Use the MCP server's tools instead (they share the same DB connection)\n\
-                     3. Use the Web UI API: curl http://localhost:9090/api/search?q=...\n\
-                     \n\
-                     DB path: {}", path.display()
-                );
-            }
-            return Err(e.into());
+            anyhow::bail!(
+                "Failed to open database at {}.\n\
+                 Error: {}\n\
+                 \n\
+                 Try re-indexing or removing the DB directory:\n\
+                 rm -rf {}", path.display(), e, path.display()
+            );
         }
     };
 

@@ -169,7 +169,7 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
         db_path.to_string_lossy().as_ref(),
     )
     .await {

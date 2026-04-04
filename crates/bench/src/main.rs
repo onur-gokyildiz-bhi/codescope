@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
     let db_path = std::env::temp_dir().join(format!("codescope-bench-{}", repo_name));
     let _ = std::fs::remove_dir_all(&db_path); // Clean start
 
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
         db_path.to_string_lossy().as_ref()
     ).await?;
     db.use_ns("bench").use_db("code").await?;

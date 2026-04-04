@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
         db_path.to_string_lossy().as_ref(),
     )
     .await?;
