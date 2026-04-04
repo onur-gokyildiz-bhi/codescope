@@ -38,10 +38,10 @@ impl GraphQuery {
 
     /// Search functions by name pattern
     pub async fn search_functions(&self, pattern: &str) -> Result<Vec<SearchResult>> {
-        let pattern = pattern.to_string();
+        let pattern = pattern.to_lowercase(); // Lowercase once in Rust, not per-row in DB
         let results: Vec<SearchResult> = self
             .db
-            .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE string::contains(string::lowercase(name), string::lowercase($pattern))")
+            .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE string::contains(string::lowercase(name), $pattern)")
             .bind(("pattern", pattern))
             .await?
             .take(0)?;
@@ -51,10 +51,14 @@ impl GraphQuery {
     /// Find all callers of a function
     pub async fn find_callers(&self, function_name: &str) -> Result<Vec<SearchResult>> {
         let name = function_name.to_string();
+        // Use direct edge traversal — much faster than subquery on large graphs
         let results: Vec<SearchResult> = self
             .db
             .query(
-                "SELECT <-calls<-`function`.* AS callers FROM `function` WHERE name = $name"
+                "SELECT in.qualified_name AS qualified_name, in.name AS name, \
+                 in.file_path AS file_path, in.start_line AS start_line, \
+                 in.end_line AS end_line, in.language AS language, in.signature AS signature \
+                 FROM calls WHERE out.name = $name AND in.name != NONE"
             )
             .bind(("name", name))
             .await?
@@ -68,7 +72,10 @@ impl GraphQuery {
         let results: Vec<SearchResult> = self
             .db
             .query(
-                "SELECT ->calls->`function`.* AS callees FROM `function` WHERE name = $name"
+                "SELECT out.qualified_name AS qualified_name, out.name AS name, \
+                 out.file_path AS file_path, out.start_line AS start_line, \
+                 out.end_line AS end_line, out.language AS language, out.signature AS signature \
+                 FROM calls WHERE in.name = $name AND out.name != NONE"
             )
             .bind(("name", name))
             .await?
@@ -76,37 +83,51 @@ impl GraphQuery {
         Ok(results)
     }
 
-    /// Find all entities in a file
+    /// Find all entities in a file — single round-trip for both functions and classes
     pub async fn file_entities(&self, file_path: &str) -> Result<Vec<SearchResult>> {
-        let mut all = Vec::new();
-
         let path = file_path.to_string();
-        let functions: Vec<SearchResult> = self
-            .db
-            .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE file_path = $path")
+
+        let mut response = self.db
+            .query(
+                "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
+                 FROM `function` WHERE file_path = $path; \
+                 SELECT qualified_name, name, file_path, start_line, end_line, language \
+                 FROM class WHERE file_path = $path;"
+            )
             .bind(("path", path))
-            .await?
-            .take(0)?;
+            .await?;
+
+        let functions: Vec<SearchResult> = response.take(0).unwrap_or_default();
+        let classes: Vec<SearchResult> = response.take(1).unwrap_or_default();
+
+        let mut all = Vec::with_capacity(functions.len() + classes.len());
         all.extend(functions);
-
-        let path = file_path.to_string();
-        let classes: Vec<SearchResult> = self
-            .db
-            .query("SELECT qualified_name, name, file_path, start_line, end_line, language FROM class WHERE file_path = $path")
-            .bind(("path", path))
-            .await?
-            .take(0)?;
         all.extend(classes);
-
         Ok(all)
     }
 
     /// Execute a raw SurrealQL query
     pub async fn raw_query(&self, query: &str) -> Result<serde_json::Value> {
-        let query = query.to_string();
-        let mut response = self.db.query(query).await?;
-        let result: Vec<serde_json::Value> = response.take(0)?;
-        Ok(serde_json::Value::Array(result))
+        let query_str = query.to_string();
+        // Count semicolons to know how many statements to collect
+        let stmt_count = query_str.matches(';').count() + 1;
+        let mut response = self.db.query(query_str).await?;
+
+        // Collect results from ALL statements (not just index 0)
+        let mut all_results = Vec::new();
+        for i in 0..stmt_count {
+            match response.take::<Vec<serde_json::Value>>(i) {
+                Ok(result) => all_results.push(serde_json::Value::Array(result)),
+                Err(_) => break, // No more results
+            }
+        }
+
+        // If single statement, return flat array for backward compatibility
+        if all_results.len() <= 1 {
+            Ok(all_results.into_iter().next().unwrap_or(serde_json::Value::Array(vec![])))
+        } else {
+            Ok(serde_json::Value::Array(all_results))
+        }
     }
 
     /// Get graph statistics — full knowledge graph overview
@@ -185,14 +206,14 @@ impl GraphQuery {
         // Get neighborhood based on entity type
         if found_type == "function" {
             let mut resp2 = self.db.query(
-                "SELECT name, file_path, signature FROM `function` \
-                     WHERE name IN (SELECT VALUE ->calls->`function`.name FROM `function` WHERE name = $name LIMIT 1)[0]; \
-                 SELECT name, file_path, signature FROM `function` \
-                     WHERE name IN (SELECT VALUE <-calls<-`function`.name FROM `function` WHERE name = $name LIMIT 1)[0]; \
+                "SELECT out.name AS name, out.file_path AS file_path, out.signature AS signature \
+                     FROM calls WHERE in.name = $name AND out.name != NONE; \
+                 SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature \
+                     FROM calls WHERE out.name = $name AND in.name != NONE; \
                  SELECT name, start_line, signature FROM `function` \
                      WHERE file_path IN (SELECT VALUE file_path FROM `function` WHERE name = $name LIMIT 1)[0] \
                      AND name != $name \
-                     ORDER BY start_line;"
+                     ORDER BY start_line LIMIT 50;"
             ).bind(("name", n.clone())).await?;
 
             let callees: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
@@ -237,25 +258,32 @@ impl GraphQuery {
         let packages: Vec<serde_json::Value> = response.take(6).unwrap_or_default();
         let infra: Vec<serde_json::Value> = response.take(7).unwrap_or_default();
 
-        // For each function, get callers from OTHER files (cross-file links)
+        // Batch query: get ALL cross-file callers for ALL functions in this file at once (avoids N+1)
+        let mut resp2 = self.db.query(
+            "SELECT out.name AS callee_name, in.name AS name, in.file_path AS file_path \
+                 FROM calls WHERE out.file_path = $fpath \
+                 AND in.name != NONE AND in.file_path != $fpath;"
+        ).bind(("fpath", p.clone())).await?;
+
+        let all_ext_callers: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
+
+        // Group external callers by callee function name
+        let mut caller_map: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+        for caller in all_ext_callers {
+            if let Some(callee) = caller.get("callee_name").and_then(|v| v.as_str()) {
+                let mut entry = caller.clone();
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("callee_name");
+                }
+                caller_map.entry(callee.to_string()).or_default().push(entry);
+            }
+        }
+
         let mut fn_with_links = Vec::new();
         for func in &functions {
             let fname = func.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if fname.is_empty() { continue; }
-
-            let mut resp2 = self.db.query(
-                "SELECT name, file_path FROM `function` \
-                     WHERE name IN (SELECT VALUE <-calls<-`function`.name FROM `function` \
-                     WHERE name = $fname AND file_path = $fpath LIMIT 1)[0] \
-                     AND file_path != $fpath;"
-            ).bind(("fname", fname.to_string()))
-             .bind(("fpath", p.clone()))
-             .await?;
-
-            let ext_callers: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
-
             let mut entry = func.clone();
-            if !ext_callers.is_empty() {
+            if let Some(ext_callers) = caller_map.remove(fname) {
                 if let Some(obj) = entry.as_object_mut() {
                     obj.insert("external_callers".into(), serde_json::Value::Array(ext_callers));
                 }
@@ -279,26 +307,27 @@ impl GraphQuery {
     /// Search across ALL entity types — universal knowledge graph search.
     /// Returns results grouped by type (code, config, doc, package, infra).
     pub async fn cross_search(&self, keyword: &str, limit: usize) -> Result<serde_json::Value> {
-        let kw = keyword.to_string();
+        // Compute lowercase once in Rust — avoids 16x string::lowercase() calls in DB
+        let kw = keyword.to_lowercase();
         let lim = limit as u32;
 
         let mut response = self.db.query(
             "SELECT name, file_path, start_line, signature, 'function' AS type \
-                 FROM `function` WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM `function` WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, start_line, 'class' AS type \
-                 FROM class WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM class WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, body, 'config' AS type \
-                 FROM config WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM config WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, body, 'doc' AS type \
-                 FROM doc WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM doc WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, 'package' AS type \
-                 FROM package WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM package WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT path AS name, language, 'file' AS type \
-                 FROM file WHERE string::contains(string::lowercase(path), string::lowercase($kw)) LIMIT $lim; \
+                 FROM file WHERE string::contains(string::lowercase(path), $kw) LIMIT $lim; \
              SELECT name, file_path, 'import' AS type \
-                 FROM import_decl WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim; \
+                 FROM import_decl WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, 'infra' AS type \
-                 FROM infra WHERE string::contains(string::lowercase(name), string::lowercase($kw)) LIMIT $lim;"
+                 FROM infra WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim;"
         ).bind(("kw", kw)).bind(("lim", lim)).await?;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
@@ -333,9 +362,8 @@ impl GraphQuery {
 
         // Multi-direction backlink search
         let mut response = self.db.query(
-            "SELECT name, file_path, signature, 'caller' AS link_type \
-                 FROM `function` WHERE name IN \
-                 (SELECT VALUE <-calls<-`function`.name FROM `function` WHERE name = $name LIMIT 1)[0]; \
+            "SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature, 'caller' AS link_type \
+                 FROM calls WHERE out.name = $name AND in.name != NONE; \
              SELECT name, file_path, 'importer' AS link_type \
                  FROM import_decl WHERE string::contains(name, $name); \
              SELECT path AS name, language, 'container' AS link_type \

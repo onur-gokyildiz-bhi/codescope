@@ -123,21 +123,33 @@ impl GitAnalyzer {
     /// Get files most frequently changed together (change coupling)
     pub fn change_coupling(&self, limit: usize) -> Result<Vec<(String, String, usize)>> {
         let commits = self.recent_commits(500)?;
-        let mut coupling: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
 
+        // Intern file paths to avoid repeated String allocations in O(n²) loop
+        let mut path_intern: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        let mut path_list: Vec<&str> = Vec::new();
         for commit in &commits {
-            let files: Vec<&str> = commit
-                .files_changed
-                .iter()
-                .map(|f| f.path.as_str())
+            for f in &commit.files_changed {
+                let next_id = path_list.len() as u32;
+                if let std::collections::hash_map::Entry::Vacant(e) = path_intern.entry(f.path.as_str()) {
+                    e.insert(next_id);
+                    path_list.push(f.path.as_str());
+                }
+            }
+        }
+
+        // Count coupling using interned IDs (u32 pairs, not String pairs)
+        let mut coupling: std::collections::HashMap<(u32, u32), usize> = std::collections::HashMap::new();
+        for commit in &commits {
+            let file_ids: Vec<u32> = commit.files_changed.iter()
+                .filter_map(|f| path_intern.get(f.path.as_str()).copied())
                 .collect();
 
-            for i in 0..files.len() {
-                for j in (i + 1)..files.len() {
-                    let pair = if files[i] < files[j] {
-                        (files[i].to_string(), files[j].to_string())
+            for i in 0..file_ids.len() {
+                for j in (i + 1)..file_ids.len() {
+                    let pair = if file_ids[i] < file_ids[j] {
+                        (file_ids[i], file_ids[j])
                     } else {
-                        (files[j].to_string(), files[i].to_string())
+                        (file_ids[j], file_ids[i])
                     };
                     *coupling.entry(pair).or_insert(0) += 1;
                 }
@@ -148,40 +160,41 @@ impl GitAnalyzer {
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         pairs.truncate(limit);
 
-        Ok(pairs.into_iter().map(|((a, b), count)| (a, b, count)).collect())
+        Ok(pairs.into_iter().map(|((a, b), count)| {
+            (path_list[a as usize].to_string(), path_list[b as usize].to_string(), count)
+        }).collect())
     }
 
     /// Get file churn (most frequently changed files)
     pub fn file_churn(&self, limit: usize) -> Result<Vec<(String, usize)>> {
         let commits = self.recent_commits(500)?;
-        let mut churn: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut churn: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
         for commit in &commits {
             for file in &commit.files_changed {
-                *churn.entry(file.path.clone()).or_insert(0) += 1;
+                *churn.entry(file.path.as_str()).or_insert(0) += 1;
             }
         }
 
+        // Only allocate Strings for the top results
         let mut files: Vec<_> = churn.into_iter().collect();
         files.sort_by(|a, b| b.1.cmp(&a.1));
         files.truncate(limit);
 
-        Ok(files)
+        Ok(files.into_iter().map(|(p, c)| (p.to_string(), c)).collect())
     }
 
     /// Get contributor map (who knows what)
     pub fn contributor_map(&self) -> Result<std::collections::HashMap<String, Vec<(String, usize)>>> {
         let commits = self.recent_commits(1000)?;
         let mut map: std::collections::HashMap<String, std::collections::HashMap<String, usize>> =
-            std::collections::HashMap::new();
+            std::collections::HashMap::with_capacity(50);
 
         for commit in &commits {
-            let author = &commit.author;
+            // Only clone author/path on first insertion (entry API handles this)
+            let author_map = map.entry(commit.author.clone()).or_default();
             for file in &commit.files_changed {
-                *map.entry(author.clone())
-                    .or_default()
-                    .entry(file.path.clone())
-                    .or_insert(0) += 1;
+                *author_map.entry(file.path.clone()).or_insert(0) += 1;
             }
         }
 

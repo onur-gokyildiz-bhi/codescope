@@ -700,10 +700,15 @@ impl GraphRagServer {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let _depth = params.depth.unwrap_or(3);
 
+        // Direct edge traversal — much faster than subquery on large graphs (21K+ edges)
         let query = format!(
             "SELECT name, qualified_name, file_path, start_line FROM `function` WHERE name = $name;\
-             SELECT <-calls<-`function`.name AS direct_callers FROM `function` WHERE name = $name;\
-             SELECT <-calls<-`function`<-calls<-`function`.name AS indirect_callers FROM `function` WHERE name = $name;"
+             SELECT in.name AS name, in.file_path AS file_path \
+               FROM calls WHERE out.name = $name AND in.name != NONE;\
+             SELECT in.name AS name, in.file_path AS file_path \
+               FROM calls WHERE out.name IN \
+                 (SELECT VALUE in.name FROM calls WHERE out.name = $name AND in.name != NONE) \
+                 AND in.name != NONE AND in.name != $name;"
         );
 
         let name = params.function_name.clone();
@@ -908,20 +913,47 @@ impl GraphRagServer {
             params.base_ref, head_display, changed_files.len()
         );
 
-        for (file_path, status) in &changed_files {
-            output.push_str(&format!("### {} ({})\n", file_path, status));
-            match gq.file_entities(file_path).await {
-                Ok(entities) if !entities.is_empty() => {
-                    for e in &entities {
-                        output.push_str(&format!(
-                            "  - **{}** (L{}-{})\n",
-                            e.name.as_deref().unwrap_or("?"),
-                            e.start_line.unwrap_or(0),
-                            e.end_line.unwrap_or(0),
-                        ));
+        // Batch query: get ALL entities for ALL changed files in one DB call (not N+1)
+        if !changed_files.is_empty() {
+            let file_list = changed_files.iter()
+                .map(|(fp, _)| format!("'{}'", fp.replace('\'', "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let batch_query = format!(
+                "SELECT name, file_path, start_line, end_line FROM `function` WHERE file_path IN [{}]; \
+                 SELECT name, file_path, start_line, end_line FROM class WHERE file_path IN [{}];",
+                file_list, file_list
+            );
+
+            let mut entities_by_file: std::collections::HashMap<String, Vec<(String, u32, u32)>> =
+                std::collections::HashMap::with_capacity(changed_files.len());
+
+            if let Ok(batch_result) = gq.raw_query(&batch_query).await {
+                if let Some(arr) = batch_result.as_array() {
+                    for stmt_result in arr {
+                        if let Some(rows) = stmt_result.as_array() {
+                            for row in rows {
+                                let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let sl = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                let el = row.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                                entities_by_file.entry(fp.to_string()).or_default()
+                                    .push((name.to_string(), sl, el));
+                            }
+                        }
                     }
                 }
-                _ => { output.push_str("  (no indexed entities)\n"); }
+            }
+
+            for (file_path, status) in &changed_files {
+                output.push_str(&format!("### {} ({})\n", file_path, status));
+                if let Some(entities) = entities_by_file.get(file_path.as_str()) {
+                    for (name, sl, el) in entities {
+                        output.push_str(&format!("  - **{}** (L{}-{})\n", name, sl, el));
+                    }
+                } else {
+                    output.push_str("  (no indexed entities)\n");
+                }
             }
         }
 

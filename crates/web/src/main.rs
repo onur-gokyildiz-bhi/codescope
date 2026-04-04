@@ -198,7 +198,7 @@ async fn api_graph(
         let mut seen = std::collections::HashSet::new();
 
         // Helper to add a node if not already seen
-        let mut add_node = |nodes: &mut Vec<GraphNode>, seen: &mut std::collections::HashSet<String>,
+        let add_node = |nodes: &mut Vec<GraphNode>, seen: &mut std::collections::HashSet<String>,
                             id: &str, name: &str, kind: &str, fp: &str| {
             if seen.insert(id.to_string()) {
                 nodes.push(GraphNode {
@@ -234,22 +234,26 @@ async fn api_graph(
         }
         add_node(&mut nodes, &mut seen, &center_id, &safe, &center_kind, &center_fp);
 
-        // 2. Callers (who calls this function)
+        // 2. Callers (who calls this function) — direct edge traversal, no subquery
         let caller_q = format!(
-            "SELECT <-calls<-`function`.{{name, qualified_name, file_path}} AS callers FROM `function` WHERE name = '{}'",
+            "SELECT in.name AS name, in.qualified_name AS qualified_name, in.file_path AS file_path \
+             FROM calls WHERE out.name = '{}' AND in.name != NONE",
             safe
         );
         if let Ok(result) = state.query.raw_query(&caller_q).await {
-            extract_neighbors(&result, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true);
+            let wrapped = serde_json::json!([{"callers": result}]);
+            extract_neighbors(&wrapped, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true);
         }
 
-        // 3. Callees (what this function calls)
+        // 3. Callees (what this function calls) — direct edge traversal, no subquery
         let callee_q = format!(
-            "SELECT ->calls->`function`.{{name, qualified_name, file_path}} AS callees FROM `function` WHERE name = '{}'",
+            "SELECT out.name AS name, out.qualified_name AS qualified_name, out.file_path AS file_path \
+             FROM calls WHERE in.name = '{}' AND out.name != NONE",
             safe
         );
         if let Ok(result) = state.query.raw_query(&callee_q).await {
-            extract_neighbors(&result, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false);
+            let wrapped = serde_json::json!([{"callees": result}]);
+            extract_neighbors(&wrapped, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false);
         }
 
         // 4. Sibling functions in same file

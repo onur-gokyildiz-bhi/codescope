@@ -263,6 +263,16 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS db_file_repo ON db_entity FIELDS file_path, repo;
         DEFINE INDEX IF NOT EXISTS infra_file_repo ON infra FIELDS file_path, repo;
         DEFINE INDEX IF NOT EXISTS pkg_file_repo ON package FIELDS file_path, repo;
+
+        -- === FULL-TEXT SEARCH INDEXES (speeds up name search queries) ===
+
+        DEFINE ANALYZER IF NOT EXISTS name_analyzer TOKENIZERS blank, class FILTERS lowercase;
+        DEFINE INDEX IF NOT EXISTS fn_name_search ON `function` FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS class_name_search ON class FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS config_name_search ON config FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS doc_name_search ON doc FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name SEARCH ANALYZER name_analyzer BM25;
         ",
     )
     .await?;

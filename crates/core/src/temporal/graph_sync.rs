@@ -30,8 +30,7 @@ impl TemporalGraphSync {
                 DEFINE INDEX IF NOT EXISTS commit_hash ON commit FIELDS hash UNIQUE;
                 DEFINE INDEX IF NOT EXISTS commit_ts ON commit FIELDS timestamp;
                 DEFINE INDEX IF NOT EXISTS commit_author ON commit FIELDS author;
-                "
-                    .to_string(),
+                ",
             )
             .await?;
         Ok(())
@@ -59,69 +58,67 @@ impl TemporalGraphSync {
 
         info!("Syncing {} commits for repo '{}'...", commits.len(), repo_name);
 
+        // Phase 1: Batch UPSERT all commits in a single query
+        let mut commit_query = String::with_capacity(commits.len() * 200);
+        for commit in commits {
+            let sanitized_hash = commit.hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+            let message_escaped = commit.message.lines().next().unwrap_or("")
+                .replace('\\', "\\\\").replace('\'', "\\'");
+            let author_escaped = commit.author.replace('\\', "\\\\").replace('\'', "\\'");
+
+            commit_query.push_str(&format!(
+                "UPSERT commit:{} SET hash = '{}', author = '{}', message = '{}', \
+                 timestamp = {}, files_changed = {}, repo = '{}';\n",
+                sanitized_hash, commit.hash, author_escaped, message_escaped,
+                commit.timestamp, commit.files_changed.len(), repo_name
+            ));
+        }
+
+        if !commit_query.is_empty() {
+            if let Err(e) = self.db.query(&commit_query).await {
+                debug!("Batch commit upsert error: {}", e);
+            }
+        }
+
+        // Phase 2: Batch create modified_in edges — one query per batch of file changes
+        let mut edge_query = String::with_capacity(commits.len() * 500);
         let mut count = 0;
         for commit in commits {
-            let hash = commit.hash.clone();
-            let author = commit.author.clone();
-            let message = commit.message.lines().next().unwrap_or("").to_string();
-            let timestamp = commit.timestamp;
-            let files_changed = commit.files_changed.len() as i64;
-            let repo = repo_name.to_string();
-
-            // UPSERT commit by hash — idempotent, no duplicates
-            let sanitized_hash = hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-            let result = self.db
-                .query(
-                    format!(
-                        "UPSERT commit:{} SET hash = $hash, author = $author, message = $msg, \
-                         timestamp = $ts, files_changed = $fc, repo = $repo",
-                        sanitized_hash
-                    ),
-                )
-                .bind(("hash", hash.clone()))
-                .bind(("author", author))
-                .bind(("msg", message))
-                .bind(("ts", timestamp))
-                .bind(("fc", files_changed))
-                .bind(("repo", repo))
-                .await;
-
-            if let Err(e) = result {
-                debug!("Commit {} error: {}", &hash[..8], e);
-                continue;
-            }
-
-            // Create modified_in edges with dedup: only if edge doesn't already exist
             for file_change in &commit.files_changed {
-                let file_path = file_change.path.clone();
-                let change_type = match file_change.change_type {
-                    ChangeType::Added => "added".to_string(),
-                    ChangeType::Modified => "modified".to_string(),
-                    ChangeType::Deleted => "deleted".to_string(),
-                    ChangeType::Renamed => "renamed".to_string(),
+                let ct = match file_change.change_type {
+                    ChangeType::Added => "added",
+                    ChangeType::Modified => "modified",
+                    ChangeType::Deleted => "deleted",
+                    ChangeType::Renamed => "renamed",
                 };
-                let commit_hash = hash.clone();
+                let path_escaped = file_change.path.replace('\\', "\\\\").replace('\'', "\\'");
+                let sanitized_hash = commit.hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
 
-                let _ = self.db
-                    .query(
-                        "LET $file = (SELECT * FROM file WHERE path CONTAINS $path LIMIT 1); \
-                         LET $commit = (SELECT * FROM commit WHERE hash = $hash LIMIT 1); \
-                         IF $file AND $commit THEN \
-                             LET $existing = (SELECT * FROM modified_in WHERE in = $file[0].id AND out = $commit[0].id LIMIT 1); \
-                             IF !$existing THEN \
-                                 RELATE ($file[0].id)->modified_in->($commit[0].id) \
-                                 SET change_type = $ct, timestamp = $ts \
-                             END \
-                         END;",
-                    )
-                    .bind(("path", file_path))
-                    .bind(("hash", commit_hash))
-                    .bind(("ct", change_type))
-                    .bind(("ts", commit.timestamp))
-                    .await;
+                edge_query.push_str(&format!(
+                    "LET $f = (SELECT id FROM file WHERE path CONTAINS '{}' LIMIT 1); \
+                     IF $f THEN \
+                         RELATE ($f[0].id)->modified_in->(commit:{}) \
+                         SET change_type = '{}', timestamp = {} \
+                     END;\n",
+                    path_escaped, sanitized_hash, ct, commit.timestamp
+                ));
             }
-
             count += 1;
+
+            // Flush in batches of 50 commits to avoid query size limits
+            if count % 50 == 0 && !edge_query.is_empty() {
+                if let Err(e) = self.db.query(&edge_query).await {
+                    debug!("Batch edge insert error: {}", e);
+                }
+                edge_query.clear();
+            }
+        }
+
+        // Flush remaining edges
+        if !edge_query.is_empty() {
+            if let Err(e) = self.db.query(&edge_query).await {
+                debug!("Batch edge insert error: {}", e);
+            }
         }
 
         info!("Synced {} commits", count);
