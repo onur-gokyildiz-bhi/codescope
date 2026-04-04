@@ -33,18 +33,35 @@ pub struct GraphRagServer {
 
 // Parameter structs for MCP tools
 
+/// Detail level for progressive disclosure — saves tokens by returning only what's needed.
+/// - **compact** (default): name + file + line. ~50 tokens/result.
+/// - **medium**: + signature, doc comment, relation counts. ~200 tokens/result.
+/// - **full**: + code snippet, all relations, call graph. ~500 tokens/result.
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, Copy, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailLevel {
+    #[default]
+    Compact,
+    Medium,
+    Full,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SearchParams {
     /// The search query (function/class name or pattern)
     pub query: String,
     /// Maximum number of results (default: 20)
     pub limit: Option<usize>,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FileEntitiesParams {
     /// Path to the file to inspect
     pub file_path: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -52,6 +69,8 @@ pub struct FindCallersParams {
     /// Name of the function to find callers for
     #[serde(alias = "function_name")]
     pub name: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -59,6 +78,8 @@ pub struct FindCalleesParams {
     /// Name of the function to find callees for
     #[serde(alias = "function_name")]
     pub name: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -82,6 +103,8 @@ pub struct ImpactAnalysisParams {
     pub name: String,
     /// Depth of the call graph to traverse (default: 3)
     pub depth: Option<usize>,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -140,12 +163,16 @@ pub struct InitProjectParams {
 pub struct ExploreParams {
     /// Entity name to explore (function, class, config key, file path, etc.)
     pub name: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ContextBundleParams {
     /// File path to get full context for
     pub file_path: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -154,12 +181,16 @@ pub struct RelatedParams {
     pub keyword: String,
     /// Maximum results per type (default: 10)
     pub limit: Option<usize>,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BacklinksParams {
     /// Entity name to find backlinks for
     pub name: String,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -243,6 +274,28 @@ pub struct ManageAdrParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TokenStatsParams {
+    /// Time range: "hour", "day", "week", "all" (default)
+    pub range: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SmartSearchParams {
+    /// Natural language or keyword search query
+    pub query: String,
+    /// Filter by entity type: "function", "class", "config", "doc", "all" (default)
+    pub entity_type: Option<String>,
+    /// Filter by file path pattern (e.g., "src/graph/")
+    pub file_pattern: Option<String>,
+    /// Filter by language (e.g., "rust", "typescript")
+    pub language: Option<String>,
+    /// Maximum results (default: 10)
+    pub limit: Option<usize>,
+    /// Detail level: "compact" (default), "medium", or "full"
+    pub detail: Option<DetailLevel>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CommunityDetectionParams {
     /// Analysis type: "clusters", "bridges", "central", or "all" (default)
     pub analysis: Option<String>,
@@ -271,6 +324,27 @@ impl GraphRagServer {
             daemon: Some(state),
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
         }
+    }
+
+    /// Track token usage for a tool call and return the response
+    async fn track(&self, tool_name: &str, detail: DetailLevel, response: String) -> String {
+        if let Ok(ctx) = self.ctx().await {
+            let detail_str = match detail {
+                DetailLevel::Compact => "compact",
+                DetailLevel::Medium => "medium",
+                DetailLevel::Full => "full",
+            };
+            // Fire-and-forget — don't block the response
+            let db = ctx.db.clone();
+            let repo = ctx.repo_name.clone();
+            let tool = tool_name.to_string();
+            let resp_clone = response.clone();
+            let det = detail_str.to_string();
+            tokio::spawn(async move {
+                record_token_stats(&db, &repo, &tool, &resp_clone, &det).await;
+            });
+        }
+        response
     }
 
     /// Get the active project context, or return an error message
@@ -454,6 +528,7 @@ impl GraphRagServer {
             Err(e) => return e,
         };
         let limit = params.limit.unwrap_or(20);
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.search_functions(&params.query).await {
@@ -461,20 +536,41 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No functions found matching '{}'", params.query);
                 }
-                let mut output = format!("Found {} functions matching '{}':\n\n", results.len().min(limit), params.query);
+                let count = results.len().min(limit);
+                let mut output = format!("Found {} functions matching '{}':\n\n", count, params.query);
                 for (i, r) in results.iter().enumerate().take(limit) {
-                    output.push_str(&format!(
-                        "{}. **{}** ({}:{})\n",
-                        i + 1,
-                        r.name.as_deref().unwrap_or("?"),
-                        r.file_path.as_deref().unwrap_or("?"),
-                        r.start_line.unwrap_or(0),
-                    ));
-                    if let Some(sig) = &r.signature {
-                        output.push_str(&format!("   `{}`\n", sig));
+                    let name = r.name.as_deref().unwrap_or("?");
+                    let fp = r.file_path.as_deref().unwrap_or("?");
+                    let line = r.start_line.unwrap_or(0);
+                    match detail {
+                        DetailLevel::Compact => {
+                            output.push_str(&format!("{}. {} ({}:{})\n", i + 1, name, fp, line));
+                        }
+                        DetailLevel::Medium => {
+                            output.push_str(&format!("{}. **{}** ({}:{})\n", i + 1, name, fp, line));
+                            if let Some(sig) = &r.signature {
+                                output.push_str(&format!("   `{}`\n", sig));
+                            }
+                        }
+                        DetailLevel::Full => {
+                            output.push_str(&format!("{}. **{}** ({}:{}-{})", i + 1, name, fp, line, r.end_line.unwrap_or(line)));
+                            if let Some(lang) = &r.language {
+                                output.push_str(&format!(" [{}]", lang));
+                            }
+                            output.push('\n');
+                            if let Some(qn) = &r.qualified_name {
+                                output.push_str(&format!("   qualified: {}\n", qn));
+                            }
+                            if let Some(sig) = &r.signature {
+                                output.push_str(&format!("   `{}`\n", sig));
+                            }
+                        }
                     }
                 }
-                output
+                if detail == DetailLevel::Compact {
+                    output.push_str("\n_Use detail=\"medium\" for signatures, \"full\" for code._");
+                }
+                self.track("search_functions", detail, output).await
             }
             Err(e) => format!("Error searching: {}", e),
         }
@@ -484,6 +580,7 @@ impl GraphRagServer {
     #[tool(description = "Find a function by exact name. Returns detailed info including signature, file path, and line numbers.")]
     async fn find_function(&self, #[tool(aggr)] params: SearchParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_function(&params.query).await {
@@ -491,7 +588,31 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No function found with name '{}'", params.query);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting results".into())
+                match detail {
+                    DetailLevel::Compact => {
+                        results.iter().map(|r| format!("{} ({}:{})",
+                            r.name.as_deref().unwrap_or("?"),
+                            r.file_path.as_deref().unwrap_or("?"),
+                            r.start_line.unwrap_or(0),
+                        )).collect::<Vec<_>>().join("\n")
+                    }
+                    DetailLevel::Medium => {
+                        let mut out = String::new();
+                        for r in &results {
+                            out.push_str(&format!("**{}** ({}:{})\n",
+                                r.name.as_deref().unwrap_or("?"),
+                                r.file_path.as_deref().unwrap_or("?"),
+                                r.start_line.unwrap_or(0)));
+                            if let Some(sig) = &r.signature {
+                                out.push_str(&format!("  `{}`\n", sig));
+                            }
+                        }
+                        out
+                    }
+                    DetailLevel::Full => {
+                        serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting results".into())
+                    }
+                }
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -501,6 +622,7 @@ impl GraphRagServer {
     #[tool(description = "List all functions and classes in a file. Provides an overview of the file's structure.")]
     async fn file_entities(&self, #[tool(aggr)] params: FileEntitiesParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.file_entities(&params.file_path).await {
@@ -508,17 +630,38 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No entities found in '{}'", params.file_path);
                 }
-                let mut output = format!("Entities in {}:\n\n", params.file_path);
+                let mut output = format!("Entities in {} ({}):\n\n", params.file_path, results.len());
                 for r in &results {
-                    output.push_str(&format!(
-                        "- **{}** (L{}-{})\n",
-                        r.name.as_deref().unwrap_or("?"),
-                        r.start_line.unwrap_or(0),
-                        r.end_line.unwrap_or(0),
-                    ));
-                    if let Some(sig) = &r.signature {
-                        output.push_str(&format!("  `{}`\n", sig));
+                    let name = r.name.as_deref().unwrap_or("?");
+                    let start = r.start_line.unwrap_or(0);
+                    let end = r.end_line.unwrap_or(0);
+                    match detail {
+                        DetailLevel::Compact => {
+                            output.push_str(&format!("- {} L{}\n", name, start));
+                        }
+                        DetailLevel::Medium => {
+                            output.push_str(&format!("- **{}** (L{}-{})\n", name, start, end));
+                            if let Some(sig) = &r.signature {
+                                output.push_str(&format!("  `{}`\n", sig));
+                            }
+                        }
+                        DetailLevel::Full => {
+                            output.push_str(&format!("- **{}** (L{}-{})", name, start, end));
+                            if let Some(lang) = &r.language {
+                                output.push_str(&format!(" [{}]", lang));
+                            }
+                            output.push('\n');
+                            if let Some(qn) = &r.qualified_name {
+                                output.push_str(&format!("  qualified: {}\n", qn));
+                            }
+                            if let Some(sig) = &r.signature {
+                                output.push_str(&format!("  `{}`\n", sig));
+                            }
+                        }
                     }
+                }
+                if detail == DetailLevel::Compact {
+                    output.push_str("\n_Use detail=\"medium\" for signatures._");
                 }
                 output
             }
@@ -530,6 +673,7 @@ impl GraphRagServer {
     #[tool(description = "Find all functions that call the specified function. Useful for understanding who depends on a function.")]
     async fn find_callers(&self, #[tool(aggr)] params: FindCallersParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_callers(&params.name).await {
@@ -537,7 +681,8 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callers found for '{}'", params.name);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
+                let result = format_search_results(&format!("Callers of '{}'", params.name), &results, detail);
+                self.track("find_callers", detail, result).await
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -547,6 +692,7 @@ impl GraphRagServer {
     #[tool(description = "Find all functions called by the specified function. Useful for understanding a function's dependencies.")]
     async fn find_callees(&self, #[tool(aggr)] params: FindCalleesParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_callees(&params.name).await {
@@ -554,7 +700,8 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callees found for '{}'", params.name);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
+                let result = format_search_results(&format!("Callees of '{}'", params.name), &results, detail);
+                self.track("find_callees", detail, result).await
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -725,9 +872,9 @@ impl GraphRagServer {
     #[tool(description = "Analyze the impact of changing a function. Shows the transitive call graph to understand what would be affected by a change.")]
     async fn impact_analysis(&self, #[tool(aggr)] params: ImpactAnalysisParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let _depth = params.depth.unwrap_or(3);
 
-        // Direct edge traversal — much faster than subquery on large graphs (21K+ edges)
         let query = format!(
             "SELECT name, qualified_name, file_path, start_line FROM `function` WHERE name = $name;\
              SELECT in.name AS name, in.file_path AS file_path \
@@ -745,30 +892,66 @@ impl GraphRagServer {
                 let direct: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
                 let indirect: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
 
-                let mut output = format!("## Impact Analysis: {}\n\n", params.name);
-
-                if let Some(info) = func_info.first() {
-                    output.push_str(&format!("**Location:** {}:{}\n\n",
-                        info.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
-                        info.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0),
-                    ));
+                match detail {
+                    DetailLevel::Compact => {
+                        // One-liner summary
+                        let loc = func_info.first()
+                            .map(|i| format!("{}:{}",
+                                i.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                                i.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0)))
+                            .unwrap_or_else(|| "?".into());
+                        format!("{} ({}) | direct callers: {} | indirect callers: {}\n\n_Use detail=\"medium\" for names, \"full\" for all info._",
+                            params.name, loc, direct.len(), indirect.len())
+                    }
+                    DetailLevel::Medium => {
+                        let mut output = format!("## Impact: {}\n", params.name);
+                        if let Some(info) = func_info.first() {
+                            output.push_str(&format!("{}:{}\n\n",
+                                info.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                                info.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0)));
+                        }
+                        if !direct.is_empty() {
+                            output.push_str(&format!("**Direct callers ({}):** ", direct.len()));
+                            let names: Vec<String> = direct.iter().filter_map(|d| d.get("name").and_then(|v| v.as_str()).map(String::from)).collect();
+                            output.push_str(&names.join(", "));
+                            output.push('\n');
+                        }
+                        if !indirect.is_empty() {
+                            output.push_str(&format!("**Indirect callers ({}):** ", indirect.len()));
+                            let names: Vec<String> = indirect.iter().filter_map(|d| d.get("name").and_then(|v| v.as_str()).map(String::from)).collect();
+                            output.push_str(&names.join(", "));
+                            output.push('\n');
+                        }
+                        output
+                    }
+                    DetailLevel::Full => {
+                        let mut output = format!("## Impact Analysis: {}\n\n", params.name);
+                        if let Some(info) = func_info.first() {
+                            output.push_str(&format!("**Location:** {}:{}\n\n",
+                                info.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                                info.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0)));
+                        }
+                        output.push_str("### Direct Callers\n");
+                        if direct.is_empty() { output.push_str("None found\n"); }
+                        else {
+                            for d in &direct {
+                                output.push_str(&format!("- {} ({})\n",
+                                    d.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
+                                    d.get("file_path").and_then(|v| v.as_str()).unwrap_or("?")));
+                            }
+                        }
+                        output.push_str("\n### Indirect Callers (2 hops)\n");
+                        if indirect.is_empty() { output.push_str("None found\n"); }
+                        else {
+                            for d in &indirect {
+                                output.push_str(&format!("- {} ({})\n",
+                                    d.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
+                                    d.get("file_path").and_then(|v| v.as_str()).unwrap_or("?")));
+                            }
+                        }
+                        output
+                    }
                 }
-
-                output.push_str("### Direct Callers\n");
-                if direct.is_empty() {
-                    output.push_str("None found\n");
-                } else {
-                    output.push_str(&serde_json::to_string_pretty(&direct).unwrap_or_default());
-                }
-
-                output.push_str("\n\n### Indirect Callers (2 hops)\n");
-                if indirect.is_empty() {
-                    output.push_str("None found\n");
-                } else {
-                    output.push_str(&serde_json::to_string_pretty(&indirect).unwrap_or_default());
-                }
-
-                output
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -780,6 +963,66 @@ impl GraphRagServer {
         let parser = codescope_core::parser::CodeParser::new();
         let languages = parser.supported_languages();
         format!("Supported languages: {}", languages.join(", "))
+    }
+
+    /// View token economics — how many tokens each tool call used vs. baseline cost
+    #[tool(description = "Show token usage statistics for MCP tool calls. Reveals how much tokens the graph saves vs. naive codebase scanning. Use to understand cost efficiency.")]
+    async fn token_stats(&self, #[tool(aggr)] params: TokenStatsParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let range = params.range.as_deref().unwrap_or("all");
+
+        let time_filter = match range {
+            "hour" => format!(" AND timestamp > '{}'", (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339()),
+            "day" => format!(" AND timestamp > '{}'", (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339()),
+            "week" => format!(" AND timestamp > '{}'", (chrono::Utc::now() - chrono::Duration::weeks(1)).to_rfc3339()),
+            _ => String::new(),
+        };
+
+        let query = format!(
+            "SELECT tool_name, \
+                count() AS calls, \
+                math::sum(response_tokens) AS total_tokens, \
+                math::sum(baseline_tokens) AS total_baseline, \
+                math::mean(savings_pct) AS avg_savings \
+             FROM token_stats WHERE repo = $repo{} GROUP BY tool_name ORDER BY total_tokens DESC",
+            time_filter
+        );
+
+        match ctx.db.query(&query).bind(("repo", ctx.repo_name.clone())).await {
+            Ok(mut response) => {
+                let rows: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                if rows.is_empty() {
+                    return "No token stats recorded yet. Use other tools first — stats are tracked automatically.".into();
+                }
+
+                let mut output = format!("## Token Economics ({})\n\n", range);
+                output.push_str("| Tool | Calls | Tokens Used | Baseline | Savings |\n");
+                output.push_str("|------|-------|-------------|----------|---------|\n");
+
+                let mut grand_tokens: i64 = 0;
+                let mut grand_baseline: i64 = 0;
+                for row in &rows {
+                    let tool = row.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let calls = row.get("calls").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let tokens = row.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let baseline = row.get("total_baseline").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let savings = row.get("avg_savings").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    grand_tokens += tokens;
+                    grand_baseline += baseline;
+                    output.push_str(&format!("| {} | {} | {} | {} | {:.1}% |\n",
+                        tool, calls, format_tokens(tokens), format_tokens(baseline), savings));
+                }
+
+                let grand_savings = if grand_baseline > 0 {
+                    (1.0 - grand_tokens as f64 / grand_baseline as f64) * 100.0
+                } else { 0.0 };
+                output.push_str(&format!("| **Total** | | **{}** | **{}** | **{:.1}%** |\n",
+                    format_tokens(grand_tokens), format_tokens(grand_baseline), grand_savings));
+
+                output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
     }
 
     /// Sync git commit history into the graph database for temporal analysis
@@ -1169,87 +1412,127 @@ impl GraphRagServer {
         Use this to deeply understand how any piece of code or config fits into the system.")]
     async fn explore(&self, #[tool(aggr)] params: ExploreParams) -> String {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.explore(&params.name).await {
             Ok(result) => {
-                let mut output = format!("## Explore: {}\n\n", params.name);
+                let entity_type = result.get("entity_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let callers = result.get("called_by").and_then(|v| v.as_array());
+                let callees = result.get("calls_to").and_then(|v| v.as_array());
+                let siblings = result.get("sibling_functions").and_then(|v| v.as_array());
+                let funcs = result.get("functions").and_then(|v| v.as_array());
+                let caller_count = callers.map(|a| a.len()).unwrap_or(0);
+                let callee_count = callees.map(|a| a.len()).unwrap_or(0);
+                let sibling_count = siblings.map(|a| a.len()).unwrap_or(0);
 
-                if let Some(entity_type) = result.get("entity_type").and_then(|v| v.as_str()) {
-                    output.push_str(&format!("**Type:** {}\n\n", entity_type));
-                }
-
-                if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
-                    output.push_str("### Entity\n");
-                    for m in matches {
-                        if let Some(fp) = m.get("file_path").and_then(|v| v.as_str()) {
-                            let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                            output.push_str(&format!("- **{}** ({}:{})\n", params.name, fp, line));
-                        }
-                        if let Some(sig) = m.get("signature").and_then(|v| v.as_str()) {
-                            output.push_str(&format!("  `{}`\n", sig));
-                        }
-                    }
-                    output.push('\n');
-                }
-
-                if let Some(callers) = result.get("called_by").and_then(|v| v.as_array()) {
-                    if !callers.is_empty() {
-                        output.push_str(&format!("### Called By ({} functions)\n", callers.len()));
-                        for c in callers {
-                            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                            output.push_str(&format!("- {} ({})\n", name, fp));
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                if let Some(callees) = result.get("calls_to").and_then(|v| v.as_array()) {
-                    if !callees.is_empty() {
-                        output.push_str(&format!("### Calls ({} functions)\n", callees.len()));
-                        for c in callees {
-                            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                            output.push_str(&format!("- {} ({})\n", name, fp));
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                if let Some(siblings) = result.get("sibling_functions").and_then(|v| v.as_array()) {
-                    if !siblings.is_empty() {
-                        output.push_str(&format!("### Same File ({} siblings)\n", siblings.len()));
-                        for s in siblings {
-                            let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let sig = s.get("signature").and_then(|v| v.as_str());
-                            if let Some(sig) = sig {
-                                output.push_str(&format!("- {} `{}`\n", name, sig));
-                            } else {
-                                output.push_str(&format!("- {}\n", name));
+                match detail {
+                    DetailLevel::Compact => {
+                        // Minimal: type, location, counts only
+                        let mut output = format!("{} [{}]", params.name, entity_type);
+                        if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
+                            if let Some(m) = matches.first() {
+                                let fp = m.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                                output.push_str(&format!(" ({}:{})", fp, line));
                             }
                         }
-                        output.push('\n');
+                        output.push_str(&format!(" | callers:{} callees:{} siblings:{}", caller_count, callee_count, sibling_count));
+                        if let Some(f) = funcs { output.push_str(&format!(" funcs:{}", f.len())); }
+                        output.push_str("\n\n_Use detail=\"medium\" for names, \"full\" for all info._");
+                        output
                     }
-                }
-
-                // For file-type results, show full context
-                if let Some(funcs) = result.get("functions").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Functions ({})\n", funcs.len()));
-                    for f in funcs {
-                        let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let sig = f.get("signature").and_then(|v| v.as_str());
-                        let line = f.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                        if let Some(sig) = sig {
-                            output.push_str(&format!("- L{}: {} `{}`\n", line, name, sig));
-                        } else {
-                            output.push_str(&format!("- L{}: {}\n", line, name));
+                    DetailLevel::Medium => {
+                        let mut output = format!("## {}\n**Type:** {} | callers:{} callees:{} siblings:{}\n\n", params.name, entity_type, caller_count, callee_count, sibling_count);
+                        if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
+                            for m in matches {
+                                let fp = m.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                                output.push_str(&format!("**Location:** {}:{}\n", fp, line));
+                                if let Some(sig) = m.get("signature").and_then(|v| v.as_str()) {
+                                    output.push_str(&format!("`{}`\n", sig));
+                                }
+                            }
                         }
+                        if let Some(arr) = callers { if !arr.is_empty() {
+                            output.push_str("\n**Called by:** ");
+                            let names: Vec<&str> = arr.iter().filter_map(|c| c.get("name").and_then(|v| v.as_str())).collect();
+                            output.push_str(&names.join(", "));
+                            output.push('\n');
+                        }}
+                        if let Some(arr) = callees { if !arr.is_empty() {
+                            output.push_str("**Calls:** ");
+                            let names: Vec<&str> = arr.iter().filter_map(|c| c.get("name").and_then(|v| v.as_str())).collect();
+                            output.push_str(&names.join(", "));
+                            output.push('\n');
+                        }}
+                        output
                     }
-                    output.push('\n');
-                }
-
-                output
+                    DetailLevel::Full => {
+                        // Full detail — original behavior
+                        let mut output = format!("## Explore: {}\n\n**Type:** {}\n\n", params.name, entity_type);
+                        if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
+                            output.push_str("### Entity\n");
+                            for m in matches {
+                                if let Some(fp) = m.get("file_path").and_then(|v| v.as_str()) {
+                                    let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    output.push_str(&format!("- **{}** ({}:{})\n", params.name, fp, line));
+                                }
+                                if let Some(sig) = m.get("signature").and_then(|v| v.as_str()) {
+                                    output.push_str(&format!("  `{}`\n", sig));
+                                }
+                            }
+                            output.push('\n');
+                        }
+                        if let Some(arr) = callers { if !arr.is_empty() {
+                            output.push_str(&format!("### Called By ({} functions)\n", arr.len()));
+                            for c in arr {
+                                let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                output.push_str(&format!("- {} ({})\n", name, fp));
+                            }
+                            output.push('\n');
+                        }}
+                        if let Some(arr) = callees { if !arr.is_empty() {
+                            output.push_str(&format!("### Calls ({} functions)\n", arr.len()));
+                            for c in arr {
+                                let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                output.push_str(&format!("- {} ({})\n", name, fp));
+                            }
+                            output.push('\n');
+                        }}
+                        if let Some(arr) = siblings { if !arr.is_empty() {
+                            output.push_str(&format!("### Same File ({} siblings)\n", arr.len()));
+                            for s in arr {
+                                let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let sig = s.get("signature").and_then(|v| v.as_str());
+                                if let Some(sig) = sig {
+                                    output.push_str(&format!("- {} `{}`\n", name, sig));
+                                } else {
+                                    output.push_str(&format!("- {}\n", name));
+                                }
+                            }
+                            output.push('\n');
+                        }}
+                        if let Some(f) = funcs { if !f.is_empty() {
+                            output.push_str(&format!("### Functions ({})\n", f.len()));
+                            for func in f {
+                                let name = func.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let sig = func.get("signature").and_then(|v| v.as_str());
+                                let line = func.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                                if let Some(sig) = sig {
+                                    output.push_str(&format!("- L{}: {} `{}`\n", line, name, sig));
+                                } else {
+                                    output.push_str(&format!("- L{}: {}\n", line, name));
+                                }
+                            }
+                            output.push('\n');
+                        }}
+                        output
+                    }
+                };
+                self.track("explore", detail, result.to_string()).await
             }
             Err(e) => format!("Error exploring '{}': {}", params.name, e),
         }
@@ -2433,6 +2716,113 @@ impl GraphRagServer {
 
         output
     }
+
+    /// Hybrid search combining structured graph queries with optional semantic ranking
+    #[tool(description = "Smart search: combines structured graph filtering (by type, file, language) with keyword matching. \
+        More powerful than search_functions — searches across ALL entity types (functions, classes, configs, docs, packages, infra). \
+        Use entity_type, file_pattern, language to narrow results. Returns compact results by default.")]
+    async fn smart_search(&self, #[tool(aggr)] params: SmartSearchParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let detail = params.detail.unwrap_or_default();
+        let limit = params.limit.unwrap_or(10) as u32;
+        let entity_type = params.entity_type.as_deref().unwrap_or("all");
+        let kw = params.query.to_lowercase();
+
+        // Build targeted SurrealQL queries based on filters
+        let file_filter = params.file_pattern.as_ref()
+            .map(|p| format!(" AND string::contains(string::lowercase(file_path), '{}')", p.to_lowercase()))
+            .unwrap_or_default();
+        let lang_filter = params.language.as_ref()
+            .map(|l| format!(" AND language = '{}'", l.to_lowercase()))
+            .unwrap_or_default();
+
+        // Which entity tables to search
+        let tables: Vec<(&str, &str)> = match entity_type {
+            "function" => vec![("function", "function")],
+            "class" => vec![("class", "class")],
+            "config" => vec![("config", "config")],
+            "doc" => vec![("doc", "doc")],
+            "package" => vec![("package", "package")],
+            "infra" => vec![("infra", "infra")],
+            "file" => vec![("file", "file")],
+            _ => vec![
+                ("function", "function"), ("class", "class"), ("config", "config"),
+                ("doc", "doc"), ("package", "package"), ("infra", "infra"),
+            ],
+        };
+
+        let mut all_results: Vec<(String, String, String, u32, Option<String>)> = Vec::new(); // (type, name, file, line, sig)
+
+        for (table, type_name) in &tables {
+            let name_field = if *table == "file" { "path" } else { "name" };
+            let file_field = if *table == "file" { "path" } else { "file_path" };
+            let backtick = if *table == "function" { "`function`" } else { table };
+
+            let query = format!(
+                "SELECT {name} AS name, {file} AS file_path, start_line, signature \
+                 FROM {tbl} WHERE string::contains(string::lowercase({name}), $kw){ff}{lf} LIMIT $lim",
+                name = name_field, file = file_field, tbl = backtick,
+                ff = file_filter, lf = lang_filter
+            );
+
+            if let Ok(mut response) = ctx.db.query(&query)
+                .bind(("kw", kw.clone()))
+                .bind(("lim", limit))
+                .await
+            {
+                let rows: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                for row in rows {
+                    let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                    let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                    let line = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let sig = row.get("signature").and_then(|v| v.as_str()).map(String::from);
+                    all_results.push((type_name.to_string(), name, fp, line, sig));
+                }
+            }
+        }
+
+        if all_results.is_empty() {
+            return format!("No results for '{}' (type={}, file={}, lang={})",
+                params.query, entity_type,
+                params.file_pattern.as_deref().unwrap_or("*"),
+                params.language.as_deref().unwrap_or("*"));
+        }
+
+        // Truncate to limit
+        all_results.truncate(limit as usize);
+
+        let mut output = format!("Found {} results for '{}'", all_results.len(), params.query);
+        if entity_type != "all" { output.push_str(&format!(" [type={}]", entity_type)); }
+        if let Some(fp) = &params.file_pattern { output.push_str(&format!(" [file={}]", fp)); }
+        if let Some(lang) = &params.language { output.push_str(&format!(" [lang={}]", lang)); }
+        output.push_str(":\n\n");
+
+        for (i, (typ, name, fp, line, sig)) in all_results.iter().enumerate() {
+            match detail {
+                DetailLevel::Compact => {
+                    output.push_str(&format!("{}. [{}] {} ({}:{})\n", i + 1, typ, name, fp, line));
+                }
+                DetailLevel::Medium => {
+                    output.push_str(&format!("{}. **{}** [{}] ({}:{})\n", i + 1, name, typ, fp, line));
+                    if let Some(s) = sig {
+                        output.push_str(&format!("   `{}`\n", s));
+                    }
+                }
+                DetailLevel::Full => {
+                    output.push_str(&format!("{}. **{}** [{}] ({}:{})\n", i + 1, name, typ, fp, line));
+                    if let Some(s) = sig {
+                        output.push_str(&format!("   `{}`\n", s));
+                    }
+                }
+            }
+        }
+
+        if detail == DetailLevel::Compact && all_results.len() > 3 {
+            output.push_str("\n_Use detail=\"medium\" for signatures._");
+        }
+
+        self.track("smart_search", detail, output).await
+    }
 }
 
 /// Load known entity names from the graph for conversation-to-code linking.
@@ -2502,6 +2892,99 @@ async fn check_conversation_hash(
         .await?
         .take(0)?;
     Ok(results.first().and_then(|r| r.hash.clone()))
+}
+
+// === Helper functions for progressive disclosure formatting ===
+
+fn format_search_results(title: &str, results: &[codescope_core::graph::query::SearchResult], detail: DetailLevel) -> String {
+    let mut output = format!("{} ({}):\n", title, results.len());
+    for r in results {
+        let name = r.name.as_deref().unwrap_or("?");
+        let fp = r.file_path.as_deref().unwrap_or("?");
+        let line = r.start_line.unwrap_or(0);
+        match detail {
+            DetailLevel::Compact => {
+                output.push_str(&format!("- {} ({}:{})\n", name, fp, line));
+            }
+            DetailLevel::Medium => {
+                output.push_str(&format!("- **{}** ({}:{})\n", name, fp, line));
+                if let Some(sig) = &r.signature {
+                    output.push_str(&format!("  `{}`\n", sig));
+                }
+            }
+            DetailLevel::Full => {
+                output.push_str(&format!("- **{}** ({}:{}-{})", name, fp, line, r.end_line.unwrap_or(line)));
+                if let Some(lang) = &r.language {
+                    output.push_str(&format!(" [{}]", lang));
+                }
+                output.push('\n');
+                if let Some(qn) = &r.qualified_name {
+                    output.push_str(&format!("  qualified: {}\n", qn));
+                }
+                if let Some(sig) = &r.signature {
+                    output.push_str(&format!("  `{}`\n", sig));
+                }
+            }
+        }
+    }
+    if detail == DetailLevel::Compact && results.len() > 3 {
+        output.push_str("\n_Use detail=\"medium\" for signatures, \"full\" for all info._");
+    }
+    output
+}
+
+/// Format token count with K/M suffixes
+fn format_tokens(n: i64) -> String {
+    if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1_000_000.0) }
+    else if n >= 1_000 { format!("{:.1}K", n as f64 / 1_000.0) }
+    else { n.to_string() }
+}
+
+/// Estimate token count from text (~4 chars per token for mixed code/text)
+fn estimate_tokens(text: &str) -> usize {
+    (text.len() + 3) / 4
+}
+
+/// Estimate baseline token cost if you had to grep/read the entire codebase instead of using the graph
+fn estimate_baseline(tool_name: &str) -> usize {
+    match tool_name {
+        "search_functions" | "find_function" => 50_000,
+        "find_callers" | "find_callees" => 80_000,
+        "explore" => 30_000,
+        "context_bundle" => 40_000,
+        "impact_analysis" => 150_000,
+        "file_entities" => 10_000,
+        "related" | "backlinks" => 60_000,
+        "semantic_search" | "smart_search" => 100_000,
+        "hotspot_detection" | "file_churn" | "change_coupling" => 200_000,
+        "find_dead_code" => 120_000,
+        "community_detection" => 80_000,
+        _ => 20_000,
+    }
+}
+
+/// Record token usage for a tool call
+async fn record_token_stats(db: &Surreal<Db>, repo: &str, tool_name: &str, response: &str, detail: &str) {
+    let response_tokens = estimate_tokens(response) as i64;
+    let baseline_tokens = estimate_baseline(tool_name) as i64;
+    let savings_pct = if baseline_tokens > 0 {
+        (1.0 - response_tokens as f64 / baseline_tokens as f64) * 100.0
+    } else {
+        0.0
+    };
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let _ = db.query(
+        "CREATE token_stats SET tool_name = $tool, response_tokens = $resp, baseline_tokens = $base, \
+         savings_pct = $savings, detail_level = $detail, timestamp = $ts, repo = $repo"
+    )
+    .bind(("tool", tool_name.to_string()))
+    .bind(("resp", response_tokens))
+    .bind(("base", baseline_tokens))
+    .bind(("savings", savings_pct))
+    .bind(("detail", detail.to_string()))
+    .bind(("ts", timestamp))
+    .bind(("repo", repo.to_string()))
+    .await;
 }
 
 /// Find the Claude projects directory matching a codebase path

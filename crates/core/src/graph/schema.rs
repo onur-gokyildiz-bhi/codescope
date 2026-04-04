@@ -274,6 +274,19 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS doc_name_search ON doc FIELDS name SEARCH ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name SEARCH ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name SEARCH ANALYZER name_analyzer BM25;
+
+        -- === TOKEN ECONOMICS TABLE ===
+
+        DEFINE TABLE IF NOT EXISTS token_stats SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS tool_name ON token_stats TYPE string;
+        DEFINE FIELD IF NOT EXISTS response_tokens ON token_stats TYPE int;
+        DEFINE FIELD IF NOT EXISTS baseline_tokens ON token_stats TYPE int;
+        DEFINE FIELD IF NOT EXISTS savings_pct ON token_stats TYPE float;
+        DEFINE FIELD IF NOT EXISTS detail_level ON token_stats TYPE string;
+        DEFINE FIELD IF NOT EXISTS timestamp ON token_stats TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON token_stats TYPE string;
+        DEFINE INDEX IF NOT EXISTS ts_tool ON token_stats FIELDS tool_name;
+        DEFINE INDEX IF NOT EXISTS ts_repo ON token_stats FIELDS repo;
         ",
     )
     .await?;

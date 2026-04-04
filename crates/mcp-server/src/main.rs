@@ -77,6 +77,35 @@ enum Command {
         #[arg(long, default_value = "3333")]
         port: u16,
     },
+
+    /// Re-index a single file (for post-edit hooks)
+    ReindexFile {
+        /// Repository name
+        #[arg(long)]
+        repo: String,
+        /// File path to re-index
+        file: String,
+    },
+
+    /// Index the latest conversation session (for session-end hooks)
+    IndexSession {
+        /// Repository name
+        #[arg(long)]
+        repo: String,
+        /// Path to the codebase
+        #[arg(long)]
+        path: String,
+    },
+
+    /// Generate Claude Code hooks configuration
+    SetupHooks {
+        /// Repository name
+        #[arg(long)]
+        repo: String,
+        /// Path to the codebase
+        #[arg(long)]
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -121,6 +150,15 @@ async fn main() -> Result<()> {
         }
         Some(Command::Stdio { path, repo, auto_index }) => {
             run_stdio(path, repo, auto_index).await
+        }
+        Some(Command::ReindexFile { repo, file }) => {
+            run_reindex_file(&repo, &file).await
+        }
+        Some(Command::IndexSession { repo, path }) => {
+            run_index_session(&repo, &path).await
+        }
+        Some(Command::SetupHooks { repo, path }) => {
+            print_hooks_config(&repo, &path)
         }
         // No subcommand = backward-compatible stdio mode
         None => {
@@ -504,6 +542,149 @@ async fn check_status(port: u16) -> Result<()> {
             eprintln!("No daemon detected on port {}", port);
         }
     }
+    Ok(())
+}
+
+/// Re-index a single file — used by post-edit hooks for fast incremental updates
+async fn run_reindex_file(repo: &str, file: &str) -> Result<()> {
+    let db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db")
+        .join(repo);
+
+    if !db_path.exists() {
+        eprintln!("DB not found for repo '{}'. Run init_project first.", repo);
+        return Ok(());
+    }
+
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+        db_path.to_string_lossy().as_ref(),
+    ).await?;
+    db.use_ns("codescope").use_db(repo).await?;
+
+    let file_path = std::path::Path::new(file);
+    if !file_path.exists() {
+        eprintln!("File not found: {}", file);
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(file_path)?;
+    let parser = codescope_core::parser::CodeParser::new();
+    let builder = codescope_core::graph::builder::GraphBuilder::new(db.clone());
+
+    // Delete old entities for this file
+    let rel_path = file_path.to_string_lossy().replace('\\', "/");
+    let _ = db.query("DELETE FROM `function` WHERE file_path = $path")
+        .bind(("path", rel_path.clone())).await;
+    let _ = db.query("DELETE FROM class WHERE file_path = $path")
+        .bind(("path", rel_path.clone())).await;
+
+    // Re-parse and insert
+    match parser.parse_source(file_path, &content, repo) {
+        Ok((entities, relations)) => {
+            let _ = builder.insert_entities(&entities).await;
+            let _ = builder.insert_relations(&relations).await;
+            eprintln!("Re-indexed {}: {} entities, {} relations",
+                file, entities.len(), relations.len());
+        }
+        Err(e) => {
+            eprintln!("Parse error for {}: {}", file, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Index the latest conversation session — used by session-end hooks
+async fn run_index_session(repo: &str, path: &str) -> Result<()> {
+    let db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db")
+        .join(repo);
+
+    if !db_path.exists() {
+        eprintln!("DB not found for repo '{}'. Run init_project first.", repo);
+        return Ok(());
+    }
+
+    let db = surrealdb::Surreal::new::<surrealdb::engine::local::RocksDb>(
+        db_path.to_string_lossy().as_ref(),
+    ).await?;
+    db.use_ns("codescope").use_db(repo).await?;
+
+    let codebase_path = std::path::Path::new(path);
+    let project_dir = server::find_claude_project_dir(codebase_path, repo);
+
+    let known_entities: Vec<String> = Vec::new();
+    let mut jsonl_files = Vec::new();
+    collect_jsonl_files(&project_dir, &mut jsonl_files);
+
+    // Sort by modification time — newest first, only index latest
+    jsonl_files.sort_by(|a, b| {
+        let ta = std::fs::metadata(a).and_then(|m| m.modified()).ok();
+        let tb = std::fs::metadata(b).and_then(|m| m.modified()).ok();
+        tb.cmp(&ta)
+    });
+
+    let builder = codescope_core::graph::builder::GraphBuilder::new(db.clone());
+    let mut indexed = 0;
+
+    // Index the 5 most recent conversations
+    for jsonl_path in jsonl_files.iter().take(5) {
+        match codescope_core::conversation::parse_conversation(jsonl_path, repo, &known_entities) {
+            Ok((entities, relations, _)) => {
+                let _ = builder.insert_entities(&entities).await;
+                let _ = builder.insert_relations(&relations).await;
+                indexed += 1;
+            }
+            Err(e) => {
+                eprintln!("Conversation parse error {}: {}", jsonl_path.display(), e);
+            }
+        }
+    }
+
+    eprintln!("Indexed {} recent conversations for '{}'", indexed, repo);
+    Ok(())
+}
+
+/// Print Claude Code hooks configuration as JSON
+fn print_hooks_config(repo: &str, path: &str) -> Result<()> {
+    let exe = std::env::current_exe()?.to_string_lossy().to_string().replace('\\', "\\\\");
+    let repo_escaped = repo.replace('\\', "\\\\");
+    let path_escaped = path.replace('\\', "\\\\");
+
+    let config = format!(r#"{{
+  "hooks": {{
+    "PostToolUse": [
+      {{
+        "matcher": "^(Write|Edit|MultiEdit|NotebookEdit)$",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{exe} reindex-file --repo {repo} -- \"$CLAUDE_FILE\""
+          }}
+        ]
+      }}
+    ],
+    "Stop": [
+      {{
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{exe} index-session --repo {repo} --path \"{path}\""
+          }}
+        ]
+      }}
+    ]
+  }}
+}}"#, exe = exe, repo = repo_escaped, path = path_escaped);
+
+    println!("{}", config);
+    eprintln!("\nAdd this to your .claude/settings.json to enable auto hooks.");
+    eprintln!("PostToolUse: Re-indexes files after edits for real-time graph updates.");
+    eprintln!("Stop: Indexes the conversation when the session ends.");
     Ok(())
 }
 
