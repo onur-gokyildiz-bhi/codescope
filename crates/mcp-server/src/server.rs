@@ -50,13 +50,15 @@ pub struct FileEntitiesParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindCallersParams {
     /// Name of the function to find callers for
-    pub function_name: String,
+    #[serde(alias = "function_name")]
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindCalleesParams {
     /// Name of the function to find callees for
-    pub function_name: String,
+    #[serde(alias = "function_name")]
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -76,7 +78,8 @@ pub struct IndexParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImpactAnalysisParams {
     /// Name of the function to analyze impact for
-    pub function_name: String,
+    #[serde(alias = "function_name")]
+    pub name: String,
     /// Depth of the call graph to traverse (default: 3)
     pub depth: Option<usize>,
 }
@@ -529,10 +532,10 @@ impl GraphRagServer {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let gq = GraphQuery::new(ctx.db);
 
-        match gq.find_callers(&params.function_name).await {
+        match gq.find_callers(&params.name).await {
             Ok(results) => {
                 if results.is_empty() {
-                    return format!("No callers found for '{}'", params.function_name);
+                    return format!("No callers found for '{}'", params.name);
                 }
                 serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
             }
@@ -546,10 +549,10 @@ impl GraphRagServer {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let gq = GraphQuery::new(ctx.db);
 
-        match gq.find_callees(&params.function_name).await {
+        match gq.find_callees(&params.name).await {
             Ok(results) => {
                 if results.is_empty() {
-                    return format!("No callees found for '{}'", params.function_name);
+                    return format!("No callees found for '{}'", params.name);
                 }
                 serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
             }
@@ -735,14 +738,14 @@ impl GraphRagServer {
                  AND in.name != NONE AND in.name != $name;"
         );
 
-        let name = params.function_name.clone();
+        let name = params.name.clone();
         match ctx.db.query(query).bind(("name", name)).await {
             Ok(mut response) => {
                 let func_info: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
                 let direct: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
                 let indirect: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
 
-                let mut output = format!("## Impact Analysis: {}\n\n", params.function_name);
+                let mut output = format!("## Impact Analysis: {}\n\n", params.name);
 
                 if let Some(info) = func_info.first() {
                     output.push_str(&format!("**Location:** {}:{}\n\n",
