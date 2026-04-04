@@ -73,7 +73,7 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 
 | Tool | Search Technology | Graph DB | Semantic Search | Binary Quantization | Languages | Local |
 |------|------------------|----------|-----------------|---------------------|-----------|-------|
-| **Codescope** | Graph (SurrealDB) + Vector + BQ | Yes | BQ + Cosine two-stage | Yes (32x) | 20+ | Yes |
+| **Codescope** | Graph (SurrealDB) + Vector + BQ | Yes | BQ + Cosine two-stage | Yes (32x) | 40+ | Yes |
 | **Greptile** | Graph + Vector (hybrid) | Yes | Cosine | No | Unspecified | No (cloud) |
 | **Sourcegraph** | Trigram (Zoekt) + SCIP | Partial (SCIP) | No | No | 30+ | No (cluster) |
 | **GitHub Search** | N-gram (Blackbird, Rust) | No | No | No | 600+ (Linguist) | No (cloud) |
@@ -141,7 +141,7 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 
 ### Areas for Improvement
 
-1. **Language count** - Aider supports 130+, GitHub 600+, Codescope currently 20+.
+1. **Language count** - Aider supports 130+, GitHub 600+, Codescope currently 40+ (32 tree-sitter + 9 content parsers).
 2. **Large-scale testing** - GitHub handles 45M repos; Codescope not yet tested at that scale.
 3. **Indexing throughput** - 23 files/s is good for local use but behind Sourcegraph's optimized pipeline.
 

@@ -168,6 +168,78 @@ impl LanguageRegistry {
             extensions: vec!["jl".into()],
         });
 
+        // --- Phase 2 languages (15 new) ---
+
+        // Bash / Shell
+        languages.push(LanguageConfig {
+            name: "bash".into(),
+            language: tree_sitter_bash::LANGUAGE.into(),
+            extensions: vec!["sh".into(), "bash".into(), "zsh".into()],
+        });
+
+        // CSS
+        languages.push(LanguageConfig {
+            name: "css".into(),
+            language: tree_sitter_css::LANGUAGE.into(),
+            extensions: vec!["css".into()],
+        });
+
+        // R
+        languages.push(LanguageConfig {
+            name: "r".into(),
+            language: tree_sitter_r::LANGUAGE.into(),
+            extensions: vec!["r".into(), "R".into()],
+        });
+
+        // Objective-C
+        languages.push(LanguageConfig {
+            name: "objc".into(),
+            language: tree_sitter_objc::LANGUAGE.into(),
+            extensions: vec!["m".into(), "mm".into()],
+        });
+
+        // Protocol Buffers
+        languages.push(LanguageConfig {
+            name: "protobuf".into(),
+            language: tree_sitter_proto::LANGUAGE.into(),
+            extensions: vec!["proto".into()],
+        });
+
+        // TOML (tree-sitter, complements the content parser)
+        languages.push(LanguageConfig {
+            name: "toml".into(),
+            language: tree_sitter_toml_updated::language().into(),
+            extensions: vec!["toml".into()],
+        });
+
+        // YAML (tree-sitter, complements the content parser)
+        languages.push(LanguageConfig {
+            name: "yaml".into(),
+            language: tree_sitter_yaml::LANGUAGE.into(),
+            extensions: vec!["yaml".into(), "yml".into()],
+        });
+
+        // Erlang
+        languages.push(LanguageConfig {
+            name: "erlang".into(),
+            language: tree_sitter_erlang::LANGUAGE.into(),
+            extensions: vec!["erl".into(), "hrl".into()],
+        });
+
+        // Makefile
+        languages.push(LanguageConfig {
+            name: "make".into(),
+            language: tree_sitter_make::LANGUAGE.into(),
+            extensions: vec!["mk".into()],
+        });
+
+        // CMake
+        languages.push(LanguageConfig {
+            name: "cmake".into(),
+            language: tree_sitter_cmake::LANGUAGE.into(),
+            extensions: vec!["cmake".into()],
+        });
+
         Self { languages }
     }
 

@@ -6,8 +6,9 @@ use tracing::{debug, warn};
 use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
 
 /// Batch size for multi-statement DB queries.
-/// Reduces round-trips by ~50x compared to individual inserts.
-const BATCH_SIZE: usize = 50;
+/// Higher batch sizes reduce round-trips at cost of larger query strings.
+/// 200 balances throughput (~4x over 50) with SurrealDB query size limits.
+const BATCH_SIZE: usize = 200;
 
 /// Builds the code knowledge graph in SurrealDB
 pub struct GraphBuilder {

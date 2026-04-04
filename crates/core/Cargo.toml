@@ -44,6 +44,18 @@ tree-sitter-ocaml = "0.24"
 tree-sitter-html = "0.23"
 tree-sitter-julia = "0.23"
 
+# New languages (Phase 2 expansion)
+tree-sitter-bash = "0.25"
+tree-sitter-css = "0.25"
+tree-sitter-r = "1.2"
+tree-sitter-objc = "3.0"
+tree-sitter-proto = "0.4"
+tree-sitter-toml-updated = "0.20"
+tree-sitter-yaml = "0.7"
+tree-sitter-erlang = "0.15"
+tree-sitter-make = "1.1"
+tree-sitter-cmake = "0.7"
+
 # Config parsing
 serde_yaml = "0.9"
 toml = "0.8"

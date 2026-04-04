@@ -248,13 +248,18 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             .await
             .unwrap_or_default();
 
-            // Phase 2: Batch insert results (async DB operations)
+            // Phase 2: Cross-file buffered insert (async DB operations)
+            // Accumulate across files for fewer, larger DB round-trips
+            let mut all_entities = Vec::with_capacity(results.len() * 10);
+            let mut all_relations = Vec::with_capacity(results.len() * 15);
             let mut file_count = 0;
             for (entities, relations) in results {
-                let _ = builder.insert_entities(&entities).await;
-                let _ = builder.insert_relations(&relations).await;
+                all_entities.extend(entities);
+                all_relations.extend(relations);
                 file_count += 1;
             }
+            let _ = builder.insert_entities(&all_entities).await;
+            let _ = builder.insert_relations(&all_relations).await;
 
             tracing::info!("Background indexing complete: {} files", file_count);
 
