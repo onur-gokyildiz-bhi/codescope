@@ -618,9 +618,15 @@ async fn cmd_embed(
     println!("Embedding with {} (model: {})...", provider, model);
 
     let pipeline = EmbeddingPipeline::new(db, embedding_provider);
-    let count = pipeline.embed_functions(batch_size).await?;
+    let result = pipeline.embed_functions(batch_size).await?;
+    let backfilled = pipeline.backfill_binary_quantization().await.unwrap_or(0);
+    let dims = pipeline.dimensions();
+    let bq_bytes = (dims + 7) / 8;
 
-    println!("Embedded {} functions", count);
+    println!("Embedded {} functions with Binary Quantization", result.embedded);
+    println!("  BQ backfilled: {}", backfilled);
+    println!("  Memory: f32 = {} bytes/vec, BQ = {} bytes/vec ({}x smaller)",
+        dims * 4, bq_bytes, (dims * 4) / bq_bytes);
     Ok(())
 }
 
@@ -659,15 +665,19 @@ async fn cmd_semantic_search(
         return Ok(());
     }
 
-    println!("Semantic search results for '{}':\n", query);
+    let has_bq = results.first().and_then(|r| r.hamming_distance).is_some();
+    let mode = if has_bq { "BQ + Cosine (two-stage)" } else { "Cosine only" };
+    println!("Semantic search results for '{}' [{}]:\n", query, mode);
     for (i, r) in results.iter().enumerate() {
+        let hamming = r.hamming_distance.map(|h| format!(" hamming:{}", h)).unwrap_or_default();
         println!(
-            "{}. {} ({}:{}) — score: {:.4}",
+            "{}. {} ({}:{}) — cosine: {:.4}{}",
             i + 1,
             r.name,
             r.file_path,
             r.start_line.unwrap_or(0),
             r.score.unwrap_or(0.0),
+            hamming,
         );
         if let Some(sig) = &r.signature {
             println!("   {}", sig);

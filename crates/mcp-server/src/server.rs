@@ -1787,13 +1787,27 @@ impl GraphRagServer {
 
         let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(ctx.db, provider);
 
+        // First embed new functions
         match pipeline.embed_functions(batch_size).await {
-            Ok(count) => format!(
-                "Embedded {} functions using {} ({} dimensions)",
-                count,
-                pipeline.provider_name(),
-                pipeline.dimensions()
-            ),
+            Ok(result) => {
+                // Also backfill BQ for any pre-existing embeddings without binary vectors
+                let backfilled = pipeline.backfill_binary_quantization().await.unwrap_or(0);
+                let dims = pipeline.dimensions();
+                let bq_bytes = (dims + 7) / 8;
+
+                format!(
+                    "## Embedding Complete\n\n\
+                     - **Embedded:** {} functions ({} dimensions)\n\
+                     - **Binary Quantized:** {} (BQ backfilled: {})\n\
+                     - **Memory per vector:** f32 = {} bytes, BQ = {} bytes (**{}x smaller**)\n\
+                     - **Provider:** {}\n\
+                     - **Search mode:** Two-stage (Hamming pre-filter → Cosine rerank)",
+                    result.embedded, dims,
+                    result.binary_quantized, backfilled,
+                    dims * 4, bq_bytes, (dims * 4) / bq_bytes,
+                    pipeline.provider_name()
+                )
+            }
             Err(e) => format!("Error embedding functions: {}", e),
         }
     }
@@ -1839,15 +1853,19 @@ impl GraphRagServer {
                         params.query
                     );
                 }
-                let mut output = format!("## Semantic Search: '{}'\n\n", params.query);
+                let has_bq = results.first().and_then(|r| r.hamming_distance).is_some();
+                let mode = if has_bq { "BQ + Cosine (two-stage)" } else { "Cosine only" };
+                let mut output = format!("## Semantic Search: '{}'\n**Mode:** {}\n\n", params.query, mode);
                 for (i, r) in results.iter().enumerate() {
                     let score = r.score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "?".into());
+                    let hamming = r.hamming_distance.map(|h| format!(" (hamming: {})", h)).unwrap_or_default();
                     output.push_str(&format!(
-                        "{}. **{}** ({}) — score: {}\n",
+                        "{}. **{}** ({}) — cosine: {}{}\n",
                         i + 1,
                         r.name,
                         r.file_path,
                         score,
+                        hamming,
                     ));
                     if let Some(sig) = &r.signature {
                         output.push_str(&format!("   `{}`\n", sig));
