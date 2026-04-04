@@ -297,7 +297,10 @@ impl ServerHandler for GraphRagServer {
         let base_instructions = "Code Graph RAG — Intelligent code knowledge graph. \
              Search, analyze, and query your codebase using a graph database. \
              Supports semantic search, call graph analysis, impact analysis, \
-             conversation history, and Obsidian-like knowledge navigation.";
+             conversation history, and Obsidian-like knowledge navigation.\n\n\
+             IMPORTANT: In daemon/SSE mode, you MUST call init_project first with the repo name \
+             and codebase path before using any other tools. This initializes the DB connection \
+             and triggers auto-indexing. Example: init_project(repo='my-project', path='/path/to/code')";
 
         // Try to include cached conversation context (non-blocking)
         let context = self.context_summary.try_read()
@@ -349,8 +352,8 @@ impl GraphRagServer {
             codebase_path: codebase_path.clone(),
         });
 
-        // Auto-index in background with parallel parsing
-        if params.auto_index.unwrap_or(false) {
+        // Auto-index in background with parallel parsing (default: true)
+        if params.auto_index.unwrap_or(true) {
             let index_repo = repo_name.clone();
             let index_path = codebase_path.clone();
             tokio::spawn(async move {
