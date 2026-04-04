@@ -297,8 +297,8 @@ impl ServerHandler for GraphRagServer {
         let base_instructions = "Code Graph RAG — Intelligent code knowledge graph. \
              Search, analyze, and query your codebase using a graph database. \
              Supports semantic search, call graph analysis, impact analysis, \
-             conversation history, and Obsidian-like knowledge navigation.\n\n\
-             IMPORTANT: In daemon/SSE mode, you MUST call init_project first with the repo name \
+             conversation history, and Obsidian-like knowledge navigation. \
+             --- IMPORTANT: In daemon/SSE mode, you MUST call init_project first with the repo name \
              and codebase path before using any other tools. This initializes the DB connection \
              and triggers auto-indexing. Example: init_project(repo='my-project', path='/path/to/code')";
 
@@ -357,7 +357,7 @@ impl GraphRagServer {
             let index_repo = repo_name.clone();
             let index_path = codebase_path.clone();
             tokio::spawn(async move {
-                tracing::info!("Background indexing {}...", index_path.display());
+                tracing::info!("Background indexing {} (exists={})", index_path.display(), index_path.exists());
                 let builder = codescope_core::graph::builder::GraphBuilder::new(db);
 
                 // Parse files in parallel (CPU-bound, rayon thread pool)
@@ -367,8 +367,9 @@ impl GraphRagServer {
                     use rayon::prelude::*;
                     let parser = codescope_core::parser::CodeParser::new();
                     let walker = ignore::WalkBuilder::new(&parse_path)
-                        .hidden(true)
+                        .hidden(false)
                         .git_ignore(true)
+                        .git_global(true)
                         .build();
 
                     let files: Vec<std::path::PathBuf> = walker
@@ -587,11 +588,21 @@ impl GraphRagServer {
     /// Index or re-index the codebase into the graph database
     #[tool(description = "Index the codebase into the knowledge graph. Parses source files and extracts entities and relationships.")]
     async fn index_codebase(&self, #[tool(aggr)] params: IndexParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return format!("[v2] ERROR: {}", e),
+        };
         let target_path = match &params.path {
             Some(p) => ctx.codebase_path.join(p),
             None => ctx.codebase_path.clone(),
         };
+        // Early diagnostic output for debugging
+        let exists = target_path.exists();
+        let is_dir = target_path.is_dir();
+        if !exists {
+            return format!("[v2] Path does not exist: {} (codebase_path={}, param_path={:?})",
+                target_path.display(), ctx.codebase_path.display(), params.path);
+        }
 
         let parser = codescope_core::parser::CodeParser::new();
         let builder = codescope_core::graph::builder::GraphBuilder::new(ctx.db.clone());
@@ -611,9 +622,12 @@ impl GraphRagServer {
             std::collections::HashMap::new()
         };
 
+        tracing::info!("index_codebase: target_path={}, exists={}", target_path.display(), target_path.exists());
+
         let walker = ignore::WalkBuilder::new(&target_path)
-            .hidden(true)
+            .hidden(false)
             .git_ignore(true)
+            .git_global(true)
             .build();
 
         let mut files_indexed = 0;
@@ -621,12 +635,18 @@ impl GraphRagServer {
         let mut entities = 0;
         let mut relations = 0;
         let mut errors = Vec::new();
+        let mut total_walked = 0usize;
+        let mut total_supported = 0usize;
 
         for entry in walker {
             let entry = match entry {
                 Ok(e) => e,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!("Walk error: {}", e);
+                    continue;
+                }
             };
+            total_walked += 1;
             if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                 continue;
             }
@@ -636,6 +656,7 @@ impl GraphRagServer {
             if !parser.supports_extension(ext) && !parser.supports_filename(filename) {
                 continue;
             }
+            total_supported += 1;
             if codescope_core::parser::should_skip_file(file_path) {
                 continue;
             }
@@ -685,8 +706,8 @@ impl GraphRagServer {
         };
 
         let mut output = format!(
-            "Indexing complete!\n- Files indexed: {}\n- Files unchanged (skipped): {}\n- Entities: {}\n- Relations: {}",
-            files_indexed, files_skipped, entities, relations
+            "[v2] Indexing complete!\n- Path: {} (exists: {}, is_dir: {})\n- Files walked: {}\n- Files supported: {}\n- Files indexed: {}\n- Files unchanged (skipped): {}\n- Entities: {}\n- Relations: {}",
+            target_path.display(), exists, is_dir, total_walked, total_supported, files_indexed, files_skipped, entities, relations
         );
         if deleted > 0 {
             output.push_str(&format!("\n- Deleted files cleaned: {}", deleted));
