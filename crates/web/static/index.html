@@ -63,6 +63,32 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-s
 /* ====== Controls Hint ====== */
 #controls-hint { position:absolute; top:14px; left:14px; background:rgba(22,27,34,.85); border:1px solid var(--border); border-radius:var(--radius); padding:8px 12px; font-size:11px; color:var(--text-dim); z-index:10; backdrop-filter:blur(10px); pointer-events:none; line-height:1.6; }
 
+/* ====== Conversation Panel ====== */
+#conv-panel { width:380px; background:var(--surface); border-left:1px solid var(--border); overflow-y:auto; flex-shrink:0; display:none; font-size:13px; z-index:10; }
+#conv-panel.open { display:flex; flex-direction:column; }
+.conv-head { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.conv-head h2 { font-size:14px; color:var(--amber); }
+.conv-tabs { display:flex; border-bottom:1px solid var(--border); }
+.conv-tab { flex:1; padding:8px; text-align:center; font-size:11px; cursor:pointer; color:var(--text-dim); border-bottom:2px solid transparent; transition:all .15s; }
+.conv-tab:hover { color:var(--text); background:#21262d; }
+.conv-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.conv-list { flex:1; overflow-y:auto; padding:0; }
+.conv-item { padding:10px 14px; border-bottom:1px solid #21262d; }
+.conv-item:hover { background:#21262d44; }
+.conv-kind { display:inline-block; padding:1px 7px; border-radius:4px; font-size:10px; font-weight:600; margin-bottom:4px; }
+.conv-kind.decision { background:#D2992233; color:var(--amber); }
+.conv-kind.problem { background:#F8514933; color:var(--red); }
+.conv-kind.solution { background:#3FB95033; color:var(--green); }
+.conv-kind.topic { background:#BC8CFF33; color:var(--purple); }
+.conv-name { font-size:12px; font-weight:600; color:var(--text); margin-bottom:3px; }
+.conv-body { font-size:11px; color:var(--text-dim); line-height:1.5; max-height:80px; overflow:hidden; }
+.conv-meta { font-size:10px; color:#484f58; margin-top:4px; }
+.conv-link { font-size:10px; color:var(--accent); display:inline-block; margin-top:3px; cursor:pointer; }
+.conv-link:hover { text-decoration:underline; }
+.conv-empty { padding:30px; text-align:center; color:var(--text-dim); font-size:12px; }
+#conv-btn { background:none; border:1px solid var(--border); border-radius:var(--radius); color:var(--amber); padding:5px 12px; font-size:12px; cursor:pointer; white-space:nowrap; }
+#conv-btn:hover { background:#21262d; border-color:var(--amber); }
+
 /* ====== Responsive ====== */
 @media (max-width: 768px) {
   #sidebar { position:absolute; right:0; top:0; bottom:0; width:280px; box-shadow: -4px 0 20px rgba(0,0,0,.5); }
@@ -80,6 +106,7 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-s
     <input id="search" type="text" placeholder="Search functions, classes, files..." autocomplete="off" />
     <div id="autocomplete"></div>
   </div>
+  <button id="conv-btn" onclick="toggleConvPanel()">&#128172; History</button>
 </div>
 
 <div id="main">
@@ -100,6 +127,16 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-s
   <div id="sidebar">
     <div class="sb-head"><h2 id="sb-title">-</h2><button class="sb-close" onclick="closeSidebar()">&times;</button></div>
     <div id="sb-content"></div>
+  </div>
+  <div id="conv-panel">
+    <div class="conv-head"><h2>Conversation History</h2><button class="sb-close" onclick="toggleConvPanel()">&times;</button></div>
+    <div class="conv-tabs">
+      <div class="conv-tab active" onclick="showConvTab('all',this)">All</div>
+      <div class="conv-tab" onclick="showConvTab('decisions',this)">Decisions</div>
+      <div class="conv-tab" onclick="showConvTab('problems',this)">Problems</div>
+      <div class="conv-tab" onclick="showConvTab('solutions',this)">Solutions</div>
+    </div>
+    <div class="conv-list" id="conv-list"></div>
   </div>
 </div>
 
@@ -417,6 +454,101 @@ async function loadStats() {
 
 // ===== Helpers =====
 function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// ===== Conversation Panel =====
+let convData = null;
+let convFilter = 'all';
+
+function toggleConvPanel() {
+  const panel = document.getElementById('conv-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open') && !convData) loadConversations();
+}
+
+function showConvTab(tab, el) {
+  convFilter = tab;
+  document.querySelectorAll('.conv-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderConversations();
+}
+
+async function loadConversations() {
+  try {
+    const r = await fetch('/api/conversations');
+    convData = await r.json();
+    renderConversations();
+  } catch (e) {
+    document.getElementById('conv-list').innerHTML = '<div class="conv-empty">Could not load conversations</div>';
+  }
+}
+
+function renderConversations() {
+  if (!convData) return;
+  const list = document.getElementById('conv-list');
+  let items = [];
+
+  if (convFilter === 'all' || convFilter === 'decisions') {
+    (convData.decisions || []).forEach(d => items.push({ ...d, _kind: 'decision' }));
+  }
+  if (convFilter === 'all' || convFilter === 'problems') {
+    (convData.problems || []).forEach(d => items.push({ ...d, _kind: 'problem' }));
+  }
+  if (convFilter === 'all' || convFilter === 'solutions') {
+    (convData.solutions || []).forEach(d => items.push({ ...d, _kind: 'solution' }));
+  }
+
+  // Build code link lookup
+  const codeLinks = {};
+  (convData.code_decisions || []).forEach(r => {
+    if (r.segment && r.entity) {
+      if (!codeLinks[r.segment]) codeLinks[r.segment] = [];
+      codeLinks[r.segment].push(r.entity);
+    }
+  });
+  (convData.code_discussions || []).forEach(r => {
+    if (r.segment && r.entity) {
+      if (!codeLinks[r.segment]) codeLinks[r.segment] = [];
+      codeLinks[r.segment].push(r.entity);
+    }
+  });
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="conv-empty">No conversation data.<br><br>Run <code>index_conversations</code> in MCP to import Claude Code sessions.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const item of items) {
+    const name = item.name || '?';
+    const body = (item.body || '').substring(0, 200);
+    const ts = item.timestamp || '';
+    const file = item.file_path || '';
+    const kind = item._kind;
+    const linked = codeLinks[name] || [];
+
+    html += `<div class="conv-item">
+      <span class="conv-kind ${kind}">${kind}</span>
+      <div class="conv-name">${esc(name)}</div>
+      <div class="conv-body">${esc(body)}</div>`;
+
+    if (linked.length > 0) {
+      html += `<div style="margin-top:4px">`;
+      for (const entity of linked.slice(0, 5)) {
+        html += `<span class="conv-link" onclick="nav('${esc(entity)}')">${esc(entity)}</span> `;
+      }
+      html += `</div>`;
+    }
+
+    if (ts || file) {
+      html += `<div class="conv-meta">`;
+      if (ts) html += ts;
+      if (file) html += ` &middot; ${esc(file)}`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  list.innerHTML = html;
+}
 
 // ===== Boot =====
 loadStats();

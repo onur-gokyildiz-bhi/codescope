@@ -145,6 +145,7 @@ async fn main() -> Result<()> {
         .route("/api/search", get(api_search))
         .route("/api/graph", get(api_graph))
         .route("/api/query", get(api_raw_query))
+        .route("/api/conversations", get(api_conversations))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", args.port);
@@ -426,6 +427,38 @@ fn extract_neighbors(
                 edges.push(GraphEdge { source: src, target: tgt, kind: "calls".to_string() });
             }
         }
+    }
+}
+
+async fn api_conversations(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let query = "\
+        SELECT name, body, kind, timestamp, file_path FROM decision ORDER BY timestamp DESC LIMIT 50; \
+        SELECT name, body, kind, timestamp, file_path FROM problem ORDER BY timestamp DESC LIMIT 50; \
+        SELECT name, body, kind, timestamp, file_path FROM solution ORDER BY timestamp DESC LIMIT 50; \
+        SELECT name, body, kind, timestamp FROM conv_topic ORDER BY timestamp DESC LIMIT 30; \
+        SELECT name, qualified_name, file_path, body FROM conversation ORDER BY name LIMIT 20; \
+        SELECT out.name AS entity, in.name AS segment, 'decided_about' AS rel \
+            FROM decided_about LIMIT 50; \
+        SELECT out.name AS entity, in.name AS segment, 'discussed_in' AS rel \
+            FROM discussed_in LIMIT 50;";
+
+    match state.query.raw_query(query).await {
+        Ok(result) => {
+            let items = result.as_array();
+            let mut out = serde_json::Map::new();
+            let keys = ["decisions", "problems", "solutions", "topics", "sessions", "code_decisions", "code_discussions"];
+            if let Some(arr) = items {
+                for (i, key) in keys.iter().enumerate() {
+                    let data = arr.get(i)
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    out.insert(key.to_string(), serde_json::Value::Array(data));
+                }
+            }
+            Json(serde_json::Value::Object(out)).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
