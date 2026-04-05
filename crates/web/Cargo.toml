@@ -17,3 +17,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 dirs = "5"
+rayon = { workspace = true }
+ignore = { workspace = true }

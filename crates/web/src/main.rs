@@ -33,6 +33,10 @@ struct Args {
     /// Port to listen on
     #[arg(long, default_value = "8080")]
     port: u16,
+
+    /// Auto-index the codebase on startup
+    #[arg(long)]
+    auto_index: bool,
 }
 
 struct AppState {
@@ -73,6 +77,63 @@ async fn main() -> Result<()> {
     db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
     println!("DB: {} (ns: codescope, db: {})", db_path.display(), repo_name);
+
+    // Auto-index if requested
+    if args.auto_index {
+        let codebase_path = std::fs::canonicalize(&args.path).unwrap_or(args.path.clone());
+        println!("Indexing {}...", codebase_path.display());
+
+        let parser = codescope_core::parser::CodeParser::new();
+        let builder = codescope_core::graph::builder::GraphBuilder::new(db.clone());
+
+        let parse_path = codebase_path.clone();
+        let parse_repo = repo_name.clone();
+        let results = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
+            let walker = ignore::WalkBuilder::new(&parse_path)
+                .hidden(true)
+                .git_ignore(true)
+                .build();
+
+            let files: Vec<std::path::PathBuf> = walker
+                .flatten()
+                .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+                .filter(|e| {
+                    let fp = e.path();
+                    let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let fname = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    (parser.supports_extension(ext) || parser.supports_filename(fname))
+                        && !codescope_core::parser::should_skip_file(fp)
+                })
+                .map(|e| e.into_path())
+                .collect();
+
+            println!("Found {} files to parse", files.len());
+
+            files
+                .par_iter()
+                .filter_map(|file_path| {
+                    let rel_path = file_path
+                        .strip_prefix(&parse_path)
+                        .unwrap_or(file_path)
+                        .to_string_lossy()
+                        .to_string()
+                        .replace('\\', "/");
+                    let content = std::fs::read_to_string(file_path).ok()?;
+                    parser.parse_source(std::path::Path::new(&rel_path), &content, &parse_repo).ok()
+                })
+                .collect::<Vec<_>>()
+        })
+        .await?;
+
+        let mut file_count = 0;
+        for (entities, relations) in results {
+            let _ = builder.insert_entities(&entities).await;
+            let _ = builder.insert_relations(&relations).await;
+            file_count += 1;
+        }
+        println!("Indexed {} files", file_count);
+    }
 
     let state = Arc::new(AppState {
         query: GraphQuery::new(db),
