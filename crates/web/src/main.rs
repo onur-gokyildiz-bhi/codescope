@@ -18,6 +18,10 @@ use codescope_core::graph::query::GraphQuery;
 #[command(name = "codescope-web")]
 #[command(about = "Codescope Web UI — Graph visualization dashboard")]
 struct Args {
+    /// Path to the codebase to visualize
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
     /// Database path (default: ~/.codescope/db/{repo})
     #[arg(long)]
     db_path: Option<PathBuf>,
@@ -43,8 +47,13 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Resolve DB path: explicit --db-path > --repo > default
-    let repo_name = args.repo.unwrap_or_else(|| "default".to_string());
+    // Resolve repo name: --repo > directory name > "default"
+    let repo_name = args.repo.unwrap_or_else(|| {
+        args.path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("default")
+            .to_string()
+    });
     let db_path = args.db_path.unwrap_or_else(|| {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
