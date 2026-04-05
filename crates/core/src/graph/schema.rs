@@ -153,6 +153,24 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON package TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS pkg_qname ON package FIELDS qualified_name UNIQUE;
 
+        -- === HTTP CLIENT CALL TABLE (cross-service linking) ===
+
+        DEFINE TABLE IF NOT EXISTS http_call SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS method ON http_call TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS url_pattern ON http_call TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS file_path ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS language ON http_call TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON http_call TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON http_call TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON http_call TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS http_call_qname ON http_call FIELDS qualified_name UNIQUE;
+        DEFINE INDEX IF NOT EXISTS http_call_method ON http_call FIELDS method;
+        DEFINE INDEX IF NOT EXISTS http_call_file_repo ON http_call FIELDS file_path, repo;
+
         -- === CONVERSATION TABLES (Claude session transcripts) ===
 
         DEFINE TABLE IF NOT EXISTS conversation SCHEMAFULL;
@@ -247,6 +265,9 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE decided_about TYPE RELATION SCHEMAFULL;
         DEFINE TABLE solves_for TYPE RELATION SCHEMAFULL;
         DEFINE TABLE co_discusses TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE calls_endpoint TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS method ON calls_endpoint TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS url_pattern ON calls_endpoint TYPE option<string>;
 
         -- === COMPOSITE INDEXES (performance: file_path+repo queries) ===
 

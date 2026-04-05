@@ -4,6 +4,7 @@
 mod parser;
 mod classifier;
 mod entity_linker;
+pub mod compressor;
 
 use anyhow::Result;
 use std::path::Path;
@@ -102,7 +103,7 @@ pub fn parse_conversation(
             start_col: 0,
             end_col: 0,
             signature: None,
-            body: Some(truncate(&seg.body, 500)),
+            body: Some(compressor::compress_segment(&seg.body, 500)),
             body_hash: None,
             language: "conversation".to_string(),
         });

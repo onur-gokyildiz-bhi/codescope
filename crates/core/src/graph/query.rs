@@ -355,6 +355,169 @@ impl GraphQuery {
         Ok(serde_json::Value::Object(result))
     }
 
+    // ===== HTTP Cross-Service Linking =====
+
+    /// Find all HTTP client calls in the codebase, optionally filtered by method.
+    pub async fn find_http_calls(&self, method: Option<&str>) -> Result<Vec<serde_json::Value>> {
+        if let Some(m) = method {
+            let m = m.to_uppercase();
+            let results: Vec<serde_json::Value> = self
+                .db
+                .query(
+                    "SELECT name, qualified_name, file_path, start_line, end_line, kind AS method, body \
+                     FROM http_call WHERE kind = $method ORDER BY file_path, start_line"
+                )
+                .bind(("method", m))
+                .await?
+                .take(0)?;
+            Ok(results)
+        } else {
+            let results: Vec<serde_json::Value> = self
+                .db
+                .query(
+                    "SELECT name, qualified_name, file_path, start_line, end_line, kind AS method \
+                     FROM http_call ORDER BY file_path, start_line"
+                )
+                .await?
+                .take(0)?;
+            Ok(results)
+        }
+    }
+
+    /// Find which functions make HTTP calls to a given endpoint path pattern.
+    pub async fn find_endpoint_callers(&self, endpoint_pattern: &str) -> Result<Vec<serde_json::Value>> {
+        let pattern = endpoint_pattern.to_lowercase();
+        let results: Vec<serde_json::Value> = self
+            .db
+            .query(
+                "SELECT in.name AS caller_name, in.file_path AS caller_file, \
+                 in.signature AS caller_signature, \
+                 out.name AS http_call, out.kind AS method, out.file_path AS call_file, \
+                 out.start_line AS call_line \
+                 FROM calls_endpoint WHERE string::contains(string::lowercase(out.name), $pattern)"
+            )
+            .bind(("pattern", pattern))
+            .await?
+            .take(0)?;
+        Ok(results)
+    }
+
+    // ===== Symbol-Level Operations =====
+
+    /// Find all references to a symbol (function/class) across the codebase.
+    /// Used by rename_symbol to show what would change.
+    pub async fn find_all_references(&self, name: &str) -> Result<serde_json::Value> {
+        let n = name.to_string();
+
+        let mut response = self.db.query(
+            // Definition sites
+            "SELECT name, qualified_name, file_path, start_line, end_line, signature, \
+                    'definition' AS ref_type FROM `function` WHERE name = $name; \
+             SELECT name, qualified_name, file_path, start_line, end_line, kind, \
+                    'definition' AS ref_type FROM class WHERE name = $name; \
+             // Call sites (where this function is called)
+             SELECT in.name AS caller_name, in.file_path AS file_path, \
+                    in.start_line AS start_line, 'call_site' AS ref_type, \
+                    meta::id(id) AS edge_id \
+                    FROM calls WHERE out.name = $name AND in.name != NONE; \
+             // Import references
+             SELECT name, file_path, start_line, 'import' AS ref_type \
+                    FROM import_decl WHERE string::contains(name, $name);"
+        ).bind(("name", n)).await?;
+
+        let definitions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        let class_defs: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+        let call_sites: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+        let imports: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+
+        let mut all_refs = Vec::new();
+        all_refs.extend(definitions);
+        all_refs.extend(class_defs);
+        all_refs.extend(call_sites);
+        all_refs.extend(imports);
+
+        let mut result = serde_json::Map::new();
+        result.insert("symbol".into(), serde_json::Value::String(name.to_string()));
+        result.insert("total_references".into(), serde_json::Value::Number(all_refs.len().into()));
+        result.insert("references".into(), serde_json::Value::Array(all_refs));
+
+        Ok(serde_json::Value::Object(result))
+    }
+
+    /// Find unused symbols — functions/classes with zero callers/importers.
+    /// Filters out entry points (main, test_, handler, new, init).
+    pub async fn find_unused_symbols(&self, min_lines: u32) -> Result<Vec<serde_json::Value>> {
+        let results: Vec<serde_json::Value> = self.db.query(
+            "SELECT name, file_path, start_line, end_line, signature, \
+                    (end_line - start_line) AS line_count \
+             FROM `function` WHERE \
+                 name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
+                 AND name != 'main' \
+                 AND string::starts_with(name, 'test_') = false \
+                 AND string::starts_with(name, 'Test') = false \
+                 AND name != 'new' AND name != 'init' AND name != 'setup' \
+                 AND name != 'default' AND name != 'from' AND name != 'into' \
+                 AND name != 'drop' AND name != 'clone' AND name != 'fmt' \
+                 AND name != 'serialize' AND name != 'deserialize' \
+                 AND (end_line - start_line) >= $min_lines \
+             ORDER BY (end_line - start_line) DESC \
+             LIMIT 50"
+        ).bind(("min_lines", min_lines)).await?.take(0)?;
+
+        Ok(results)
+    }
+
+    /// Check if a symbol can be safely deleted — zero references anywhere.
+    pub async fn safe_delete_check(&self, name: &str) -> Result<serde_json::Value> {
+        let n = name.to_string();
+
+        let mut response = self.db.query(
+            // Check callers
+            "SELECT count() AS cnt FROM calls WHERE out.name = $name GROUP ALL; \
+             // Check if imported anywhere
+             SELECT count() AS cnt FROM import_decl WHERE string::contains(name, $name) GROUP ALL; \
+             // Get the entity details
+             SELECT name, file_path, start_line, end_line, signature \
+                    FROM `function` WHERE name = $name; \
+             SELECT name, file_path, start_line, end_line, kind \
+                    FROM class WHERE name = $name;"
+        ).bind(("name", n)).await?;
+
+        let callers: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        let importers: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+        let fn_defs: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+        let class_defs: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+
+        let caller_count = callers.first()
+            .and_then(|v| v.get("cnt"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let import_count = importers.first()
+            .and_then(|v| v.get("cnt"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let is_safe = caller_count == 0 && import_count == 0;
+
+        let mut definitions = Vec::new();
+        definitions.extend(fn_defs);
+        definitions.extend(class_defs);
+
+        let mut result = serde_json::Map::new();
+        result.insert("symbol".into(), serde_json::Value::String(name.to_string()));
+        result.insert("safe_to_delete".into(), serde_json::Value::Bool(is_safe));
+        result.insert("caller_count".into(), serde_json::Value::Number(caller_count.into()));
+        result.insert("import_count".into(), serde_json::Value::Number(import_count.into()));
+        result.insert("definitions".into(), serde_json::Value::Array(definitions));
+        if !is_safe {
+            result.insert("reason".into(), serde_json::Value::String(
+                format!("{} callers, {} imports still reference this symbol", caller_count, import_count)
+            ));
+        }
+
+        Ok(serde_json::Value::Object(result))
+    }
+
     /// Find all incoming references to an entity — Obsidian-like backlinks.
     /// "What calls/imports/contains/depends on this?"
     pub async fn backlinks(&self, name: &str) -> Result<serde_json::Value> {

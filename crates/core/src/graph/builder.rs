@@ -163,6 +163,7 @@ impl GraphBuilder {
                  DELETE FROM db_entity WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM infra WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM package WHERE file_path = $path AND repo = $repo; \
+                 DELETE FROM http_call WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM file WHERE path = $path AND repo = $repo;",
             )
             .bind(("path", file_path.to_string()))
@@ -186,7 +187,8 @@ impl GraphBuilder {
                  DELETE FROM api WHERE repo = $repo; \
                  DELETE FROM db_entity WHERE repo = $repo; \
                  DELETE FROM infra WHERE repo = $repo; \
-                 DELETE FROM package WHERE repo = $repo;",
+                 DELETE FROM package WHERE repo = $repo; \
+                 DELETE FROM http_call WHERE repo = $repo;",
             )
             .bind(("repo", repo.to_string()))
             .await?;
@@ -250,6 +252,47 @@ impl GraphBuilder {
             }
             Err(e) => {
                 warn!("Call target resolution failed: {}", e);
+                Ok(0)
+            }
+        }
+    }
+
+    /// Link HTTP client calls to matching API endpoint definitions.
+    ///
+    /// Matches http_call entities to api entities by HTTP method + path pattern.
+    /// For example: http_call "GET /users/{id}" → api "GET /users/{id}".
+    pub async fn link_http_endpoints(&self, repo: &str) -> Result<usize> {
+        let repo_escaped = repo.replace('\'', "\\'");
+
+        // Find all HTTP calls and API endpoints in the repo,
+        // then match by method + normalized path
+        let query = format!(
+            "LET $calls = (SELECT id, name, kind, qualified_name FROM http_call WHERE repo = '{}');
+             LET $endpoints = (SELECT id, name, qualified_name FROM api WHERE repo = '{}' AND kind = 'ApiEndpoint');
+             LET $linked = 0;
+             FOR $call IN $calls {{
+               FOR $ep IN $endpoints {{
+                 IF string::lowercase($call.name) = string::lowercase($ep.name) {{
+                   RELATE ($call.id)->calls_endpoint->($ep.id) SET method = $call.kind;
+                   LET $linked = $linked + 1;
+                 }};
+               }};
+             }};
+             RETURN $linked;",
+            repo_escaped, repo_escaped,
+        );
+
+        match self.db.query(&query).await {
+            Ok(mut response) => {
+                let count: Option<i64> = response.take(4).unwrap_or(None);
+                let linked = count.unwrap_or(0) as usize;
+                if linked > 0 {
+                    debug!("Linked {} HTTP calls to API endpoints", linked);
+                }
+                Ok(linked)
+            }
+            Err(e) => {
+                warn!("HTTP endpoint linking failed: {}", e);
                 Ok(0)
             }
         }

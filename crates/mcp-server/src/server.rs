@@ -60,6 +60,12 @@ pub struct FindCalleesParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct HttpCallParams {
+    /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH). If not specified, returns all HTTP calls.
+    pub method: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawQueryParams {
     /// SurrealQL query to execute
     pub query: String,
@@ -203,6 +209,18 @@ pub struct SemanticSearchParams {
     pub limit: Option<usize>,
     /// Embedding provider: "fastembed" (default), "ollama", or "openai"
     pub provider: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RenameSymbolParams {
+    /// Name of the symbol (function/class) to find all references for
+    pub symbol_name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SafeDeleteParams {
+    /// Name of the symbol to check for safe deletion
+    pub symbol_name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -742,6 +760,161 @@ impl GraphRagServer {
                 }
 
                 output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    // ===== HTTP Cross-Service Linking =====
+
+    /// Find HTTP client calls in the codebase
+    #[tool(description = "Find all HTTP client calls (reqwest, fetch, axios, requests) in the codebase. Optionally filter by HTTP method (GET, POST, PUT, DELETE, PATCH). Shows which functions make HTTP requests and to which endpoints.")]
+    async fn find_http_calls(&self, #[tool(aggr)] params: HttpCallParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+
+        match gq.find_http_calls(params.method.as_deref()).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    return "No HTTP client calls found in the codebase.".into();
+                }
+                let mut output = format!("Found {} HTTP client calls:\n\n", results.len());
+                for (i, r) in results.iter().enumerate() {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let file = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let line = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("{}. **{}** ({}:{})\n", i + 1, name, file, line));
+                }
+                output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Find which functions call a specific HTTP endpoint
+    #[tool(description = "Find all code functions that call a specific HTTP endpoint by URL pattern. Example: '/users' finds all code that makes HTTP requests to any /users endpoint. Shows the calling function, HTTP method, and location.")]
+    async fn find_endpoint_callers(&self, #[tool(aggr)] params: SearchParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+
+        match gq.find_endpoint_callers(&params.query).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    return format!("No functions found calling endpoint matching '{}'", params.query);
+                }
+                let mut output = format!("Found {} callers of endpoint '{}':\n\n", results.len(), params.query);
+                for (i, r) in results.iter().enumerate() {
+                    let caller = r.get("caller_name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let file = r.get("caller_file").and_then(|v| v.as_str()).unwrap_or("?");
+                    let method = r.get("method").and_then(|v| v.as_str()).unwrap_or("?");
+                    let http_call = r.get("http_call").and_then(|v| v.as_str()).unwrap_or("?");
+                    output.push_str(&format!(
+                        "{}. **{}** ({}) calls {} {}\n",
+                        i + 1, caller, file, method, http_call,
+                    ));
+                }
+                output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    // ===== Symbol-Level Operations =====
+
+    /// Find all references to a symbol for rename planning
+    #[tool(description = "Find all references to a symbol (function/class) across the codebase. Shows definitions, call sites, and imports. Use this to plan a rename — it shows every location that would need to change.")]
+    async fn rename_symbol(&self, #[tool(aggr)] params: RenameSymbolParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+
+        match gq.find_all_references(&params.symbol_name).await {
+            Ok(result) => {
+                let total = result.get("total_references").and_then(|v| v.as_u64()).unwrap_or(0);
+                if total == 0 {
+                    return format!("No references found for symbol '{}'", params.symbol_name);
+                }
+                let mut output = format!("**Symbol: {}** — {} references found\n\n", params.symbol_name, total);
+
+                if let Some(refs) = result.get("references").and_then(|v| v.as_array()) {
+                    for r in refs {
+                        let ref_type = r.get("ref_type").and_then(|v| v.as_str()).unwrap_or("?");
+                        let file = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                        let line = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let name = r.get("name").or_else(|| r.get("caller_name"))
+                            .and_then(|v| v.as_str()).unwrap_or("?");
+                        output.push_str(&format!("- [{}] **{}** at {}:{}\n", ref_type, name, file, line));
+                    }
+                }
+
+                output.push_str(&format!("\nTo rename '{}', all {} locations above need updating.", params.symbol_name, total));
+                output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Find unused symbols (functions with zero references)
+    #[tool(description = "Find unused symbols — functions that are never called by any other function. Filters out known entry points (main, test functions, handlers, constructors). Useful for codebase cleanup and reducing maintenance burden.")]
+    async fn find_unused(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+        let min_lines = params.min_lines.unwrap_or(3);
+
+        match gq.find_unused_symbols(min_lines).await {
+            Ok(results) => {
+                if results.is_empty() {
+                    return "No unused symbols found (or all are entry points/trivial).".into();
+                }
+                let limit = params.limit.unwrap_or(50);
+                let mut output = format!("Found {} potentially unused symbols (min {} lines):\n\n", results.len().min(limit), min_lines);
+                for (i, r) in results.iter().enumerate().take(limit) {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let file = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let lines = r.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let sig = r.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                    output.push_str(&format!("{}. **{}** ({}, {} lines)\n", i + 1, name, file, lines));
+                    if !sig.is_empty() {
+                        output.push_str(&format!("   `{}`\n", sig));
+                    }
+                }
+                output
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Check if a symbol can be safely deleted
+    #[tool(description = "Check if a symbol (function/class) can be safely deleted. Returns whether it has zero callers and zero importers. If not safe, shows what still references it.")]
+    async fn safe_delete(&self, #[tool(aggr)] params: SafeDeleteParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+
+        match gq.safe_delete_check(&params.symbol_name).await {
+            Ok(result) => {
+                let safe = result.get("safe_to_delete").and_then(|v| v.as_bool()).unwrap_or(false);
+                let callers = result.get("caller_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let imports = result.get("import_count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                if safe {
+                    let mut output = format!("**{}** can be safely deleted. No callers or imports reference it.\n\n", params.symbol_name);
+                    if let Some(defs) = result.get("definitions").and_then(|v| v.as_array()) {
+                        output.push_str("Definitions to remove:\n");
+                        for d in defs {
+                            let file = d.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                            let line = d.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                            output.push_str(&format!("- {}:{}\n", file, line));
+                        }
+                    }
+                    output
+                } else {
+                    format!(
+                        "**{}** is NOT safe to delete.\n\n\
+                         - {} callers still reference it\n\
+                         - {} imports mention it\n\n\
+                         Use `rename_symbol` to see all references.",
+                        params.symbol_name, callers, imports
+                    )
+                }
             }
             Err(e) => format!("Error: {}", e),
         }

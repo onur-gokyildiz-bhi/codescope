@@ -168,6 +168,97 @@ impl LanguageRegistry {
             extensions: vec!["jl".into()],
         });
 
+        // Bash / Shell
+        languages.push(LanguageConfig {
+            name: "bash".into(),
+            language: tree_sitter_bash::LANGUAGE.into(),
+            extensions: vec!["sh".into(), "bash".into(), "zsh".into()],
+        });
+
+        // R
+        languages.push(LanguageConfig {
+            name: "r".into(),
+            language: tree_sitter_r::LANGUAGE.into(),
+            extensions: vec!["r".into(), "R".into()],
+        });
+
+        // CSS
+        languages.push(LanguageConfig {
+            name: "css".into(),
+            language: tree_sitter_css::LANGUAGE.into(),
+            extensions: vec!["css".into()],
+        });
+
+        // Erlang
+        languages.push(LanguageConfig {
+            name: "erlang".into(),
+            language: tree_sitter_erlang::LANGUAGE.into(),
+            extensions: vec!["erl".into(), "hrl".into()],
+        });
+
+        // Objective-C
+        languages.push(LanguageConfig {
+            name: "objc".into(),
+            language: tree_sitter_objc::LANGUAGE.into(),
+            extensions: vec!["m".into(), "mm".into()],
+        });
+
+        // HCL / Terraform
+        languages.push(LanguageConfig {
+            name: "hcl".into(),
+            language: tree_sitter_hcl::LANGUAGE.into(),
+            extensions: vec!["hcl".into(), "tf".into(), "tfvars".into()],
+        });
+
+        // Nix
+        languages.push(LanguageConfig {
+            name: "nix".into(),
+            language: tree_sitter_nix::LANGUAGE.into(),
+            extensions: vec!["nix".into()],
+        });
+
+        // CMake
+        languages.push(LanguageConfig {
+            name: "cmake".into(),
+            language: tree_sitter_cmake::language(),
+            extensions: vec!["cmake".into()],
+        });
+
+        // Makefile
+        languages.push(LanguageConfig {
+            name: "make".into(),
+            language: tree_sitter_make::LANGUAGE.into(),
+            extensions: vec!["mk".into()],
+        });
+
+        // Verilog / SystemVerilog
+        languages.push(LanguageConfig {
+            name: "verilog".into(),
+            language: tree_sitter_verilog::LANGUAGE.into(),
+            extensions: vec!["v".into(), "sv".into(), "svh".into()],
+        });
+
+        // Fortran
+        languages.push(LanguageConfig {
+            name: "fortran".into(),
+            language: tree_sitter_fortran::LANGUAGE.into(),
+            extensions: vec!["f".into(), "f90".into(), "f95".into(), "f03".into(), "f08".into()],
+        });
+
+        // GLSL
+        languages.push(LanguageConfig {
+            name: "glsl".into(),
+            language: tree_sitter_glsl::LANGUAGE_GLSL.into(),
+            extensions: vec!["glsl".into(), "vert".into(), "frag".into(), "comp".into()],
+        });
+
+        // GraphQL
+        languages.push(LanguageConfig {
+            name: "graphql".into(),
+            language: tree_sitter_graphql::LANGUAGE.into(),
+            extensions: vec!["graphql".into(), "gql".into()],
+        });
+
         Self { languages }
     }
 

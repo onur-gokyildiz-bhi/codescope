@@ -39,7 +39,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Features
 
-- **28 supported formats**: 19 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
+- **44 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
 - **28 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
 - **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
@@ -458,7 +458,7 @@ The `ask` tool translates plain English questions to SurrealQL:
 
 ## Supported Languages & Formats
 
-### Programming Languages (19, tree-sitter)
+### Programming Languages (35, tree-sitter)
 
 | Language | Extensions |
 |----------|-----------|
@@ -481,6 +481,22 @@ The `ask` tool translates plain English questions to SurrealQL:
 | Haskell | `.hs` |
 | Elixir | `.ex`, `.exs` |
 | Lua | `.lua` |
+| OCaml | `.ml`, `.mli` |
+| HTML | `.html`, `.htm` |
+| Julia | `.jl` |
+| Bash | `.sh`, `.bash`, `.zsh` |
+| R | `.r`, `.R` |
+| CSS | `.css` |
+| Erlang | `.erl`, `.hrl` |
+| Objective-C | `.m`, `.mm` |
+| HCL / Terraform | `.hcl`, `.tf`, `.tfvars` |
+| Nix | `.nix` |
+| CMake | `.cmake` |
+| Makefile | `.mk` |
+| Verilog | `.v`, `.sv`, `.svh` |
+| Fortran | `.f`, `.f90`, `.f95`, `.f03`, `.f08` |
+| GLSL | `.glsl`, `.vert`, `.frag`, `.comp` |
+| GraphQL | `.graphql`, `.gql` |
 
 ### Content Formats (custom parsers)
 
@@ -692,7 +708,7 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed per-scenario results.
 codescope/
 ├── crates/
 │   ├── core/              # Graph engine, parsers, embeddings, temporal analysis
-│   │   ├── parser/        # tree-sitter (19 langs) + custom content parsers (9 formats)
+│   │   ├── parser/        # tree-sitter (39 langs) + custom content parsers (9 formats)
 │   │   ├── graph/         # SurrealDB schema, builder, query, incremental indexer
 │   │   ├── embeddings/    # FastEmbed/Ollama/OpenAI vector embedding pipeline
 │   │   ├── temporal/      # Git history analysis + graph sync
@@ -709,7 +725,7 @@ codescope/
 **Tech stack:**
 - **Rust** — Core language, zero-cost abstractions
 - **SurrealDB 2.x** — Embedded graph + document + vector database (RocksDB backend)
-- **tree-sitter** — Incremental parsing for 19 programming languages
+- **tree-sitter** — Incremental parsing for 35 programming languages
 - **FastEmbed** — In-process ONNX embeddings (zero external deps)
 - **rmcp** — Official Rust MCP SDK for AI agent integration
 - **git2** — Native git history analysis
@@ -770,7 +786,7 @@ How does Codescope compare to other code intelligence tools?
 |---------|-----------|---------------------|------------------|--------|----------------|----------------|
 | **Language** | Rust | C | Python | Python | Node.js | Python |
 | **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
-| **Languages** | 19 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
+| **Languages** | 35 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
 | **MCP Server** | Yes (28 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
 | **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
 | **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
@@ -799,7 +815,7 @@ How does Codescope compare to other code intelligence tools?
 
 1. **Graph + Embeddings + Conversations** — Structural code graph, semantic search, AND conversation memory in a single binary. No other tool does all three.
 2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
-3. **Beyond code** — 28 formats: 19 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
+3. **Beyond code** — 44 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
 4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
 5. **Conversation memory** — Auto-indexes Claude Code sessions, extracts decisions/problems/solutions, links them to code entities. Auto-generates CONTEXT.md so Claude knows your project history.
 6. **Claude Code native** — 9 slash commands with Turkish + English natural language support.

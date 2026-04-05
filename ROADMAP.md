@@ -67,12 +67,10 @@
 **Etki**: Kullanıcı deneyiminde büyük fark — "her zaman güncel"
 **Efor**: Orta (2-3 saat)
 
-#### 2. Daha Fazla Dil Desteği (19 → 40+)
+#### 2. ~~Daha Fazla Dil Desteği (19 → 40+)~~ ✅ TAMAMLANDI
 **Rakip**: codebase-memory-mcp (66), Serena (40+)
-**Durum**: 19 dil, ama Kotlin, R, Julia, Perl, PowerShell, Bash, Clojure vb. eksik
-**Plan**: tree-sitter grammar'ları ekle (çoğu tek satır registry ekleme)
+**Durum**: ✅ 35 tree-sitter dil + 9 content format = 44 format. Bash, R, CSS, Erlang, Objective-C, HCL, Nix, CMake, Make, Verilog, Fortran, GLSL, GraphQL eklendi. (Kotlin/Perl/Clojure/Svelte tree-sitter 0.25+ gerektiriyor, ileride eklenecek)
 **Etki**: Daha geniş kullanıcı kitlesi
-**Efor**: Düşük-orta (her dil ~15dk, toplam 3-4 saat)
 
 #### 3. Dead Code Detection
 **Rakip**: codebase-memory-mcp
@@ -83,22 +81,14 @@
 
 ### P1 — Önemli (Fark yaratacak)
 
-#### 4. SimpleMem Tarzı Conversation Compression
+#### 4. ~~SimpleMem Tarzı Conversation Compression~~ ✅ TAMAMLANDI
 **Rakip**: SimpleMem (3 aşamalı pipeline)
-**Durum**: Ham metin 500 char truncate
-**Plan**:
-  - Semantic compression: Önemli bilgiyi çıkar, gereksiz token'ları at
-  - Online synthesis: Aynı konuyu tartışan segment'leri birleştir
-  - 3 katmanlı indeks: Vector (mevcut) + keyword (mevcut) + metadata (timestamp ekle)
-**Etki**: 30x token tasarrufu conversation retrieval'da
-**Efor**: Yüksek (1-2 gün)
+**Durum**: ✅ Semantic compression pipeline eklendi. Filler removal + key sentence extraction + information density scoring. Ham 500-char truncate yerine anlamlı sıkıştırma. Topic merging desteği mevcut.
 
-#### 5. Cross-Service HTTP Linking
+#### 5. ~~Cross-Service HTTP Linking~~ ✅ TAMAMLANDI
 **Rakip**: codebase-memory-mcp
-**Durum**: Yok
-**Plan**: REST endpoint'leri (axum/actix route'ları) parse et, HTTP client çağrılarını (reqwest) eşle
+**Durum**: ✅ HTTP client çağrıları algılanıyor (reqwest, fetch, axios, requests, ureq, hyper, surf). `find_http_calls` ve `find_endpoint_callers` MCP tool'ları eklendi. Post-indexing endpoint eşleme (`link_http_endpoints`) mevcut.
 **Etki**: Microservice projelerde büyük değer
-**Efor**: Orta (3-4 saat)
 
 #### 6. Multi-Agent Desteği (8 agent)
 **Rakip**: codebase-memory-mcp (8 agent)
@@ -107,15 +97,12 @@
 **Etki**: Daha geniş erişim
 **Efor**: Düşük (1-2 saat, sadece config template)
 
-#### 7. Symbol-Level Operations
+#### 7. ~~Symbol-Level Operations~~ ✅ TAMAMLANDI
 **Rakip**: Serena
-**Durum**: Yok — sadece read-only analiz
-**Plan**:
-  - `rename_symbol`: Graf üzerinden tüm referansları bul, rename öner
-  - `find_unused`: Dead code + unused import tespiti
-  - `safe_delete`: Sıfır referanslı entity silme önerisi
-**Etki**: Refactoring desteği — yazma yeteneği
-**Efor**: Yüksek (2-3 gün)
+**Durum**: ✅ 3 yeni MCP tool eklendi:
+  - `rename_symbol`: Tüm referansları (definition, call_site, import) gösterir
+  - `find_unused`: Dead code + sıfır çağrıcılı fonksiyonları bulur (entry point filtreli)
+  - `safe_delete`: Sıfır referanslı entity silme güvenlik kontrolü
 
 ### P2 — Nice-to-Have (Gelecek fazlar)
 

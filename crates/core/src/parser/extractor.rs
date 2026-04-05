@@ -96,7 +96,7 @@ impl EntityExtractor {
                     });
 
                     // Extract call sites within the function body
-                    self.extract_calls(node, source, &qname, relations);
+                    self.extract_calls(node, source, &qname, relations, entities);
 
                     entities.push(entity);
 
@@ -294,17 +294,19 @@ impl EntityExtractor {
         source: &str,
         caller_qname: &str,
         relations: &mut Vec<CodeRelation>,
+        entities: &mut Vec<CodeEntity>,
     ) {
         let mut cursor = node.walk();
-        self.walk_for_calls(&mut cursor, source, caller_qname, relations);
+        self.walk_for_calls_with_entities(&mut cursor, source, caller_qname, relations, entities);
     }
 
-    fn walk_for_calls(
+    fn walk_for_calls_with_entities(
         &self,
         cursor: &mut tree_sitter::TreeCursor,
         source: &str,
         caller_qname: &str,
         relations: &mut Vec<CodeRelation>,
+        entities: &mut Vec<CodeEntity>,
     ) {
         let node = cursor.node();
 
@@ -335,9 +337,55 @@ impl EntityExtractor {
             }
         }
 
+        // Detect HTTP client calls (reqwest, fetch, axios, requests, http)
+        if kind == "call_expression"
+            || kind == "method_invocation"
+            || kind == "call"
+        {
+            if let Some((http_method, url_pattern, raw_text)) =
+                self.extract_http_call(node, source)
+            {
+                let call_qname = format!(
+                    "{}:{}:http:{}:{}:L{}",
+                    self.repo,
+                    self.file_path,
+                    http_method,
+                    sanitize_url(&url_pattern),
+                    node.start_position().row + 1,
+                );
+                entities.push(CodeEntity {
+                    kind: EntityKind::HttpClientCall,
+                    name: format!("{} {}", http_method, url_pattern),
+                    qualified_name: call_qname.clone(),
+                    file_path: self.file_path.clone(),
+                    repo: self.repo.clone(),
+                    start_line: node.start_position().row as u32 + 1,
+                    end_line: node.end_position().row as u32 + 1,
+                    start_col: node.start_position().column as u32,
+                    end_col: node.end_position().column as u32,
+                    signature: Some(format!("{} {}", http_method, url_pattern)),
+                    body: Some(raw_text),
+                    body_hash: None,
+                    language: self.language.clone(),
+                });
+                relations.push(CodeRelation {
+                    kind: RelationKind::CallsEndpoint,
+                    from_entity: caller_qname.to_string(),
+                    to_entity: call_qname,
+                    from_table: "function".to_string(),
+                    to_table: "http_call".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "method": http_method,
+                        "url_pattern": url_pattern,
+                        "line": node.start_position().row + 1,
+                    })),
+                });
+            }
+        }
+
         if cursor.goto_first_child() {
             loop {
-                self.walk_for_calls(cursor, source, caller_qname, relations);
+                self.walk_for_calls_with_entities(cursor, source, caller_qname, relations, entities);
                 if !cursor.goto_next_sibling() {
                     break;
                 }
@@ -415,6 +463,132 @@ impl EntityExtractor {
         let first_line = text.lines().next().unwrap_or(name);
         first_line.to_string()
     }
+
+    /// Detect HTTP client calls and extract method + URL pattern.
+    /// Supports: reqwest (Rust), fetch (JS/TS), axios (JS/TS), requests (Python),
+    /// http/net/http (Go), HttpClient (C#/Java).
+    fn extract_http_call(&self, node: Node, source: &str) -> Option<(String, String, String)> {
+        let text = node.utf8_text(source.as_bytes()).ok()?;
+
+        // Get the callee text (function/method being called)
+        let callee_text = self.get_full_callee_text(node, source)?;
+        let callee_lower = callee_text.to_lowercase();
+
+        // Known HTTP client patterns: "receiver.method" or "function"
+        let http_methods = ["get", "post", "put", "delete", "patch", "head", "options"];
+        let http_clients = [
+            "reqwest", "client", "http_client", "httpclient",
+            "axios", "fetch", "requests", "http", "net",
+            "ureq", "hyper", "surf",
+        ];
+
+        let method = if callee_lower == "fetch" {
+            // fetch("url") — default GET
+            "GET".to_string()
+        } else {
+            // Check for receiver.method pattern (reqwest::get, axios.post, requests.get)
+            let parts: Vec<&str> = callee_lower.rsplitn(2, |c| c == '.' || c == ':').collect();
+            if parts.len() == 2 {
+                let method_part = parts[0];
+                let receiver_part = parts[1].rsplit(|c| c == '.' || c == ':').next().unwrap_or(parts[1]);
+                if http_methods.contains(&method_part)
+                    && http_clients.iter().any(|c| receiver_part.contains(c))
+                {
+                    method_part.to_uppercase()
+                } else {
+                    return None;
+                }
+            } else {
+                return None;
+            }
+        };
+
+        // Extract URL from the first string argument
+        let url = self.extract_first_string_arg(node, source)?;
+
+        // Clean URL: strip protocol, extract path
+        let path = extract_url_path(&url);
+
+        if path.is_empty() || path == "/" {
+            return None;
+        }
+
+        Some((method, path, text.to_string()))
+    }
+
+    /// Get the full callee text including receiver (e.g., "reqwest::get", "axios.post")
+    fn get_full_callee_text(&self, node: Node, source: &str) -> Option<String> {
+        for field in &["function", "name", "method", "selector"] {
+            if let Some(child) = node.child_by_field_name(field) {
+                let text = child.utf8_text(source.as_bytes()).ok()?.trim().to_string();
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+        }
+        node.named_child(0)
+            .and_then(|c| c.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.trim().to_string())
+    }
+
+    /// Extract the first string literal argument from a call expression.
+    fn extract_first_string_arg(&self, node: Node, source: &str) -> Option<String> {
+        // Look for arguments node
+        let args_node = node.child_by_field_name("arguments")
+            .or_else(|| {
+                // Fallback: find parenthesized child
+                (0..node.child_count())
+                    .filter_map(|i| node.child(i))
+                    .find(|c| c.kind() == "arguments" || c.kind() == "argument_list")
+            })?;
+
+        // Find first string literal in arguments
+        for i in 0..args_node.child_count() {
+            if let Some(child) = args_node.child(i) {
+                let kind = child.kind();
+                if kind == "string" || kind == "string_literal" || kind == "interpreted_string_literal"
+                    || kind == "template_string" || kind == "raw_string_literal"
+                {
+                    let text = child.utf8_text(source.as_bytes()).ok()?.trim().to_string();
+                    // Remove quotes
+                    let unquoted = text.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                    return Some(unquoted.to_string());
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Extract URL path from a full or partial URL.
+/// "https://api.example.com/users/{id}" → "/users/{id}"
+/// "/api/users" → "/api/users"
+fn extract_url_path(url: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        // Full URL: extract path after host
+        if let Some(idx) = url.find("://") {
+            let after_proto = &url[idx + 3..];
+            if let Some(path_start) = after_proto.find('/') {
+                return after_proto[path_start..].to_string();
+            }
+        }
+        "/".to_string()
+    } else if url.starts_with('/') {
+        url.to_string()
+    } else {
+        format!("/{}", url)
+    }
+}
+
+/// Sanitize URL for use in SurrealDB record IDs
+fn sanitize_url(url: &str) -> String {
+    url.replace(
+        ['/', '{', '}', ':', '.', '?', '&', '=', '#', ' '],
+        "_",
+    )
+    .replace("__", "_")
+    .trim_matches('_')
+    .to_string()
 }
 
 fn hash_content(content: &str) -> String {

@@ -75,6 +75,9 @@ pub enum EntityKind {
     Dependency,
     Script,
 
+    // HTTP client call entities (cross-service linking)
+    HttpClientCall,
+
     // Conversation entities (Claude session transcripts)
     ConversationSession,
     ConversationTopic,
@@ -102,6 +105,9 @@ impl EntityKind {
 
             // API
             Self::ApiEndpoint | Self::ApiSchema | Self::ApiField => "api",
+
+            // HTTP client calls
+            Self::HttpClientCall => "http_call",
 
             // Database
             Self::DbTable | Self::DbColumn | Self::DbIndex | Self::DbView => "db_entity",
@@ -155,6 +161,9 @@ pub enum RelationKind {
     DependsOnPackage,
     RunsScript,
 
+    // HTTP cross-service relations
+    CallsEndpoint,
+
     // Conversation relations
     DiscussedIn,
     DecidedAbout,
@@ -179,6 +188,7 @@ impl RelationKind {
             Self::References => "references",
             Self::DependsOnPackage => "depends_on_package",
             Self::RunsScript => "runs_script",
+            Self::CallsEndpoint => "calls_endpoint",
             Self::DiscussedIn => "discussed_in",
             Self::DecidedAbout => "decided_about",
             Self::SolvesFor => "solves_for",
