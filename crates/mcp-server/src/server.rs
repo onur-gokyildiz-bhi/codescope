@@ -312,10 +312,27 @@ impl GraphRagServer {
 #[tool(tool_box)]
 impl ServerHandler for GraphRagServer {
     fn get_info(&self) -> ServerInfo {
-        let base_instructions = "Code Graph RAG — Intelligent code knowledge graph. \
-             Search, analyze, and query your codebase using a graph database. \
-             Supports semantic search, call graph analysis, impact analysis, \
-             conversation history, and Obsidian-like knowledge navigation.";
+        let base_instructions = "\
+CODESCOPE — Code knowledge graph. ALWAYS prefer these tools over Read/Grep to save tokens:\n\
+\n\
+TOKEN-SAVING RULES (follow strictly):\n\
+- BEFORE reading any file → use context_bundle to get full file map (functions, classes, imports, cross-file callers) in ONE call\n\
+- BEFORE grepping for callers → use find_callers / find_callees (graph traversal, not text search)\n\
+- BEFORE reading multiple files to find a function → use search_functions or find_function\n\
+- BEFORE manually tracing impact → use impact_analysis (transitive call graph)\n\
+- BEFORE exploring how code connects → use explore (full neighborhood) or backlinks\n\
+- BEFORE reading git history → use file_churn or hotspot_detection\n\
+- ONLY use Read for reading actual code BODY after you know exactly which function/line to read\n\
+\n\
+TOOL CHEAT SHEET:\n\
+| Instead of...              | Use...                          | Saves |\n\
+|----------------------------|----------------------------------|-------|\n\
+| Read whole file            | context_bundle(file_path)        | ~80%  |\n\
+| Grep + Read for callers    | find_callers(name)               | ~90%  |\n\
+| Multiple Read for function | find_function(name)              | ~70%  |\n\
+| Manual call graph tracing  | impact_analysis(name, depth=3)   | ~95%  |\n\
+| Grep across codebase       | search_functions / related       | ~85%  |\n\
+| Read file to understand it | explore(entity_name)             | ~75%  |";
 
         // Try to include cached conversation context (non-blocking)
         let context = self.context_summary.try_read()
