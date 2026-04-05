@@ -4,18 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-default = ["embeddings", "git", "http"]
-embeddings = ["fastembed"]
-git = ["git2"]
-http = ["reqwest"]
-full = ["embeddings", "git", "http"]
-
 [dependencies]
-# Core (always included)
 surrealdb = { workspace = true }
 tree-sitter = { workspace = true }
 tokio = { workspace = true }
+git2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -26,15 +19,8 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 walkdir = { workspace = true }
 ignore = { workspace = true }
-
-# Optional: semantic search (626 transitive deps, ~40MB)
-fastembed = { workspace = true, optional = true }
-
-# Optional: git history analysis (101 transitive deps)
-git2 = { workspace = true, optional = true }
-
-# Optional: external embedding providers (261 transitive deps)
-reqwest = { workspace = true, optional = true }
+fastembed = { workspace = true }
+reqwest = { workspace = true }
 
 # Tree-sitter language grammars
 tree-sitter-typescript = "0.23"

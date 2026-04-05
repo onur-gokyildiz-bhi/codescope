@@ -1,11 +1,9 @@
-#[cfg(feature = "git")]
 pub mod git;
 pub mod evolution;
 pub mod graph_sync;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "git")]
 pub use git::GitAnalyzer;
 pub use graph_sync::{TemporalGraphSync, HotspotEntry};
 

@@ -490,27 +490,19 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
 /// Check daemon status
 async fn check_status(port: u16) -> Result<()> {
-    #[cfg(feature = "http")]
+    let url = format!("http://127.0.0.1:{}/sse", port);
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
     {
-        let url = format!("http://127.0.0.1:{}/sse", port);
-        match reqwest::Client::new()
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(2))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                eprintln!("Codescope daemon is running on port {}", port);
-            }
-            _ => {
-                eprintln!("No daemon detected on port {}", port);
-            }
+        Ok(resp) if resp.status().is_success() => {
+            eprintln!("Codescope daemon is running on port {}", port);
         }
-    }
-    #[cfg(not(feature = "http"))]
-    {
-        let _ = port;
-        eprintln!("HTTP check not available. Build with --features http.");
+        _ => {
+            eprintln!("No daemon detected on port {}", port);
+        }
     }
     Ok(())
 }

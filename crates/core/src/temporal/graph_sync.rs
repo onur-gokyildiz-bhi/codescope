@@ -37,7 +37,6 @@ impl TemporalGraphSync {
     }
 
     /// Sync recent commits from a git repo into the graph
-    #[cfg(feature = "git")]
     pub async fn sync_commits(
         &self,
         analyzer: &super::GitAnalyzer,

@@ -15,7 +15,7 @@ categories = ["development-tools", "command-line-utilities"]
 
 [workspace.dependencies]
 # Database
-surrealdb = { version = "2.3", features = ["kv-surrealkv"] }
+surrealdb = { version = "2.3", default-features = false, features = ["kv-surrealkv"] }
 
 # Parsing
 tree-sitter = "0.24"
@@ -74,3 +74,11 @@ fastembed = "5"
 # File watching
 notify = "7"
 notify-debouncer-mini = "0.5"
+
+# === Binary size optimization ===
+[profile.release]
+opt-level = "z"        # Optimize for size (not speed)
+lto = true             # Link-Time Optimization — cross-crate dead code elimination
+codegen-units = 1      # Single codegen unit — better LTO, smaller binary
+strip = true           # Strip debug symbols
+panic = "abort"        # No unwinding = smaller binary

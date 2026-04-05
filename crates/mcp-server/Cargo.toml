@@ -4,16 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[features]
-default = ["full"]
-full = ["codescope-core/full", "git2", "reqwest"]
-embeddings = ["codescope-core/embeddings"]
-git = ["codescope-core/git", "git2"]
-http = ["codescope-core/http", "reqwest"]
-lite = []  # No optional deps — smallest binary
-
 [dependencies]
-codescope-core = { path = "../core", default-features = false }
+codescope-core = { path = "../core" }
 rmcp = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -25,14 +17,12 @@ clap = { workspace = true }
 schemars = { workspace = true }
 surrealdb = { workspace = true }
 ignore = { workspace = true }
+git2 = { workspace = true }
 dirs = "5"
+reqwest = { workspace = true }
 chrono = "0.4"
 rayon = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
-
-# Optional deps (gated by features)
-git2 = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
