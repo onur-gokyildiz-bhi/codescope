@@ -8,7 +8,7 @@
 
 ### 1. codebase-memory-mcp (DeusData)
 - **Dil**: C, single static binary
-- **Dil desteği**: 66 dil (biz: 19)
+- **Dil desteği**: 66 dil (biz: 35)
 - **İndeksleme**: Linux kernel (28M LOC) 3 dakikada
 - **3D Graf UI**: localhost:9749'da interaktif 3D görselleştirme
 - **Otomatik watch**: Git değişikliklerini izleyip auto-reindex
@@ -142,7 +142,7 @@
 ## Hedef: v0.3.0
 
 Tüm P0 + P1 tamamlandığında:
-- 40+ dil (şu an 19)
+- 44 format (35 dil + 9 content parser) ✅
 - File watcher ile otomatik güncelleme
 - Dead code detection
 - Cross-service HTTP linking

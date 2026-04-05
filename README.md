@@ -41,10 +41,13 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 - **44 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
-- **28 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
+- **43 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
 - **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
 - **Conversation memory**: Auto-indexes Claude Code sessions — tracks decisions, problems, solutions, and links them to code entities
 - **Auto CONTEXT.md**: Generates a dynamic context file with recent decisions/problems so Claude sees your project history automatically
+- **Skill/Knowledge graphs**: Index markdown skill files with `[[wikilinks]]` + YAML frontmatter, progressive disclosure traversal — arscontexta compatible
+- **HTTP cross-service linking**: Detect HTTP client calls (reqwest, fetch, axios, requests) and link to API endpoints
+- **Symbol-level refactoring**: `rename_symbol`, `find_unused`, `safe_delete` for code cleanup
 - **Temporal analysis**: Git history tracking, hotspot detection, change coupling, contributor expertise maps
 - **Semantic search**: Local embeddings with FastEmbed (zero deps), or Ollama/OpenAI — search code by meaning
 - **Incremental indexing**: Hash-based change detection, only re-parses modified files
@@ -74,7 +77,7 @@ You can also download binaries manually from the [Releases page](https://github.
 
 ### Option 2: Build from Source
 
-Requires [Rust](https://rustup.rs/) 1.75+ and a C/C++ compiler (for SurrealDB RocksDB and tree-sitter).
+Requires [Rust](https://rustup.rs/) 1.75+ and a C/C++ compiler (for SurrealDB and tree-sitter).
 
 ```bash
 git clone https://github.com/onur-gokyildiz-bhi/codescope
@@ -382,7 +385,7 @@ codescope-mcp status --port 3333
 codescope-mcp stop --port 3333
 ```
 
-### Available MCP Tools (28 tools)
+### Available MCP Tools (43 tools)
 
 **Code Search & Navigation:**
 
@@ -394,6 +397,15 @@ codescope-mcp stop --port 3333
 | `find_callers` | Find all callers of a function |
 | `find_callees` | Find all functions called by a function |
 | `impact_analysis` | Analyze blast radius of changing a function |
+| `find_dead_code` | Find functions with zero callers |
+
+**Symbol-Level Refactoring:**
+
+| Tool | Description |
+|------|-------------|
+| `rename_symbol` | Find all references to plan a rename |
+| `find_unused` | Find unused symbols (zero-reference functions) |
+| `safe_delete` | Check if a symbol can be safely removed |
 
 **Obsidian-like Exploration:**
 
@@ -403,6 +415,20 @@ codescope-mcp stop --port 3333
 | `context_bundle` | Complete file context with cross-file links |
 | `backlinks` | Find everything that references a given entity |
 | `related` | Universal search across all entity types |
+
+**HTTP Cross-Service Linking:**
+
+| Tool | Description |
+|------|-------------|
+| `find_http_calls` | Find HTTP client calls (reqwest, fetch, axios) |
+| `find_endpoint_callers` | Find code that calls a specific HTTP endpoint |
+
+**Skill/Knowledge Graph:**
+
+| Tool | Description |
+|------|-------------|
+| `index_skill_graph` | Index markdown skill files with [[wikilinks]] + YAML frontmatter |
+| `traverse_skill_graph` | Navigate skill graph with progressive disclosure (4 detail levels) |
 
 **Semantic Search:**
 
@@ -429,6 +455,18 @@ codescope-mcp stop --port 3333
 |------|-------------|
 | `index_conversations` | Index Claude Code JSONL sessions into the graph |
 | `conversation_search` | Search past decisions, problems, solutions |
+| `conversation_timeline` | Track changes to a specific entity over time |
+| `memory_save` | Save persistent memory notes across sessions |
+| `memory_search` | Search saved memories and past decisions |
+
+**Code Quality & Patterns:**
+
+| Tool | Description |
+|------|-------------|
+| `team_patterns` | Detect naming, import, and structure conventions |
+| `edit_preflight` | Check if a planned edit aligns with team patterns |
+| `community_detection` | Find code clusters, bridge modules, central nodes |
+| `manage_adr` | Create and manage Architecture Decision Records |
 
 **Infrastructure:**
 
@@ -530,6 +568,8 @@ The `ask` tool translates plain English questions to SurrealQL:
 | `package` | Package manifests | `name`, `kind` (Package/Dependency/Script) |
 | `db_entity` | SQL schema objects | `name`, `kind` (DbTable/DbView/DbIndex) |
 | `api` | API definitions | `name`, `kind` (ApiEndpoint/ApiSchema) |
+| `http_call` | HTTP client calls | `name`, `method`, `url_pattern`, `file_path` |
+| `skill` | Skill/knowledge graph nodes | `name`, `description`, `node_type`, `created` |
 | `conversation` | Claude Code sessions | `name`, `hash`, `timestamp` |
 | `decision` | Decisions from conversations | `name`, `body`, `timestamp` |
 | `problem` | Problems from conversations | `name`, `body`, `timestamp` |
@@ -554,6 +594,8 @@ The `ask` tool translates plain English questions to SurrealQL:
 | `decided_about` | Decision about a code entity | decision → struct |
 | `solves_for` | Solution solves a problem | solution → problem |
 | `co_discusses` | Sessions discussing same entity | session → session |
+| `calls_endpoint` | Function calls HTTP endpoint | function → http_call |
+| `links_to` | Skill wikilink connection | skill → skill |
 
 ### Common Query Patterns
 
@@ -708,7 +750,7 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed per-scenario results.
 codescope/
 ├── crates/
 │   ├── core/              # Graph engine, parsers, embeddings, temporal analysis
-│   │   ├── parser/        # tree-sitter (39 langs) + custom content parsers (9 formats)
+│   │   ├── parser/        # tree-sitter (35 langs) + custom content parsers (9 formats)
 │   │   ├── graph/         # SurrealDB schema, builder, query, incremental indexer
 │   │   ├── embeddings/    # FastEmbed/Ollama/OpenAI vector embedding pipeline
 │   │   ├── temporal/      # Git history analysis + graph sync
@@ -724,7 +766,7 @@ codescope/
 
 **Tech stack:**
 - **Rust** — Core language, zero-cost abstractions
-- **SurrealDB 2.x** — Embedded graph + document + vector database (RocksDB backend)
+- **SurrealDB 2.x** — Embedded graph + document + vector database (SurrealKV backend)
 - **tree-sitter** — Incremental parsing for 35 programming languages
 - **FastEmbed** — In-process ONNX embeddings (zero external deps)
 - **rmcp** — Official Rust MCP SDK for AI agent integration
@@ -787,7 +829,7 @@ How does Codescope compare to other code intelligence tools?
 | **Language** | Rust | C | Python | Python | Node.js | Python |
 | **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
 | **Languages** | 35 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
-| **MCP Server** | Yes (28 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
+| **MCP Server** | Yes (43 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
 | **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
 | **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
 | **Local Embeddings** | Yes (FastEmbed, zero deps) | No | No | No | No (needs API key) | No |
@@ -813,7 +855,7 @@ How does Codescope compare to other code intelligence tools?
 
 ### What Makes Codescope Different
 
-1. **Graph + Embeddings + Conversations** — Structural code graph, semantic search, AND conversation memory in a single binary. No other tool does all three.
+1. **Graph + Embeddings + Conversations + Skills** — Structural code graph, semantic search, conversation memory, AND knowledge/skill graphs in a single binary. No other tool does all four.
 2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
 3. **Beyond code** — 44 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
 4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
