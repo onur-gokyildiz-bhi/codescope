@@ -167,7 +167,24 @@ struct SearchParams {
 
 async fn api_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL").await {
-        Ok(result) => Json(result).into_response(),
+        Ok(result) => {
+            // Flatten [[{"total":N}],...] → {"files":N,"functions":N,...}
+            let labels = ["files", "functions", "classes", "imports", "configs", "docs", "packages"];
+            let arr = result.as_array();
+            let mut stats = serde_json::Map::new();
+            if let Some(items) = arr {
+                for (i, label) in labels.iter().enumerate() {
+                    let count = items.get(i)
+                        .and_then(|v| v.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|o| o.get("total"))
+                        .and_then(|n| n.as_u64())
+                        .unwrap_or(0);
+                    stats.insert(label.to_string(), serde_json::Value::Number(count.into()));
+                }
+            }
+            Json(serde_json::Value::Object(stats)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

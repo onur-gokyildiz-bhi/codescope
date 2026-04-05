@@ -400,13 +400,14 @@ async function loadStats() {
   try {
     const r = await fetch('/api/stats');
     const d = await r.json();
-    const labels = ['Files', 'Functions', 'Classes', 'Imports', 'Configs', 'Docs', 'Packages'];
     let h = '';
-    if (Array.isArray(d)) {
-      d.forEach((item, i) => {
-        const t = (typeof item === 'object' && item) ? (item.total || item.count || 0) : 0;
-        if (t > 0) h += `<span class="stat"><b>${t.toLocaleString()}</b> ${labels[i] || ''}</span>`;
-      });
+    const entries = [
+      ['files', 'Files'], ['functions', 'Functions'], ['classes', 'Classes'],
+      ['imports', 'Imports'], ['configs', 'Configs'], ['docs', 'Docs'], ['packages', 'Packages']
+    ];
+    for (const [key, label] of entries) {
+      const t = d[key] || 0;
+      if (t > 0) h += `<span class="stat"><b>${t.toLocaleString()}</b> ${label}</span>`;
     }
     document.getElementById('stats-bar').innerHTML = h || '<span class="stat" style="color:var(--text-dim)">No data indexed yet</span>';
   } catch (e) {
