@@ -430,7 +430,7 @@ impl GraphQuery {
     pub async fn traverse_skill_graph(
         &self,
         name: &str,
-        depth: usize,
+        _depth: usize,
         detail_level: usize,
     ) -> Result<serde_json::Value> {
         let n = name.to_string();

@@ -3,6 +3,7 @@
 
 /// A reference from conversation text to a code entity in the graph
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CodeReference {
     pub name: String,
     pub entity_table: String,
@@ -34,6 +35,7 @@ impl EntityLinker {
     }
 
     /// Build directly from name/table/qname tuples (used by MCP tools)
+    #[allow(dead_code)]
     pub fn from_tuples(tuples: Vec<(String, String, String)>) -> Self {
         Self { known: tuples }
     }

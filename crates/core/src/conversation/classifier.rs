@@ -6,10 +6,11 @@ use super::parser::ConversationTurn;
 
 /// Classification result for a conversation segment
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ClassifiedSegment {
     pub kind: SegmentKind,
-    pub name: String,       // short description
-    pub body: String,       // relevant text excerpt
+    pub name: String,
+    pub body: String,
     pub line_number: u32,
     pub confidence: f32,
     pub timestamp: Option<String>,

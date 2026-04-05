@@ -8,17 +8,19 @@ use std::path::Path;
 
 /// A parsed conversation turn (one user or assistant message)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConversationTurn {
-    pub role: String,           // "user" or "assistant"
-    pub text: String,           // extracted text content
-    pub line_number: u32,       // line in JSONL file
+    pub role: String,
+    pub text: String,
+    pub line_number: u32,
     pub timestamp: Option<String>,
-    pub has_tool_use: bool,     // assistant used a tool
-    pub has_tool_error: bool,   // tool returned an error
+    pub has_tool_use: bool,
+    pub has_tool_error: bool,
     pub tool_error_text: Option<String>,
 }
 
 /// Result of parsing a JSONL conversation file
+#[allow(dead_code)]
 pub struct ConversationParseResult {
     pub session_id: String,
     pub turns: Vec<ConversationTurn>,

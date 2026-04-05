@@ -29,7 +29,7 @@ impl ContentParser for MarkdownParser {
         });
 
         // Phase 1: Parse YAML frontmatter (skill graph support)
-        let (frontmatter, body_start) = parse_frontmatter(source);
+        let (frontmatter, _body_start) = parse_frontmatter(source);
         let is_skill_file = frontmatter.is_some();
 
         // Create skill entity from frontmatter

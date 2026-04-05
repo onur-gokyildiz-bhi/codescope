@@ -8,6 +8,8 @@ use tracing_subscriber::EnvFilter;
 use rmcp::ServiceExt;
 
 mod daemon;
+mod helpers;
+mod params;
 mod server;
 mod tools;
 mod watcher;
@@ -268,7 +270,7 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             }
 
             // Phase 3: Auto-index conversations + memory files
-            let project_dir = server::find_claude_project_dir(&index_path, &index_repo);
+            let project_dir = helpers::find_claude_project_dir(&index_path, &index_repo);
             tracing::info!("Auto-indexing conversations from {}", project_dir.display());
 
             let known_entities: Vec<String> = Vec::new();
@@ -314,7 +316,7 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             );
 
             // Phase 4: Generate CONTEXT.md + load context summary into MCP server
-            server::generate_context_md(&index_db, &index_repo, &index_path).await;
+            helpers::generate_context_md(&index_db, &index_repo, &index_path).await;
             mcp_handle.load_context_summary().await;
 
             tracing::info!("Context summary loaded into MCP server instructions");

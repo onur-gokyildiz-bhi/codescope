@@ -73,22 +73,22 @@ pub fn parse_conversation(
         let slug = slug_from_name(&seg.name);
         let qname = format!("{}:conv:{}:{}", repo, session_id, slug);
 
-        let (kind, kind_str) = match seg.kind {
+        let kind = match seg.kind {
             classifier::SegmentKind::Decision => {
                 result.decisions += 1;
-                (EntityKind::Decision, "Decision")
+                EntityKind::Decision
             }
             classifier::SegmentKind::Problem => {
                 result.problems += 1;
-                (EntityKind::Problem, "Problem")
+                EntityKind::Problem
             }
             classifier::SegmentKind::Solution => {
                 result.solutions += 1;
-                (EntityKind::Solution, "Solution")
+                EntityKind::Solution
             }
             classifier::SegmentKind::Topic => {
                 result.topics += 1;
-                (EntityKind::ConversationTopic, "Topic")
+                EntityKind::ConversationTopic
             }
         };
 
@@ -222,15 +222,3 @@ fn slug_from_name(name: &str) -> String {
         .collect()
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        // Find largest char boundary <= max to avoid splitting multi-byte chars
-        let mut boundary = max;
-        while boundary > 0 && !s.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        format!("{}...", &s[..boundary])
-    }
-}
