@@ -146,6 +146,12 @@ async fn main() -> Result<()> {
         .route("/api/graph", get(api_graph))
         .route("/api/query", get(api_raw_query))
         .route("/api/conversations", get(api_conversations))
+        .route("/api/files", get(api_files))
+        .route("/api/file-content", get(api_file_content))
+        .route("/api/node-detail", get(api_node_detail))
+        .route("/api/hotspots", get(api_hotspots))
+        .route("/api/clusters", get(api_clusters))
+        .route("/api/skill-graph", get(api_skill_graph))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", args.port);
@@ -477,6 +483,127 @@ async fn api_raw_query(
     }
     match state.query.raw_query(&query).await {
         Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// File tree — list all indexed files grouped by directory
+async fn api_files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.query.raw_query("SELECT path, language, line_count FROM file ORDER BY path").await {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// File content — read source file from disk
+#[derive(Deserialize)]
+struct FileContentParams { path: Option<String> }
+
+async fn api_file_content(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<FileContentParams>,
+) -> impl IntoResponse {
+    let path = params.path.unwrap_or_default();
+    if path.is_empty() {
+        return Json(serde_json::json!({"error": "No path"})).into_response();
+    }
+    // Get file entities + read source
+    let entities = state.query.raw_query(&format!(
+        "SELECT name, start_line, end_line, signature, 'function' AS type FROM `function` WHERE file_path = '{}' ORDER BY start_line; \
+         SELECT name, start_line, end_line, kind, 'class' AS type FROM class WHERE file_path = '{}' ORDER BY start_line",
+        path.replace('\'', "\\'"), path.replace('\'', "\\'")
+    )).await.unwrap_or(serde_json::Value::Null);
+
+    // Try reading the file from the codebase path (stored in args at startup)
+    let content = std::fs::read_to_string(&path)
+        .or_else(|_| {
+            // Try relative to common locations
+            let home = dirs::home_dir().unwrap_or_default();
+            std::fs::read_to_string(home.join(&path))
+        })
+        .unwrap_or_default();
+
+    Json(serde_json::json!({
+        "path": path,
+        "content": content,
+        "entities": entities,
+    })).into_response()
+}
+
+// Node detail — callers, callees, signature for a specific function
+#[derive(Deserialize)]
+struct NodeDetailParams { name: Option<String> }
+
+async fn api_node_detail(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<NodeDetailParams>,
+) -> impl IntoResponse {
+    let name = params.name.unwrap_or_default();
+    if name.is_empty() {
+        return Json(serde_json::json!({"error": "No name"})).into_response();
+    }
+    let q = format!(
+        "SELECT name, qualified_name, signature, file_path, start_line, end_line FROM `function` WHERE name = '{}'; \
+         SELECT in.name AS name, in.file_path AS file_path, in.signature AS sig FROM calls WHERE out.name = '{}' AND in.name != NONE LIMIT 20; \
+         SELECT out.name AS name, out.file_path AS file_path, out.signature AS sig FROM calls WHERE in.name = '{}' AND out.name != NONE LIMIT 20; \
+         SELECT name, kind, file_path, start_line FROM class WHERE name = '{}'",
+        name.replace('\'', "\\'"), name.replace('\'', "\\'"),
+        name.replace('\'', "\\'"), name.replace('\'', "\\'"),
+    );
+    match state.query.raw_query(&q).await {
+        Ok(result) => {
+            let items = result.as_array();
+            let mut out = serde_json::Map::new();
+            let keys = ["entity", "callers", "callees", "class"];
+            if let Some(arr) = items {
+                for (i, key) in keys.iter().enumerate() {
+                    if let Some(data) = arr.get(i) {
+                        out.insert(key.to_string(), data.clone());
+                    }
+                }
+            }
+            Json(serde_json::Value::Object(out)).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// Hotspots — functions with high complexity (line count as proxy)
+async fn api_hotspots(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.query.raw_query(
+        "SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size \
+         FROM `function` ORDER BY size DESC LIMIT 50"
+    ).await {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// Clusters — community detection via most-connected functions
+async fn api_clusters(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.query.raw_query(
+        "SELECT file_path, count() AS fn_count, array::group(name) AS functions \
+         FROM `function` GROUP BY file_path ORDER BY fn_count DESC LIMIT 30"
+    ).await {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// Skill graph — skill nodes + wikilink edges
+async fn api_skill_graph(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let q = "SELECT name, qualified_name, description, node_type, file_path FROM skill ORDER BY name; \
+             SELECT in.name AS source, out.name AS target, context FROM links_to";
+    match state.query.raw_query(q).await {
+        Ok(result) => {
+            let items = result.as_array();
+            let mut out = serde_json::Map::new();
+            if let Some(arr) = items {
+                out.insert("nodes".into(), arr.get(0).cloned().unwrap_or(serde_json::Value::Array(vec![])));
+                out.insert("edges".into(), arr.get(1).cloned().unwrap_or(serde_json::Value::Array(vec![])));
+            }
+            Json(serde_json::Value::Object(out)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
