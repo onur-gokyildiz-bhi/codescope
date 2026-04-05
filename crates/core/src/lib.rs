@@ -1,5 +1,6 @@
 pub mod parser;
 pub mod graph;
+#[cfg(feature = "embeddings")]
 pub mod embeddings;
 pub mod temporal;
 pub mod crossrepo;

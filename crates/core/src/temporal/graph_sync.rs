@@ -3,7 +3,7 @@ use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 use tracing::{debug, info};
 
-use super::git::{GitAnalyzer, CommitInfo, ChangeType};
+use super::{CommitInfo, ChangeType};
 
 /// Syncs git history into the SurrealDB graph
 pub struct TemporalGraphSync {
@@ -37,9 +37,10 @@ impl TemporalGraphSync {
     }
 
     /// Sync recent commits from a git repo into the graph
+    #[cfg(feature = "git")]
     pub async fn sync_commits(
         &self,
-        analyzer: &GitAnalyzer,
+        analyzer: &super::GitAnalyzer,
         repo_name: &str,
         limit: usize,
     ) -> Result<usize> {

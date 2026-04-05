@@ -948,6 +948,11 @@ impl GraphRagServer {
     /// Sync git commit history into the graph database for temporal analysis
     #[tool(description = "Sync git commit history into the graph database. Enables temporal queries like hotspot detection, change coupling, and code evolution tracking.")]
     async fn sync_git_history(&self, #[tool(aggr)] params: SyncHistoryParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with `--features git` to enable.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let git_path = params.git_path
             .map(|p| ctx.codebase_path.join(p))
@@ -968,11 +973,17 @@ impl GraphRagServer {
             Ok(count) => format!("Synced {} commits into the graph database", count),
             Err(e) => format!("Error syncing commits: {}", e),
         }
+        }
     }
 
     /// Detect code hotspots — files/functions with high complexity AND high churn
     #[tool(description = "Detect code hotspots: functions with high complexity and high change frequency. These are high-risk areas that may need refactoring.")]
     async fn hotspot_detection(&self, #[tool(aggr)] params: HotspotParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let sync = codescope_core::temporal::TemporalGraphSync::new(ctx.db);
         match sync.calculate_hotspots(&ctx.repo_name).await {
@@ -1002,11 +1013,17 @@ impl GraphRagServer {
             }
             Err(e) => format!("Error calculating hotspots: {}", e),
         }
+        }
     }
 
     /// Get file churn — most frequently changed files in git history
     #[tool(description = "Get the most frequently changed files in git history. High-churn files may indicate instability or active development areas.")]
     async fn file_churn(&self, #[tool(aggr)] params: ChurnParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let limit = params.limit.unwrap_or(20);
         let git_path = ctx.codebase_path.clone();
@@ -1026,11 +1043,17 @@ impl GraphRagServer {
             Ok(Err(e)) => format!("Error: {}", e),
             Err(e) => format!("Task error: {}", e),
         }
+        }
     }
 
     /// Get change coupling — files that are frequently changed together
     #[tool(description = "Find files that are frequently changed together in commits. High coupling suggests hidden dependencies or that files should be colocated.")]
     async fn change_coupling(&self, #[tool(aggr)] params: CouplingParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let limit = params.limit.unwrap_or(20);
         let git_path = ctx.codebase_path.clone();
@@ -1050,11 +1073,17 @@ impl GraphRagServer {
             Ok(Err(e)) => format!("Error: {}", e),
             Err(e) => format!("Task error: {}", e),
         }
+        }
     }
 
     /// Review a git diff with graph context — analyze which functions and relationships are affected
     #[tool(description = "Review a git diff with graph context. Shows which functions, classes, and call relationships are affected by changes between two git refs.")]
     async fn review_diff(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
@@ -1149,11 +1178,17 @@ impl GraphRagServer {
 
         output.push_str(&format!("\n---\n**Summary:** {} files affected.\n", changed_files.len()));
         output
+        }
     }
 
     /// Get contributor expertise map — who knows which parts of the codebase
     #[tool(description = "Get a contributor expertise map showing who has the most knowledge about which files. Useful for finding the right reviewer for a change.")]
     async fn contributor_map(&self) -> String {
+        #[cfg(not(feature = "git"))]
+        { return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let git_path = ctx.codebase_path.clone();
 
@@ -1178,11 +1213,17 @@ impl GraphRagServer {
             Ok(Err(e)) => format!("Error: {}", e),
             Err(e) => format!("Task error: {}", e),
         }
+        }
     }
 
     /// Suggest reviewers for changed files based on git history
     #[tool(description = "Suggest code reviewers for a set of changed files based on who has the most expertise with those files.")]
     async fn suggest_reviewers(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
+        #[cfg(not(feature = "git"))]
+        { let _ = params; return "Git analysis not available. Build with --features git.".into(); }
+
+        #[cfg(feature = "git")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
@@ -1248,6 +1289,7 @@ impl GraphRagServer {
         }
 
         output
+        }
     }
 
     /// Translate a natural language question to a SurrealQL query and execute it
@@ -1948,6 +1990,11 @@ impl GraphRagServer {
         Uses local FastEmbed by default (no external service needed). \
         Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'.")]
     async fn embed_functions(&self, #[tool(aggr)] params: EmbedParams) -> String {
+        #[cfg(not(feature = "embeddings"))]
+        { let _ = params; return "Embeddings not available. Build with --features embeddings.".into(); }
+
+        #[cfg(feature = "embeddings")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let batch_size = params.batch_size.unwrap_or(100);
         let provider_name = params.provider.as_deref().unwrap_or("fastembed");
@@ -2000,6 +2047,7 @@ impl GraphRagServer {
             }
             Err(e) => format!("Error embedding functions: {}", e),
         }
+        }
     }
 
     /// Search for semantically similar code using vector embeddings
@@ -2007,6 +2055,11 @@ impl GraphRagServer {
         using vector embeddings. Run embed_functions first to generate embeddings. \
         Example: 'parse configuration file' finds all config-parsing functions regardless of naming.")]
     async fn semantic_search(&self, #[tool(aggr)] params: SemanticSearchParams) -> String {
+        #[cfg(not(feature = "embeddings"))]
+        { let _ = params; return "Embeddings not available. Build with --features embeddings.".into(); }
+
+        #[cfg(feature = "embeddings")]
+        {
         let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
         let limit = params.limit.unwrap_or(10);
         let provider_name = params.provider.as_deref().unwrap_or("fastembed");
@@ -2064,6 +2117,7 @@ impl GraphRagServer {
                 output
             }
             Err(e) => format!("Semantic search error: {}", e),
+        }
         }
     }
 
