@@ -163,6 +163,7 @@ impl GraphBuilder {
                  DELETE FROM db_entity WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM infra WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM package WHERE file_path = $path AND repo = $repo; \
+                 DELETE FROM skill WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM http_call WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM file WHERE path = $path AND repo = $repo;",
             )
@@ -188,7 +189,8 @@ impl GraphBuilder {
                  DELETE FROM db_entity WHERE repo = $repo; \
                  DELETE FROM infra WHERE repo = $repo; \
                  DELETE FROM package WHERE repo = $repo; \
-                 DELETE FROM http_call WHERE repo = $repo;",
+                 DELETE FROM http_call WHERE repo = $repo; \
+                 DELETE FROM skill WHERE repo = $repo;",
             )
             .bind(("repo", repo.to_string()))
             .await?;
@@ -417,6 +419,24 @@ fn build_entity_set(entity: &CodeEntity) -> String {
             surql_opt_str(&entity.body),
             surql_opt_str(&entity.body_hash),
             surql_opt_str(&entity.signature), // timestamp stored in signature field
+        ),
+        EntityKind::SkillNode | EntityKind::SkillMOC => format!(
+            "SET name = {}, qualified_name = {}, kind = {}, \
+             file_path = {}, repo = {}, language = {}, \
+             start_line = {}, end_line = {}, body = {}, \
+             description = {}, node_type = {}, created = {}",
+            surql_str(&entity.name),
+            surql_str(&entity.qualified_name),
+            surql_str(&format!("{:?}", entity.kind)),
+            surql_str(&entity.file_path),
+            surql_str(&entity.repo),
+            surql_str(&entity.language),
+            entity.start_line,
+            entity.end_line,
+            surql_opt_str(&entity.body),
+            surql_opt_str(&entity.body),       // description = body (frontmatter description)
+            surql_str(&format!("{:?}", entity.kind)), // node_type from kind
+            surql_opt_str(&entity.signature),  // created date in signature field
         ),
         // All other entities: config, doc, api, db_entity, infra, package, conversation
         _ => format!(

@@ -169,7 +169,9 @@ impl GraphQuery {
                     'doc' AS entity_type FROM doc WHERE name = $name; \
              SELECT name, qualified_name, file_path, kind, \
                     'package' AS entity_type FROM package WHERE name = $name; \
-             SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name;"
+             SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name; \
+             SELECT name, qualified_name, file_path, description, node_type, \
+                    'skill' AS entity_type FROM skill WHERE name = $name;"
         ).bind(("name", n.clone())).await?;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
@@ -178,6 +180,7 @@ impl GraphQuery {
         let docs: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
         let packages: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
         let files: Vec<serde_json::Value> = response.take(5).unwrap_or_default();
+        let skills: Vec<serde_json::Value> = response.take(6).unwrap_or_default();
 
         // Gather all matches
         let mut entity = serde_json::Map::new();
@@ -189,6 +192,9 @@ impl GraphQuery {
         } else if !classes.is_empty() {
             entity.insert("matches".into(), serde_json::Value::Array(classes));
             found_type = "class".into();
+        } else if !skills.is_empty() {
+            entity.insert("matches".into(), serde_json::Value::Array(skills));
+            found_type = "skill".into();
         } else if !configs.is_empty() {
             entity.insert("matches".into(), serde_json::Value::Array(configs));
             found_type = "config".into();
@@ -223,6 +229,22 @@ impl GraphQuery {
             entity.insert("calls_to".into(), serde_json::Value::Array(callees));
             entity.insert("called_by".into(), serde_json::Value::Array(callers));
             entity.insert("sibling_functions".into(), serde_json::Value::Array(siblings));
+        } else if found_type == "skill" {
+            // For skills, get wikilink neighbors
+            let mut resp2 = self.db.query(
+                "SELECT out.name AS name, out.description AS description, \
+                        out.node_type AS node_type, context \
+                     FROM links_to WHERE in.name = $name; \
+                 SELECT in.name AS name, in.description AS description, \
+                        in.node_type AS node_type, context \
+                     FROM links_to WHERE out.name = $name;"
+            ).bind(("name", n.clone())).await?;
+
+            let links_to: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
+            let linked_from: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
+
+            entity.insert("links_to".into(), serde_json::Value::Array(links_to));
+            entity.insert("linked_from".into(), serde_json::Value::Array(linked_from));
         } else if found_type == "file" {
             // For files, get all contained entities
             let file_ctx = self.file_context(&n).await?;
@@ -402,6 +424,81 @@ impl GraphQuery {
         Ok(results)
     }
 
+    // ===== Skill Graph Traversal =====
+
+    /// Traverse the skill/knowledge graph with progressive disclosure.
+    pub async fn traverse_skill_graph(
+        &self,
+        name: &str,
+        depth: usize,
+        detail_level: usize,
+    ) -> Result<serde_json::Value> {
+        let n = name.to_string();
+
+        // Level 1: Find the root skill node
+        let mut response = self.db.query(
+            "SELECT name, qualified_name, kind, file_path, description, node_type, created \
+             FROM skill WHERE name = $name OR string::contains(qualified_name, $name) LIMIT 5"
+        ).bind(("name", n.clone())).await?;
+
+        let roots: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        if roots.is_empty() {
+            return Ok(serde_json::json!({"error": format!("No skill node found matching '{}'", name)}));
+        }
+
+        let root = &roots[0];
+        let qname = root.get("qualified_name").and_then(|v| v.as_str()).unwrap_or("");
+        let file_path = root.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+
+        let mut result = serde_json::Map::new();
+        result.insert("skill".into(), root.clone());
+
+        if detail_level < 2 {
+            return Ok(serde_json::Value::Object(result));
+        }
+
+        // Level 2: Get outgoing and incoming wikilinks
+        let qn = qname.to_string();
+        let mut resp2 = self.db.query(
+            "SELECT out.name AS name, out.description AS description, \
+                    out.node_type AS node_type, context \
+             FROM links_to WHERE in.qualified_name = $qn; \
+             SELECT in.name AS name, in.description AS description, \
+                    in.node_type AS node_type, context \
+             FROM links_to WHERE out.qualified_name = $qn;"
+        ).bind(("qn", qn)).await?;
+
+        let links_to: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
+        let linked_from: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
+
+        result.insert("links_to".into(), serde_json::Value::Array(links_to));
+        result.insert("linked_from".into(), serde_json::Value::Array(linked_from));
+
+        if detail_level < 3 {
+            return Ok(serde_json::Value::Object(result));
+        }
+
+        // Level 3: Get sections (headings) from the same file
+        let fp = file_path.to_string();
+        let mut resp3 = self.db.query(
+            "SELECT name, kind, start_line FROM doc WHERE file_path = $fp \
+             AND kind = 'DocSection' ORDER BY start_line"
+        ).bind(("fp", fp)).await?;
+
+        let sections: Vec<serde_json::Value> = resp3.take(0).unwrap_or_default();
+        result.insert("sections".into(), serde_json::Value::Array(sections));
+
+        if detail_level < 4 {
+            return Ok(serde_json::Value::Object(result));
+        }
+
+        // Level 4: Full body content
+        let body = root.get("body").cloned().unwrap_or(serde_json::Value::Null);
+        result.insert("full_content".into(), body);
+
+        Ok(serde_json::Value::Object(result))
+    }
+
     // ===== Symbol-Level Operations =====
 
     /// Find all references to a symbol (function/class) across the codebase.
@@ -535,21 +632,26 @@ impl GraphQuery {
                  OR path IN (SELECT VALUE file_path FROM class WHERE name = $name) \
                  OR path IN (SELECT VALUE file_path FROM config WHERE name = $name); \
              SELECT name, kind, file_path, 'dependent' AS link_type \
-                 FROM package WHERE kind = 'Dependency' AND name = $name;"
+                 FROM package WHERE kind = 'Dependency' AND name = $name; \
+             SELECT in.name AS name, in.file_path AS file_path, in.description AS description, \
+                    'wikilink' AS link_type, context \
+                 FROM links_to WHERE out.name = $name;"
         ).bind(("name", n)).await?;
 
         let callers: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let importers: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
         let containers: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
         let dependents: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+        let wikilinks: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
 
         let mut result = serde_json::Map::new();
-        let total = callers.len() + importers.len() + containers.len() + dependents.len();
+        let total = callers.len() + importers.len() + containers.len() + dependents.len() + wikilinks.len();
         result.insert("total_backlinks".into(), serde_json::Value::Number(total.into()));
         if !callers.is_empty() { result.insert("callers".into(), serde_json::Value::Array(callers)); }
         if !importers.is_empty() { result.insert("importers".into(), serde_json::Value::Array(importers)); }
         if !containers.is_empty() { result.insert("contained_in".into(), serde_json::Value::Array(containers)); }
         if !dependents.is_empty() { result.insert("dependents".into(), serde_json::Value::Array(dependents)); }
+        if !wikilinks.is_empty() { result.insert("wikilinks".into(), serde_json::Value::Array(wikilinks)); }
 
         Ok(serde_json::Value::Object(result))
     }

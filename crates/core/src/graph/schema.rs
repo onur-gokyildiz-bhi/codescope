@@ -153,6 +153,26 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS body ON package TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS pkg_qname ON package FIELDS qualified_name UNIQUE;
 
+        -- === SKILL/KNOWLEDGE GRAPH TABLE (arscontexta-style) ===
+
+        DEFINE TABLE IF NOT EXISTS skill SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS file_path ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS language ON skill TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON skill TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON skill TYPE int;
+        DEFINE FIELD IF NOT EXISTS body ON skill TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS description ON skill TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS node_type ON skill TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS created ON skill TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS skill_name ON skill FIELDS name;
+        DEFINE INDEX IF NOT EXISTS skill_qname ON skill FIELDS qualified_name UNIQUE;
+        DEFINE INDEX IF NOT EXISTS skill_file_repo ON skill FIELDS file_path, repo;
+        DEFINE INDEX IF NOT EXISTS skill_repo ON skill FIELDS repo;
+
         -- === HTTP CLIENT CALL TABLE (cross-service linking) ===
 
         DEFINE TABLE IF NOT EXISTS http_call SCHEMAFULL;
@@ -265,6 +285,8 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE decided_about TYPE RELATION SCHEMAFULL;
         DEFINE TABLE solves_for TYPE RELATION SCHEMAFULL;
         DEFINE TABLE co_discusses TYPE RELATION SCHEMAFULL;
+        DEFINE TABLE links_to TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS context ON links_to TYPE option<string>;
         DEFINE TABLE calls_endpoint TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS method ON calls_endpoint TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS url_pattern ON calls_endpoint TYPE option<string>;
@@ -295,6 +317,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS doc_name_search ON doc FIELDS name SEARCH ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name SEARCH ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS skill_name_search ON skill FIELDS name SEARCH ANALYZER name_analyzer BM25;
         ",
     )
     .await?;
