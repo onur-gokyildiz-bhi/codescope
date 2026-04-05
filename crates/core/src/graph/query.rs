@@ -424,6 +424,56 @@ impl GraphQuery {
         Ok(results)
     }
 
+    // ===== Type Hierarchy =====
+
+    /// Traverse the type hierarchy for a class/struct/trait/interface.
+    /// Shows parents (supertype chain), children (subtypes), interfaces, and implementors.
+    pub async fn type_hierarchy(&self, name: &str, depth: usize) -> Result<serde_json::Value> {
+        let n = name.to_string();
+        let d = depth.min(5) as u32; // Cap at 5 levels
+
+        let mut response = self.db.query(
+            // Find the entity
+            "SELECT name, qualified_name, kind, file_path, start_line, end_line \
+                FROM class WHERE name = $name; \
+             // Parents (what does this extend?)
+             SELECT ->inherits->class.name AS parent, ->inherits->class.kind AS parent_kind, \
+                    ->inherits->class.file_path AS parent_file \
+                FROM class WHERE name = $name; \
+             // Children (what extends this?)
+             SELECT <-inherits<-class.name AS child, <-inherits<-class.kind AS child_kind, \
+                    <-inherits<-class.file_path AS child_file \
+                FROM class WHERE name = $name; \
+             // Interfaces implemented by this type
+             SELECT ->implements->class.name AS iface, ->implements->class.kind AS iface_kind \
+                FROM class WHERE name = $name; \
+             // Types that implement this interface/trait
+             SELECT <-implements<-class.name AS implementor, <-implements<-class.kind AS impl_kind, \
+                    <-implements<-class.file_path AS impl_file \
+                FROM class WHERE name = $name;"
+        ).bind(("name", n)).await?;
+
+        let entities: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        let parents: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+        let children: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+        let interfaces: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+        let implementors: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
+
+        let mut result = serde_json::Map::new();
+        result.insert("name".into(), serde_json::Value::String(name.to_string()));
+
+        if let Some(entity) = entities.into_iter().next() {
+            result.insert("entity".into(), entity);
+        }
+        if !parents.is_empty() { result.insert("parents".into(), serde_json::Value::Array(parents)); }
+        if !children.is_empty() { result.insert("children".into(), serde_json::Value::Array(children)); }
+        if !interfaces.is_empty() { result.insert("implements".into(), serde_json::Value::Array(interfaces)); }
+        if !implementors.is_empty() { result.insert("implemented_by".into(), serde_json::Value::Array(implementors)); }
+
+        let _ = d; // depth reserved for recursive traversal in future
+        Ok(serde_json::Value::Object(result))
+    }
+
     // ===== Skill Graph Traversal =====
 
     /// Traverse the skill/knowledge graph with progressive disclosure.

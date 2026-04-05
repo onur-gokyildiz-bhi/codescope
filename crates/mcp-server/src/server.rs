@@ -703,6 +703,51 @@ impl GraphRagServer {
         }
     }
 
+    // ===== Type Hierarchy =====
+
+    /// Show inheritance chain for a class/struct/trait/interface
+    #[tool(description = "Show the type hierarchy for a class, struct, trait, or interface. Shows parent types (extends), child types (subtypes), implemented interfaces, and implementors.")]
+    async fn type_hierarchy(&self, #[tool(aggr)] params: TypeHierarchyParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let gq = GraphQuery::new(ctx.db);
+        let depth = params.depth.unwrap_or(3);
+
+        match gq.type_hierarchy(&params.name, depth).await {
+            Ok(result) => {
+                let mut output = format!("## Type Hierarchy: {}\n\n", params.name);
+
+                if let Some(entity) = result.get("entity") {
+                    let kind = entity.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                    let file = entity.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    output.push_str(&format!("**{}** [{}] in {}\n\n", params.name, kind, file));
+                }
+
+                for (key, title) in [("parents", "Extends"), ("children", "Subtypes"), ("implements", "Implements"), ("implemented_by", "Implemented By")] {
+                    if let Some(items) = result.get(key).and_then(|v| v.as_array()) {
+                        if !items.is_empty() {
+                            output.push_str(&format!("### {}\n", title));
+                            for item in items {
+                                // Try all possible field names from the query
+                                let name = item.get("parent").or(item.get("child"))
+                                    .or(item.get("iface")).or(item.get("implementor"))
+                                    .and_then(|v| v.as_str()).unwrap_or("?");
+                                output.push_str(&format!("- {}\n", name));
+                            }
+                            output.push('\n');
+                        }
+                    }
+                }
+
+                if output.lines().count() <= 3 {
+                    format!("No type '{}' found or no inheritance relationships.", params.name)
+                } else {
+                    output
+                }
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
     // ===== Skill/Knowledge Graph =====
 
     /// Index a folder of markdown skill/knowledge files into the graph
@@ -872,6 +917,76 @@ impl GraphRagServer {
             }
             Err(e) => format!("Error: {}", e),
         }
+    }
+
+    /// Auto-generate skill notes from conversation history
+    #[tool(description = "Auto-generate markdown skill notes from conversation history. Extracts decisions, problems, and solutions from indexed conversations and creates arscontexta-compatible skill files with [[wikilinks]] and YAML frontmatter. Creates an index.md MOC file.")]
+    async fn generate_skill_notes(&self, #[tool(aggr)] params: GenerateSkillNotesParams) -> String {
+        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let output_dir = ctx.codebase_path.join(params.output_dir.as_deref().unwrap_or("skills"));
+
+        // Fetch all conversation segments from DB
+        let mut response = match ctx.db.query(
+            "SELECT name, body, kind, timestamp FROM decision; \
+             SELECT name, body, kind, timestamp FROM problem; \
+             SELECT name, body, kind, timestamp FROM solution;"
+        ).await {
+            Ok(r) => r,
+            Err(e) => return format!("Error querying conversations: {}", e),
+        };
+
+        let decisions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+        let problems: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+        let solutions: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+
+        // Collect segments
+        let mut segments = Vec::new();
+        for (kind, items) in [("decision", &decisions), ("problem", &problems), ("solution", &solutions)] {
+            for item in items {
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let ts = item.get("timestamp").and_then(|v| v.as_str()).map(|s| s.to_string());
+                if !name.is_empty() {
+                    segments.push((kind.to_string(), name, body, ts));
+                }
+            }
+        }
+
+        if segments.is_empty() {
+            return "No conversation segments found. Run index_conversations first.".into();
+        }
+
+        // Get known code entity names for wikilink generation
+        let code_refs: Vec<String> = match ctx.db.query(
+            "SELECT VALUE name FROM `function` LIMIT 200"
+        ).await {
+            Ok(mut r) => r.take(0).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+
+        // Generate skill notes
+        let files = codescope_core::conversation::generate_skill_notes(&segments, &code_refs);
+
+        // Write to disk
+        if let Err(e) = std::fs::create_dir_all(&output_dir) {
+            return format!("Cannot create output directory: {}", e);
+        }
+
+        let mut written = 0;
+        for (filename, content) in &files {
+            let path = output_dir.join(filename);
+            if let Err(e) = std::fs::write(&path, content) {
+                return format!("Error writing {}: {}", filename, e);
+            }
+            written += 1;
+        }
+
+        format!(
+            "Generated {} skill notes in {}\n\nFiles:\n{}",
+            written,
+            output_dir.display(),
+            files.iter().map(|(f, _)| format!("- {}", f)).collect::<Vec<_>>().join("\n"),
+        )
     }
 
     /// List all supported programming languages

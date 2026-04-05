@@ -212,6 +212,74 @@ fn find_preceding_problem<'a>(
         })
 }
 
+/// Generate skill note markdown files from conversation segments.
+/// Returns Vec<(filename, content)> pairs ready to write to disk.
+pub fn generate_skill_notes(
+    segments: &[(String, String, String, Option<String>)], // (kind, name, body, timestamp)
+    code_refs: &[String],
+) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    let mut decisions = Vec::new();
+    let mut problems = Vec::new();
+    let mut solutions = Vec::new();
+
+    for (kind, name, body, timestamp) in segments {
+        let slug = slug_from_name(name);
+        let ts = timestamp.as_deref().unwrap_or("2026-01-01");
+        let note_type = match kind.as_str() {
+            "Decision" | "decision" => "decision",
+            "Problem" | "problem" => "problem",
+            "Solution" | "solution" => "solution",
+            _ => "insight",
+        };
+
+        // Convert code entity references to wikilinks
+        let mut linked_body = body.clone();
+        for code_ref in code_refs {
+            if body.contains(code_ref) {
+                linked_body = linked_body.replace(code_ref, &format!("[[{}]]", code_ref));
+            }
+        }
+
+        let content = format!(
+            "---\ndescription: {}\ntype: {}\ncreated: {}\n---\n\n# {}\n\n{}\n\n---\n\nTopics:\n- [[{}s]]\n",
+            name, note_type, ts, name, linked_body, note_type
+        );
+
+        let filename = format!("{}.md", slug);
+        match note_type {
+            "decision" => decisions.push(format!("- [[{}]] — {}", slug, name)),
+            "problem" => problems.push(format!("- [[{}]] — {}", slug, name)),
+            "solution" => solutions.push(format!("- [[{}]] — {}", slug, name)),
+            _ => {}
+        }
+
+        files.push((filename, content));
+    }
+
+    // Generate index MOC
+    let mut index = String::from("---\ndescription: Auto-generated skill graph from conversation history\ntype: moc\ncreated: 2026-01-01\n---\n\n# Project Knowledge\n\n");
+
+    if !decisions.is_empty() {
+        index.push_str("## Decisions\n\n");
+        for d in &decisions { index.push_str(d); index.push('\n'); }
+        index.push('\n');
+    }
+    if !problems.is_empty() {
+        index.push_str("## Problems\n\n");
+        for p in &problems { index.push_str(p); index.push('\n'); }
+        index.push('\n');
+    }
+    if !solutions.is_empty() {
+        index.push_str("## Solutions\n\n");
+        for s in &solutions { index.push_str(s); index.push('\n'); }
+        index.push('\n');
+    }
+
+    files.push(("index.md".to_string(), index));
+    files
+}
+
 fn slug_from_name(name: &str) -> String {
     name.to_lowercase()
         .replace(|c: char| !c.is_alphanumeric() && c != '_', "_")

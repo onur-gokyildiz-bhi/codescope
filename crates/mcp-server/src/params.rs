@@ -244,6 +244,20 @@ pub struct ManageAdrParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TypeHierarchyParams {
+    /// Name of the class, struct, trait, or interface
+    pub name: String,
+    /// Depth of hierarchy traversal (default: 3, max: 5)
+    pub depth: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GenerateSkillNotesParams {
+    /// Output directory for generated skill notes (relative to codebase root, default: "skills")
+    pub output_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CommunityDetectionParams {
     /// Analysis type: "clusters", "bridges", "central", or "all" (default)
     pub analysis: Option<String>,
