@@ -324,13 +324,60 @@ async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Res
             // Phase 5: Start file watcher for live re-indexing
             match watcher::start_watcher(&index_path) {
                 Ok(rx) => {
-                    watcher::spawn_reindex_task(rx, index_db, index_repo, index_path);
+                    watcher::spawn_reindex_task(rx, index_db.clone(), index_repo.clone(), index_path.clone());
                     tracing::info!("File watcher active — changes will auto-reindex");
                 }
                 Err(e) => {
                     tracing::warn!("File watcher failed to start: {}", e);
                 }
             }
+
+            // Phase 6: Periodic conversation re-indexing (every 5 minutes)
+            let conv_db = index_db.clone();
+            let conv_repo = index_repo.clone();
+            let conv_path = index_path.clone();
+            let conv_mcp = mcp_handle.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                interval.tick().await; // skip first immediate tick
+                loop {
+                    interval.tick().await;
+                    tracing::debug!("Periodic conversation re-index...");
+
+                    let project_dir = helpers::find_claude_project_dir(&conv_path, &conv_repo);
+                    let builder = codescope_core::graph::builder::GraphBuilder::new(conv_db.clone());
+                    let known: Vec<String> = Vec::new();
+
+                    let mut jsonl_files = Vec::new();
+                    collect_jsonl_files(&project_dir, &mut jsonl_files);
+
+                    let mut new_count = 0;
+                    for jsonl_path in &jsonl_files {
+                        // Check hash to skip already-indexed files
+                        let fname = jsonl_path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        if let Ok(Some(_)) = helpers::check_conversation_hash(&conv_db, fname).await {
+                            continue; // already indexed
+                        }
+
+                        match codescope_core::conversation::parse_conversation(jsonl_path, &conv_repo, &known) {
+                            Ok((entities, relations, _)) => {
+                                let _ = builder.insert_entities(&entities).await;
+                                let _ = builder.insert_relations(&relations).await;
+                                new_count += 1;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+
+                    if new_count > 0 {
+                        tracing::info!("Periodic index: {} new conversations", new_count);
+                        helpers::generate_context_md(&conv_db, &conv_repo, &conv_path).await;
+                        conv_mcp.load_context_summary().await;
+                    }
+                }
+            });
         });
     }
 
