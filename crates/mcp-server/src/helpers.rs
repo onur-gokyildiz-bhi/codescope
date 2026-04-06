@@ -298,15 +298,8 @@ pub(crate) async fn build_post_index_insights(
         insights.push(s);
     }
 
-    // 4. Missing CLAUDE.md check
-    let has_claude_md: Vec<serde_json::Value> = db
-        .query("SELECT path FROM file WHERE repo = $repo AND string::contains(path, 'CLAUDE.md') LIMIT 1")
-        .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
-
-    if has_claude_md.is_empty() {
-        insights.push("### Missing CLAUDE.md\nNo CLAUDE.md found. Consider creating one with project conventions and codescope usage guidance.\n".to_string());
-    }
+    // 4. CLAUDE.md check removed — .claude/ is a hidden dir not indexed by tree walker.
+    //    CLAUDE.md existence is better checked by the agent itself via filesystem.
 
     // 5. Skill graph opportunity — suggest based on conversation count
     let conv_count: Vec<serde_json::Value> = db
