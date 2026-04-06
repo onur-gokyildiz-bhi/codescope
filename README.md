@@ -29,6 +29,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 - [Git History Analysis](#git-history-analysis)
 - [Embedding & Semantic Search](#embedding--semantic-search)
 - [Benchmarking](#benchmarking)
+- [3D Web UI](#3d-web-ui)
 - [Architecture](#architecture)
 - [Configuration](#configuration)
 - [Comparison with Alternatives](#comparison-with-alternatives)
@@ -52,7 +53,9 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 - **Semantic search**: Local embeddings with FastEmbed (zero deps), or Ollama/OpenAI — search code by meaning
 - **Incremental indexing**: Hash-based change detection, only re-parses modified files
 - **Daemon mode**: Multi-project HTTP/SSE server for concurrent AI agent connections
-- **Web UI**: Interactive D3.js force-directed graph visualization
+- **3D Web UI**: Interactive Three.js knowledge graph visualization — node sidebar, file tree, search autocomplete, hotspot heatmap, syntax-highlighted file viewer, skill graph tab, conversation timeline with date filter, minimap, cluster view
+- **Auto project insights**: Post-indexing analysis — hotspots (refactor candidates), dead code, most complex files, language distribution, skill graph opportunities
+- **Unified binary**: Single `codescope` binary — CLI, MCP server, and Web UI as subcommands. No separate installs
 - **Benchmark suite**: Built-in benchmarking against traditional approaches
 
 ---
@@ -379,7 +382,7 @@ codescope mcp status --port 3333
 codescope mcp stop --port 3333
 ```
 
-### Available MCP Tools (43 tools)
+### Available MCP Tools (45 tools)
 
 **Code Search & Navigation:**
 
@@ -423,6 +426,13 @@ codescope mcp stop --port 3333
 |------|-------------|
 | `index_skill_graph` | Index markdown skill files with [[wikilinks]] + YAML frontmatter |
 | `traverse_skill_graph` | Navigate skill graph with progressive disclosure (4 detail levels) |
+| `generate_skill_notes` | Auto-generate skill markdown files from conversations |
+
+**Type Hierarchy:**
+
+| Tool | Description |
+|------|-------------|
+| `type_hierarchy` | Show inheritance chain for a class/struct/trait/interface |
 
 **Semantic Search:**
 
@@ -738,6 +748,46 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed per-scenario results.
 
 ---
 
+## 3D Web UI
+
+Launch the interactive 3D knowledge graph visualization:
+
+```bash
+codescope web /path/to/project --auto-index --port 9091
+```
+
+![Codescope 3D Web UI](assets/demo.gif)
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **3D Force Graph** | Three.js force-directed layout with orbit controls — rotate, zoom, pan |
+| **Node Sidebar** | Click any node to see details: signature, callers, callees, file location |
+| **File Tree** | Browse all indexed files by directory structure, click to view source |
+| **Search Autocomplete** | Real-time fuzzy search across all entities with instant results |
+| **Filter Controls** | Toggle entity types on/off (functions, classes, files, skills, etc.) |
+| **Hotspot Heatmap** | Highlight high-risk code based on complexity × churn |
+| **Source Viewer** | Syntax-highlighted file viewer with line numbers (highlight.js) |
+| **Skill Graph Tab** | Browse skill/knowledge nodes with [[wikilink]] connections |
+| **Conversation Timeline** | Visual timeline of decisions, problems, solutions from Claude sessions |
+| **Date Filter** | Filter conversations by date range |
+| **Minimap** | Overview of the entire graph for quick navigation |
+| **Cluster View** | Community detection visualization — see code modules and boundaries |
+
+### Node Color Coding
+
+| Color | Entity Type |
+|-------|-------------|
+| 🔵 Blue | Functions & methods |
+| 🟢 Green | Classes, structs, enums, traits |
+| 🟡 Amber | Config entries |
+| 🟣 Purple | Skills & knowledge nodes |
+| ⚪ Gray | Files |
+| 🔴 Red | Infrastructure (Docker, Terraform) |
+
+---
+
 ## Architecture
 
 ```
@@ -766,7 +816,8 @@ codescope/
 - **rmcp** — Official Rust MCP SDK for AI agent integration
 - **git2** — Native git history analysis
 - **rayon** — Parallel file parsing for fast indexing
-- **axum** — Web server for D3.js visualization
+- **Three.js / 3d-force-graph** — Interactive 3D knowledge graph visualization
+- **axum** — Web server for 3D UI and API endpoints
 
 ### Data Flow
 
@@ -823,7 +874,7 @@ How does Codescope compare to other code intelligence tools?
 | **Language** | Rust | C | Python | Python | Node.js | Python |
 | **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
 | **Languages** | 35 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
-| **MCP Server** | Yes (43 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
+| **MCP Server** | Yes (45 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
 | **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
 | **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
 | **Local Embeddings** | Yes (FastEmbed, zero deps) | No | No | No | No (needs API key) | No |
@@ -835,6 +886,11 @@ How does Codescope compare to other code intelligence tools?
 | **Semantic Search** | Yes (in-process) | No | No | No | Yes (external) | No |
 | **Git History** | Yes (churn, coupling, contributors) | No | No | No | No | No |
 | **Claude Code Skills** | Yes (9 slash commands) | No | No | No | No | No |
+| **3D Web Visualization** | Yes (Three.js, 12 features) | No | No | No | No | No |
+| **Auto Project Insights** | Yes (hotspots, dead code, coupling) | No | No | No | No | No |
+| **Skill/Knowledge Graphs** | Yes (arscontexta-compatible) | No | No | No | No | No |
+| **Type Hierarchy** | Yes (inherits/implements traversal) | No | No | No | No | No |
+| **HTTP Cross-Service Linking** | Yes (reqwest/fetch/axios) | No | No | No | No | No |
 | **License** | MIT | MIT | MIT | MIT | MIT | MIT |
 
 ### Approach Comparison
@@ -849,13 +905,15 @@ How does Codescope compare to other code intelligence tools?
 
 ### What Makes Codescope Different
 
-1. **Graph + Embeddings + Conversations + Skills** — Structural code graph, semantic search, conversation memory, AND knowledge/skill graphs in a single binary. No other tool does all four.
+1. **Graph + Embeddings + Conversations + Skills + 3D Viz** — Structural code graph, semantic search, conversation memory, knowledge/skill graphs, AND interactive 3D visualization in a single binary. No other tool does all five.
 2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
 3. **Beyond code** — 44 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
 4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
 5. **Conversation memory** — Auto-indexes Claude Code sessions, extracts decisions/problems/solutions, links them to code entities. Auto-generates CONTEXT.md so Claude knows your project history.
-6. **Claude Code native** — 9 slash commands with Turkish + English natural language support.
-7. **Temporal analysis** — Git history integration for churn analysis, change coupling, hotspot detection, contributor mapping.
+6. **Auto project insights** — After indexing, automatically identifies hotspots, dead code, complex files, and suggests refactoring opportunities.
+7. **3D knowledge graph** — Interactive Three.js visualization with 12 features: node sidebar, file tree, search, hotspot heatmap, source viewer, skill graph, conversation timeline, minimap, clusters.
+8. **Claude Code native** — 9 slash commands with Turkish + English natural language support.
+9. **Temporal analysis** — Git history integration for churn analysis, change coupling, hotspot detection, contributor mapping.
 
 ---
 
