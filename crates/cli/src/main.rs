@@ -238,10 +238,16 @@ async fn main() -> Result<()> {
             cmd_install()?;
         }
         Commands::Mcp { path, auto_index } => {
-            codescope_mcp::run_stdio(path, Some(global_repo), auto_index).await?;
+            // Derive repo from target path, not CWD
+            let repo = path.canonicalize().ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+            codescope_mcp::run_stdio(path, repo, auto_index).await?;
         }
         Commands::Web { path, port, auto_index } => {
-            codescope_web::run_web(path, Some(global_repo), port, auto_index, cli.db_path).await?;
+            // Derive repo from target path, not CWD
+            let repo = path.canonicalize().ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+            codescope_web::run_web(path, repo, port, auto_index, cli.db_path).await?;
         }
     }
 

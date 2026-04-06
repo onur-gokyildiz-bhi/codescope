@@ -71,7 +71,7 @@ irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.
 curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
 ```
 
-This downloads the latest release, installs `codescope` and `codescope-mcp` to your PATH, and you're ready to go. No Rust toolchain required.
+This downloads the latest release and installs the `codescope` binary to your PATH. The single binary includes CLI, MCP server, and Web UI as subcommands. No Rust toolchain required.
 
 You can also download binaries manually from the [Releases page](https://github.com/onur-gokyildiz-bhi/codescope/releases).
 
@@ -85,28 +85,22 @@ cd codescope
 cargo build --release
 ```
 
-Binaries will be at:
-- `target/release/codescope` — CLI tool
-- `target/release/codescope-mcp` — MCP server
-- `target/release/codescope-bench` — Benchmark runner
+The unified binary will be at `target/release/codescope` (CLI, MCP server, and Web UI all in one). The benchmark runner is a separate binary at `target/release/codescope-bench`.
 
-Optionally add them to PATH:
+Optionally add to PATH:
 
 ```bash
 # Linux/macOS
 cp target/release/codescope ~/.local/bin/
-cp target/release/codescope-mcp ~/.local/bin/
 
 # Windows (PowerShell)
 Copy-Item target\release\codescope.exe $env:LOCALAPPDATA\codescope\bin\
-Copy-Item target\release\codescope-mcp.exe $env:LOCALAPPDATA\codescope\bin\
 ```
 
 ### Option 3: Cargo Install (Rust users)
 
 ```bash
 cargo install --git https://github.com/onur-gokyildiz-bhi/codescope codescope
-cargo install --git https://github.com/onur-gokyildiz-bhi/codescope codescope-mcp
 ```
 
 ---
@@ -290,7 +284,7 @@ The MCP server exposes Codescope's capabilities as tools that AI agents (Claude 
 ### Start the Server
 
 ```bash
-codescope-mcp /path/to/project --auto-index
+codescope mcp /path/to/project --auto-index
 ```
 
 **Options:**
@@ -324,8 +318,8 @@ Add to `~/.claude.json` (global, all projects):
 {
   "mcpServers": {
     "codescope": {
-      "command": "codescope-mcp",
-      "args": [".", "--auto-index"]
+      "command": "codescope",
+      "args": ["mcp", ".", "--auto-index"]
     }
   }
 }
@@ -337,8 +331,8 @@ Or create `.mcp.json` in your project root (project-level):
 {
   "mcpServers": {
     "codescope": {
-      "command": "codescope-mcp",
-      "args": [".", "--auto-index"]
+      "command": "codescope",
+      "args": ["mcp", ".", "--auto-index"]
     }
   }
 }
@@ -373,16 +367,16 @@ Claude will also **automatically use Codescope tools** when you ask code structu
 
 ```bash
 # Start daemon (background, multi-project)
-codescope-mcp serve --port 3333
+codescope mcp serve --port 3333
 
 # Start as background process
-codescope-mcp start --port 3333
+codescope mcp start --port 3333
 
 # Check status
-codescope-mcp status --port 3333
+codescope mcp status --port 3333
 
 # Stop daemon
-codescope-mcp stop --port 3333
+codescope mcp stop --port 3333
 ```
 
 ### Available MCP Tools (43 tools)
@@ -756,10 +750,10 @@ codescope/
 │   │   ├── temporal/      # Git history analysis + graph sync
 │   │   ├── conversation/  # Claude session parser, classifier, entity linker
 │   │   └── crossrepo/     # Multi-repository linking
-│   ├── cli/               # Command-line interface (codescope)
-│   ├── mcp-server/        # MCP server + daemon mode (codescope-mcp)
-│   ├── web/               # Interactive D3.js graph visualization (codescope-web)
-│   └── bench/             # Benchmark suite (codescope-bench)
+│   ├── cli/               # Unified binary — CLI, MCP server, Web UI (codescope)
+│   ├── mcp-server/        # MCP server library (used by unified binary)
+│   ├── web/               # Web UI library (used by unified binary)
+│   └── bench/             # Benchmark suite (codescope-bench, separate binary)
 ├── BENCHMARKS.md          # Detailed benchmark results
 └── CLAUDE.md              # Quick reference for AI assistants
 ```

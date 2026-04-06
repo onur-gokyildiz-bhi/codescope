@@ -38,13 +38,13 @@ cp configs/codex-cli.yaml ~/.codex/config.yaml
 
 ## Custom Binary Path
 
-If `codescope-mcp` is not in PATH, replace `"codescope-mcp"` with the full path:
+If `codescope` is not in PATH, replace `"codescope"` with the full path:
 
 ```json
-"command": "/path/to/codescope-mcp"
+"command": "/path/to/codescope"
 ```
 
 Windows:
 ```json
-"command": "C:\\Users\\you\\AppData\\Local\\codescope\\bin\\codescope-mcp.exe"
+"command": "C:\\Users\\you\\AppData\\Local\\codescope\\bin\\codescope.exe"
 ```
