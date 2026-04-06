@@ -71,7 +71,15 @@ impl GraphRagServer {
             Err(_) => return,
         };
         let summary = build_context_summary(&ctx.db, &ctx.repo_name).await;
-        *self.context_summary.write().await = summary;
+        let insights = crate::helpers::build_post_index_insights(&ctx.db, &ctx.repo_name).await;
+        let combined = if insights.is_empty() {
+            summary
+        } else if summary.is_empty() {
+            insights
+        } else {
+            format!("{}\n\n{}", insights, summary)
+        };
+        *self.context_summary.write().await = combined;
     }
 }
 
