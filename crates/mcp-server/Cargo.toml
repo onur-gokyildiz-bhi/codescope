@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "codescope_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codescope-mcp"
+path = "src/main.rs"
+
 [dependencies]
 codescope-core = { path = "../core" }
 rmcp = { workspace = true }

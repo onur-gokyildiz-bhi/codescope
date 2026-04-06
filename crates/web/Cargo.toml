@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "codescope_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codescope-web"
+path = "src/main.rs"
+
 [dependencies]
 codescope-core = { path = "../core" }
 axum = { workspace = true }

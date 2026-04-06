@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 codescope-core = { path = "../core" }
+codescope-mcp = { path = "../mcp-server" }
+codescope-web = { path = "../web" }
 surrealdb = { workspace = true }
 ignore = { workspace = true }
 tokio = { workspace = true }

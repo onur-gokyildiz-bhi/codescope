@@ -131,6 +131,32 @@ enum Commands {
 
     /// Install codescope binary to ~/.local/bin (adds to PATH)
     Install,
+
+    /// Start MCP server (for AI agent integration)
+    Mcp {
+        /// Path to the codebase
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Auto-index on startup
+        #[arg(long)]
+        auto_index: bool,
+    },
+
+    /// Start web visualization dashboard
+    Web {
+        /// Path to the codebase
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Port to listen on
+        #[arg(long, default_value = "8080")]
+        port: u16,
+
+        /// Auto-index on startup
+        #[arg(long)]
+        auto_index: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -210,6 +236,12 @@ async fn main() -> Result<()> {
         }
         Commands::Install => {
             cmd_install()?;
+        }
+        Commands::Mcp { path, auto_index } => {
+            codescope_mcp::run_stdio(path, Some(global_repo), auto_index).await?;
+        }
+        Commands::Web { path, port, auto_index } => {
+            codescope_web::run_web(path, Some(global_repo), port, auto_index, cli.db_path).await?;
         }
     }
 
