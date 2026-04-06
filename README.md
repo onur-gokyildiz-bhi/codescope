@@ -41,7 +41,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 - **44 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
-- **43 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
+- **45 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
 - **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
 - **Conversation memory**: Auto-indexes Claude Code sessions — tracks decisions, problems, solutions, and links them to code entities
 - **Auto CONTEXT.md**: Generates a dynamic context file with recent decisions/problems so Claude sees your project history automatically
