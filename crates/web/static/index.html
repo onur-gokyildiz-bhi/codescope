@@ -779,16 +779,21 @@ function toggleDir(id, el) {
   if (arrow) arrow.classList.toggle('open');
 }
 
-async function loadFileInGraph(path) {
+async function loadFileInGraph(fpath) {
   try {
-    const r = await fetch(`/api/file-content?path=${encodeURIComponent(path)}`);
+    const r = await fetch(`/api/file-content?path=${encodeURIComponent(fpath)}`);
     const data = await r.json();
-    if (data.entities && data.entities.length > 0) {
-      // Navigate to first entity
-      nav(data.entities[0].name || data.entities[0]);
+    // entities comes from raw_query — may be nested [[{...}],[{...}]]
+    let ents = data.entities || [];
+    // Flatten nested arrays
+    if (Array.isArray(ents) && ents.length > 0 && Array.isArray(ents[0])) {
+      ents = ents.flat();
+    }
+    const firstEnt = ents.find(e => e && e.name);
+    if (firstEnt) {
+      nav(firstEnt.name);
     } else {
-      // Just search for the filename
-      const fname = path.split('/').pop().split('\\').pop();
+      const fname = fpath.split('/').pop().split('\\').pop().replace(/\.\w+$/, '');
       loadGraph(fname);
     }
   } catch (e) {
