@@ -252,6 +252,10 @@ body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-s
       <div class="conv-tab" onclick="showConvTab('solutions',this)">Solutions</div>
       <div class="conv-tab" onclick="showConvTab('timeline',this)">Timeline</div>
     </div>
+    <div style="padding:6px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">
+      <input id="conv-search" type="text" placeholder="Search or ask a date..." style="flex:1;padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;outline:none" oninput="filterConversations()" />
+      <input id="conv-date" type="date" style="padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;outline:none" onchange="filterConversations()" />
+    </div>
     <div class="conv-list" id="conv-list"></div>
   </div>
 
@@ -1233,9 +1237,15 @@ async function loadConversations() {
   }
 }
 
+function filterConversations() {
+  renderConversations();
+}
+
 function renderConversations() {
   if (!convData) return;
   const list = document.getElementById('conv-list');
+  const searchQ = (document.getElementById('conv-search')?.value || '').toLowerCase();
+  const dateQ = document.getElementById('conv-date')?.value || '';
 
   // Feature 8: Timeline tab
   if (convFilter === 'timeline') {
@@ -1253,6 +1263,23 @@ function renderConversations() {
   }
   if (convFilter === 'all' || convFilter === 'solutions') {
     (convData.solutions || []).forEach(d => items.push({ ...d, _kind: 'solution' }));
+  }
+
+  // Apply search filter
+  if (searchQ) {
+    items = items.filter(it => {
+      const name = (it.name || '').toLowerCase();
+      const body = (it.body || '').toLowerCase();
+      return name.includes(searchQ) || body.includes(searchQ);
+    });
+  }
+
+  // Apply date filter
+  if (dateQ) {
+    items = items.filter(it => {
+      const ts = it.timestamp || '';
+      return ts.startsWith(dateQ);
+    });
   }
 
   // Build code link lookup
