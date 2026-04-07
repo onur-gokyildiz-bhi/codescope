@@ -21,3 +21,7 @@ zod/
 express/
 .fastembed_cache/
 crates/web/frontend/node_modules/
+
+# Build output
+crates/web/frontend/dist/
+.graph-rag/
