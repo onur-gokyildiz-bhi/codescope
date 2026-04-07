@@ -391,8 +391,7 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
         let web_db = db.clone();
         tokio::spawn(async move {
             let router = codescope_web::build_web_router(web_db);
-            let addr = "127.0.0.1:9876";
-            match tokio::net::TcpListener::bind(addr).await {
+            match tokio::net::TcpListener::bind("127.0.0.1:9876").await {
                 Ok(listener) => {
                     tracing::info!("Web UI: http://localhost:9876");
                     let _ = axum::serve(listener, router).await;
