@@ -177,6 +177,33 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                 Err(e) => tracing::warn!("Virtual dispatch resolution failed: {}", e),
             }
 
+            // Phase 2.7: Sync git history for hotspot/churn analysis
+            {
+                let git_path = index_path.clone();
+                let commits = tokio::task::spawn_blocking(move || {
+                    codescope_core::temporal::GitAnalyzer::open(&git_path)
+                        .and_then(|a| a.recent_commits(500))
+                })
+                .await
+                .unwrap_or_else(|_| Ok(vec![]));
+
+                match commits {
+                    Ok(ref c) if !c.is_empty() => {
+                        let git_sync =
+                            codescope_core::temporal::TemporalGraphSync::new(index_db.clone());
+                        match git_sync.sync_commit_data(c, &index_repo).await {
+                            Ok(n) if n > 0 => {
+                                tracing::info!("Synced {} git commits", n);
+                            }
+                            Ok(_) => {}
+                            Err(e) => tracing::debug!("Git sync failed: {}", e),
+                        }
+                    }
+                    Err(e) => tracing::debug!("Git history skipped: {}", e),
+                    _ => {}
+                }
+            }
+
             // Phase 3: Auto-index conversations + memory files
             let project_dir = helpers::find_claude_project_dir(&index_path, &index_repo);
             tracing::info!("Auto-indexing conversations from {}", project_dir.display());
