@@ -318,3 +318,11 @@ pub struct CaptureInsightParams {
     /// Agent identity: "claude-code", "cursor", "codex-cli", etc (auto-detected if empty)
     pub agent: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SuggestStructureParams {
+    /// Project description or goal (what does this project do?)
+    pub description: Option<String>,
+    /// Primary language (auto-detected if not specified)
+    pub language: Option<String>,
+}

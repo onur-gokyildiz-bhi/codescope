@@ -322,10 +322,266 @@ pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &P
     }
 }
 
+/// Build a compact project profile from indexed data.
+/// Analyzes tech stack, architecture, naming convention, scale, and key patterns.
+pub(crate) async fn build_project_profile(db: &Surreal<Db>, repo: &str) -> String {
+    let mut lines = Vec::new();
+
+    // 1. Tech Stack Detection — language distribution from functions
+    let func_langs: Vec<serde_json::Value> = db
+        .query(
+            "SELECT language, count() AS cnt FROM `function` WHERE repo = $repo \
+             GROUP BY language ORDER BY cnt DESC LIMIT 5",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    // Framework detection from packages
+    let frameworks: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name FROM package WHERE repo = $repo AND \
+             (name ~ 'react' OR name ~ 'next' OR name ~ 'express' OR name ~ 'django' \
+              OR name ~ 'flask' OR name ~ 'fastapi' OR name ~ 'spring' OR name ~ 'flutter' \
+              OR name ~ 'aspire' OR name ~ 'axum' OR name ~ 'actix' OR name ~ 'gin' \
+              OR name ~ 'fiber' OR name ~ 'rails') LIMIT 10",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !func_langs.is_empty() {
+        let lang_parts: Vec<String> = func_langs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| {
+                let lang = l.get("language").and_then(|v| v.as_str())?;
+                if lang.is_empty() || lang == "unknown" {
+                    return None;
+                }
+                let label = if i == 0 {
+                    format!("{} (primary)", lang)
+                } else if i == 1 {
+                    format!("{} (secondary)", lang)
+                } else {
+                    lang.to_string()
+                };
+                Some(label)
+            })
+            .collect();
+
+        let fw_names: Vec<String> = frameworks
+            .iter()
+            .filter_map(|f| {
+                f.get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+
+        let mut stack_line = lang_parts.join(", ");
+        if !fw_names.is_empty() {
+            stack_line.push_str(&format!(" — {}", fw_names.join(", ")));
+        }
+        lines.push(format!("- **Stack**: {}", stack_line));
+    }
+
+    // 2. Architecture Pattern — from file paths
+    let file_paths: Vec<serde_json::Value> = db
+        .query("SELECT path FROM file WHERE repo = $repo LIMIT 200")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !file_paths.is_empty() {
+        let paths: Vec<String> = file_paths
+            .iter()
+            .filter_map(|f| {
+                f.get("path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .collect();
+
+        let mut has_components = false;
+        let mut has_crates = false;
+        let mut has_lib_packages = false;
+        let mut has_services = false;
+        let mut has_models = false;
+        let mut has_handlers = false;
+        let mut seen_crates = std::collections::HashSet::new();
+        for p in &paths {
+            let normalized = p.replace('\\', "/");
+            if normalized.contains("src/components/") || normalized.contains("/components/") {
+                has_components = true;
+            }
+            if normalized.contains("crates/") && normalized.contains("/src/") {
+                has_crates = true;
+                // Count distinct crate names
+                if let Some(after_crates) = normalized.split("crates/").nth(1) {
+                    if let Some(crate_name) = after_crates.split('/').next() {
+                        seen_crates.insert(crate_name.to_string());
+                    }
+                }
+            }
+            if normalized.starts_with("lib/")
+                && normalized.split('/').count() > 2
+                && !normalized.contains("node_modules")
+            {
+                has_lib_packages = true;
+            }
+            if normalized.contains("services/") && normalized.split('/').count() > 2 {
+                has_services = true;
+            }
+            if normalized.contains("app/models/") {
+                has_models = true;
+            }
+            if normalized.contains("handlers/") || normalized.contains("controllers/") {
+                has_handlers = true;
+            }
+        }
+        let crate_count = seen_crates.len();
+
+        let arch = if has_crates {
+            format!("Workspace monorepo ({} crates)", crate_count)
+        } else if has_services {
+            "Microservices".to_string()
+        } else if has_components {
+            "Component-based (React/Vue)".to_string()
+        } else if has_lib_packages {
+            "Dart/Flutter package".to_string()
+        } else if has_models && has_handlers {
+            "MVC (Rails/Django)".to_string()
+        } else if has_handlers {
+            "Handler pattern".to_string()
+        } else {
+            "Standard".to_string()
+        };
+        lines.push(format!("- **Architecture**: {}", arch));
+    }
+
+    // 3. Naming Convention — analyze function names
+    let fn_names: Vec<serde_json::Value> = db
+        .query("SELECT name FROM `function` WHERE repo = $repo LIMIT 100")
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !fn_names.is_empty() {
+        let mut snake = 0u32;
+        let mut camel = 0u32;
+        let mut pascal = 0u32;
+
+        for f in &fn_names {
+            if let Some(name) = f.get("name").and_then(|v| v.as_str()) {
+                if name.contains('_') && name == name.to_lowercase() {
+                    snake += 1;
+                } else if !name.is_empty() {
+                    let first_char = name.chars().next().unwrap_or('a');
+                    if first_char.is_uppercase() {
+                        pascal += 1;
+                    } else if name.chars().any(|c| c.is_uppercase()) {
+                        camel += 1;
+                    }
+                }
+            }
+        }
+
+        let convention = if snake >= camel && snake >= pascal {
+            "snake_case"
+        } else if camel >= snake && camel >= pascal {
+            "camelCase"
+        } else {
+            "PascalCase"
+        };
+        lines.push(format!("- **Convention**: {}", convention));
+    }
+
+    // 4. Scale — count functions, classes, files
+    let scale_counts: Vec<serde_json::Value> = db
+        .query(
+            "SELECT \
+             (SELECT count() FROM `function` WHERE repo = $repo GROUP ALL)[0].count AS fn_count, \
+             (SELECT count() FROM class WHERE repo = $repo GROUP ALL)[0].count AS cls_count, \
+             (SELECT count() FROM file WHERE repo = $repo GROUP ALL)[0].count AS file_count",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if let Some(row) = scale_counts.first() {
+        let fns = row.get("fn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        let cls = row.get("cls_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        let files = row.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0);
+        if fns > 0 || cls > 0 || files > 0 {
+            let mut parts = Vec::new();
+            if fns > 0 {
+                parts.push(format!("{} functions", fns));
+            }
+            if cls > 0 {
+                parts.push(format!("{} classes", cls));
+            }
+            if files > 0 {
+                parts.push(format!("{} files", files));
+            }
+            lines.push(format!("- **Scale**: {}", parts.join(", ")));
+        }
+    }
+
+    // 5. Key patterns — top 5 most-called functions (by incoming call count)
+    let top_called: Vec<serde_json::Value> = db
+        .query(
+            "SELECT out.name AS name, count() AS call_count FROM calls \
+             WHERE out.repo = $repo \
+             GROUP BY out.name ORDER BY call_count DESC LIMIT 5",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !top_called.is_empty() {
+        let names: Vec<String> = top_called
+            .iter()
+            .filter_map(|r| {
+                r.get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| format!("`{}`", s))
+            })
+            .collect();
+        if !names.is_empty() {
+            lines.push(format!("- **Key patterns**: {}", names.join(", ")));
+        }
+    }
+
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("## Project Profile\n{}\n", lines.join("\n"))
+    }
+}
+
 /// Post-index project insights — auto-generated recommendations after indexing.
 /// Returned as markdown and injected into CONTEXT.md + MCP server instructions.
 pub(crate) async fn build_post_index_insights(db: &Surreal<Db>, repo: &str) -> String {
     let mut insights = Vec::new();
+
+    // Project Profile at the top
+    let profile = build_project_profile(db, repo).await;
+    if !profile.is_empty() {
+        insights.push(profile);
+    }
 
     // 1. Hotspots — largest functions (refactoring candidates)
     let hotspots: Vec<serde_json::Value> = db

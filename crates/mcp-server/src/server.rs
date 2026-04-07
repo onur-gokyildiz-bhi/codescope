@@ -11,8 +11,9 @@ use codescope_core::graph::query::GraphQuery;
 
 use crate::daemon::DaemonState;
 use crate::helpers::{
-    build_context_summary, check_conversation_hash, derive_scope_from_file_path,
-    extract_path_from_question, link_cross_session_topics, load_known_entities,
+    build_context_summary, build_project_profile, check_conversation_hash,
+    derive_scope_from_file_path, extract_path_from_question, link_cross_session_topics,
+    load_known_entities,
 };
 use crate::params::*;
 
@@ -4217,5 +4218,222 @@ impl GraphRagServer {
             confirmation.push_str(&format!("\n- Linked to entity: {}", entity));
         }
         confirmation
+    }
+
+    /// Suggest a project directory structure for new/empty projects, or return the project profile if already indexed.
+    #[tool(
+        description = "Suggest a directory structure for a new project based on language and description. \
+        If the project is already indexed (has entities), returns the Project Profile instead. \
+        For empty/new projects, reads README.md or DESIGN.md if available and suggests a \
+        language-appropriate directory layout."
+    )]
+    async fn suggest_structure(
+        &self,
+        Parameters(params): Parameters<SuggestStructureParams>,
+    ) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        // Check if the project already has indexed entities
+        let entity_count: Vec<serde_json::Value> = ctx
+            .db
+            .query(
+                "SELECT \
+                 (SELECT count() FROM `function` WHERE repo = $repo GROUP ALL)[0].count AS fn_count, \
+                 (SELECT count() FROM class WHERE repo = $repo GROUP ALL)[0].count AS cls_count",
+            )
+            .bind(("repo", ctx.repo_name.clone()))
+            .await
+            .ok()
+            .and_then(|mut r| r.take(0).ok())
+            .unwrap_or_default();
+
+        let has_entities = entity_count
+            .first()
+            .map(|row| {
+                let fns = row.get("fn_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cls = row.get("cls_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                fns > 0 || cls > 0
+            })
+            .unwrap_or(false);
+
+        // If project already indexed, return the Project Profile
+        if has_entities {
+            let profile = build_project_profile(&ctx.db, &ctx.repo_name).await;
+            if profile.is_empty() {
+                return "Project is indexed but no profile data available. Try re-indexing.".into();
+            }
+            return format!(
+                "Project already indexed. Here is the current profile:\n\n{}",
+                profile
+            );
+        }
+
+        // Empty/new project — look for README.md, DESIGN.md, or docs/
+        let mut context_from_files = String::new();
+
+        for filename in &["README.md", "DESIGN.md"] {
+            let file_path = ctx.codebase_path.join(filename);
+            if file_path.is_file() {
+                if let Ok(content) = std::fs::read_to_string(&file_path) {
+                    let truncated: String = content.chars().take(2000).collect();
+                    context_from_files
+                        .push_str(&format!("### From {}\n{}\n\n", filename, truncated));
+                }
+            }
+        }
+
+        // Check docs/ directory for any .md files
+        let docs_path = ctx.codebase_path.join("docs");
+        if docs_path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&docs_path) {
+                for entry in entries.flatten().take(3) {
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "md").unwrap_or(false) {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("doc");
+                            let truncated: String = content.chars().take(1000).collect();
+                            context_from_files
+                                .push_str(&format!("### From docs/{}\n{}\n\n", fname, truncated));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Detect language — from param, or try to infer from files in the directory
+        let lang = if let Some(ref l) = params.language {
+            l.to_lowercase()
+        } else {
+            // Try to detect from common project files
+            let codebase = &ctx.codebase_path;
+            if codebase.join("Cargo.toml").is_file() {
+                "rust".to_string()
+            } else if codebase.join("package.json").is_file() {
+                if codebase.join("tsconfig.json").is_file() {
+                    "typescript".to_string()
+                } else {
+                    "javascript".to_string()
+                }
+            } else if codebase.join("pyproject.toml").is_file()
+                || codebase.join("requirements.txt").is_file()
+            {
+                "python".to_string()
+            } else if codebase.join("pubspec.yaml").is_file() {
+                "dart".to_string()
+            } else if codebase.join("go.mod").is_file() {
+                "go".to_string()
+            } else if codebase.join("Project.csproj").is_file() || codebase.join("*.sln").is_file()
+            {
+                "csharp".to_string()
+            } else {
+                "unknown".to_string()
+            }
+        };
+
+        let suggestion = match lang.as_str() {
+            "rust" => {
+                "Suggested structure:\n```\nsrc/\n\
+                       \x20\x20\x20\x20main.rs\n\
+                       \x20\x20\x20\x20lib.rs\n\
+                       \x20\x20\x20\x20config.rs\n\
+                       \x20\x20\x20\x20error.rs\n\
+                       \x20\x20\x20\x20routes/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20mod.rs\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20health.rs\n\
+                       Cargo.toml\n```"
+            }
+            "typescript" | "javascript" => {
+                "Suggested structure:\n```\nsrc/\n\
+                       \x20\x20\x20\x20index.ts\n\
+                       \x20\x20\x20\x20config/\n\
+                       \x20\x20\x20\x20routes/\n\
+                       \x20\x20\x20\x20services/\n\
+                       \x20\x20\x20\x20models/\n\
+                       \x20\x20\x20\x20utils/\n\
+                       package.json\ntsconfig.json\n```"
+            }
+            "python" => {
+                "Suggested structure:\n```\nsrc/\n\
+                       \x20\x20\x20\x20__init__.py\n\
+                       \x20\x20\x20\x20main.py\n\
+                       \x20\x20\x20\x20config.py\n\
+                       \x20\x20\x20\x20routes/\n\
+                       \x20\x20\x20\x20services/\n\
+                       \x20\x20\x20\x20models/\n\
+                       \x20\x20\x20\x20utils/\n\
+                       requirements.txt\npyproject.toml\n```"
+            }
+            "dart" | "flutter" => {
+                "Suggested structure:\n```\nlib/\n\
+                       \x20\x20\x20\x20main.dart\n\
+                       \x20\x20\x20\x20core/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20config/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20constants/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20utils/\n\
+                       \x20\x20\x20\x20features/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20home/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20screens/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20widgets/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20providers/\n\
+                       \x20\x20\x20\x20shared/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20models/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20services/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20widgets/\n\
+                       pubspec.yaml\n```"
+            }
+            "go" => {
+                "Suggested structure:\n```\ncmd/\n\
+                       \x20\x20\x20\x20server/\n\
+                       \x20\x20\x20\x20\x20\x20\x20\x20main.go\n\
+                       internal/\n\
+                       \x20\x20\x20\x20config/\n\
+                       \x20\x20\x20\x20handler/\n\
+                       \x20\x20\x20\x20service/\n\
+                       \x20\x20\x20\x20model/\n\
+                       \x20\x20\x20\x20repository/\n\
+                       pkg/\ngo.mod\n```"
+            }
+            "csharp" | "c#" => {
+                "Suggested structure:\n```\nsrc/\n\
+                       \x20\x20\x20\x20Program.cs\n\
+                       \x20\x20\x20\x20Controllers/\n\
+                       \x20\x20\x20\x20Services/\n\
+                       \x20\x20\x20\x20Models/\n\
+                       \x20\x20\x20\x20Data/\n\
+                       \x20\x20\x20\x20Middleware/\n\
+                       Tests/\n\
+                       \x20\x20\x20\x20UnitTests/\n\
+                       \x20\x20\x20\x20IntegrationTests/\n\
+                       Project.csproj\n```"
+            }
+            _ => {
+                "Suggested structure:\n```\nsrc/\n\
+                       \x20\x20\x20\x20main\n\
+                       \x20\x20\x20\x20config/\n\
+                       \x20\x20\x20\x20core/\n\
+                       \x20\x20\x20\x20services/\n\
+                       \x20\x20\x20\x20models/\n\
+                       \x20\x20\x20\x20utils/\n\
+                       tests/\ndocs/\n```"
+            }
+        };
+
+        let mut output = "# Project Structure Suggestion\n\n".to_string();
+        output.push_str(&format!("**Detected language**: {}\n", lang));
+        if let Some(ref desc) = params.description {
+            output.push_str(&format!("**Goal**: {}\n", desc));
+        }
+        output.push('\n');
+        output.push_str(suggestion);
+
+        if !context_from_files.is_empty() {
+            output.push_str("\n\n## Existing Documentation\n\n");
+            output.push_str(&context_from_files);
+        }
+
+        output
     }
 }
