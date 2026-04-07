@@ -288,6 +288,14 @@ pub struct ApiChangelogParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExportObsidianParams {
+    /// Output directory (default: ~/.codescope/exports/{repo})
+    pub output_dir: Option<String>,
+    /// Maximum number of entities to export (default: 500)
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MemoryPinParams {
     /// The decision/memory name to find (partial match)
     pub name: String,

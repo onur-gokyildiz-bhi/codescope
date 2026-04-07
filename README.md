@@ -40,9 +40,9 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Features
 
-- **44 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
+- **47 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
-- **45 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
+- **52 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
 - **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
 - **Conversation memory**: Auto-indexes Claude Code sessions — tracks decisions, problems, solutions, and links them to code entities
 - **Auto CONTEXT.md**: Generates a dynamic context file with recent decisions/problems so Claude sees your project history automatically
@@ -382,7 +382,7 @@ codescope mcp status --port 9877
 codescope mcp stop --port 9877
 ```
 
-### Available MCP Tools (45 tools)
+### Available MCP Tools (52 tools)
 
 **Code Search & Navigation:**
 
@@ -874,7 +874,7 @@ How does Codescope compare to other code intelligence tools?
 | **Language** | Rust | C | Python | Python | Node.js | Python |
 | **Analysis** | tree-sitter + SurrealDB graph | tree-sitter + SQLite | tree-sitter + KuzuDB/Neo4j | LSP servers | Embeddings only | ast-grep |
 | **Languages** | 35 + 9 formats | 66 | 14 | 40+ | All (embedding) | 25+ |
-| **MCP Server** | Yes (45 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
+| **MCP Server** | Yes (52 tools) | Yes (14 tools) | Yes | Yes | Yes | Yes |
 | **Knowledge Graph** | SurrealDB (graph+doc+vector) | SQLite | KuzuDB / Neo4j / FalkorDB | None (live LSP) | None (vector only) | In-memory |
 | **Persistent Storage** | Yes | Yes | Yes | No | Yes (Milvus) | No |
 | **Local Embeddings** | Yes (FastEmbed, zero deps) | No | No | No | No (needs API key) | No |
@@ -907,7 +907,7 @@ How does Codescope compare to other code intelligence tools?
 
 1. **Graph + Embeddings + Conversations + Skills + 3D Viz** — Structural code graph, semantic search, conversation memory, knowledge/skill graphs, AND interactive 3D visualization in a single binary. No other tool does all five.
 2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
-3. **Beyond code** — 44 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
+3. **Beyond code** — 47 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
 4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
 5. **Conversation memory** — Auto-indexes Claude Code sessions, extracts decisions/problems/solutions, links them to code entities. Auto-generates CONTEXT.md so Claude knows your project history.
 6. **Auto project insights** — After indexing, automatically identifies hotspots, dead code, complex files, and suggests refactoring opportunities.

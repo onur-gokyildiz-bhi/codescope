@@ -4,16 +4,35 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-07
+
 ### Added
+- Dart function/method extraction
+- Protobuf parser
+- .env file parser
+- Gradle parser
+- Circular dependency and duplicate code detection
+- API changelog tool
+- Export to Obsidian vault (`export_obsidian` tool with wikilinks)
+- Tiered memory, decision rationale, and scoped memory
+- Virtual dispatch heuristic for C#/Java
+- Auto-embed after indexing
+- Git history auto-sync
+- Code smell detection tool
+- Custom lint rules engine
 - CI: `cargo audit` security scanning via `rustsec/audit-check`
 - CI: Strict clippy and test enforcement (no more `continue-on-error`)
 - `clippy.toml` and `deny.toml` for lint and supply chain security config
 - `Dockerfile` with multi-stage build for containerized deployment
 - Pre-commit hook config for local quality gates
-- `CHANGELOG.md` for tracking releases
 - SHA256 checksums for release binaries
 
+### Changed
+- All dependencies upgraded (SurrealDB 3.0, rmcp 1.3, tree-sitter 0.25)
+- Impact analysis BFS rewrite
+
 ### Fixed
+- 6 C# evaluation bug fixes
 - `.mcp.json` hardcoded user paths — now portable across machines
 - All MCP config templates standardized to use `codescope-mcp` binary
 - 3 `unwrap()` calls in production code replaced with safe alternatives

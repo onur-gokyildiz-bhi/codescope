@@ -3812,4 +3812,198 @@ impl GraphRagServer {
 
         output
     }
+
+    // ===== Export to Obsidian Vault =====
+
+    /// Export the knowledge graph as an Obsidian-compatible vault with wikilinks
+    #[tool(
+        description = "Export indexed functions and classes as an Obsidian vault with wikilinks. \
+        Creates an index.md listing all entities and individual markdown files for the top 50 \
+        most-connected functions (with callers/callees). Output defaults to ~/.codescope/exports/{repo}/."
+    )]
+    async fn export_obsidian(
+        &self,
+        Parameters(params): Parameters<ExportObsidianParams>,
+    ) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        let limit = params.limit.unwrap_or(500);
+
+        // Resolve output directory
+        let output_dir = if let Some(dir) = params.output_dir {
+            std::path::PathBuf::from(dir)
+        } else {
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".codescope")
+                .join("exports")
+                .join(&ctx.repo_name)
+        };
+
+        if let Err(e) = std::fs::create_dir_all(&output_dir) {
+            return format!("Failed to create output directory: {}", e);
+        }
+
+        // Query all functions
+        let fq = "SELECT name, file_path, language, start_line, end_line, signature \
+                   FROM `function` WHERE repo = $repo \
+                   ORDER BY file_path, start_line LIMIT $lim";
+        let functions: Vec<serde_json::Value> = match ctx
+            .db
+            .query(fq)
+            .bind(("repo", ctx.repo_name.clone()))
+            .bind(("lim", limit as i64))
+            .await
+        {
+            Ok(mut r) => r.take(0).unwrap_or_default(),
+            Err(e) => return format!("Error querying functions: {}", e),
+        };
+
+        // Query all classes
+        let cq = "SELECT name, file_path, language, start_line, end_line \
+                   FROM class WHERE repo = $repo \
+                   ORDER BY file_path, start_line LIMIT $lim";
+        let classes: Vec<serde_json::Value> = match ctx
+            .db
+            .query(cq)
+            .bind(("repo", ctx.repo_name.clone()))
+            .bind(("lim", limit as i64))
+            .await
+        {
+            Ok(mut r) => r.take(0).unwrap_or_default(),
+            Err(e) => return format!("Error querying classes: {}", e),
+        };
+
+        // Build index.md
+        let mut index = format!("# {} — Code Index\n\n", ctx.repo_name);
+
+        index.push_str("## Functions\n\n");
+        for f in &functions {
+            let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let fp = f.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+            let line = f.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            index.push_str(&format!("- [[{}]] (`{}:{}`)\n", name, fp, line));
+        }
+
+        index.push_str("\n## Classes\n\n");
+        for c in &classes {
+            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+            let line = c.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            index.push_str(&format!("- [[{}]] (`{}:{}`)\n", name, fp, line));
+        }
+
+        if let Err(e) = std::fs::write(output_dir.join("index.md"), &index) {
+            return format!("Error writing index.md: {}", e);
+        }
+        let mut file_count = 1usize; // index.md
+
+        // Find top 50 most-connected functions for individual files
+        let top_q = "SELECT name, file_path, language, start_line, end_line, signature, \
+                      count(<-calls) AS caller_count, count(->calls) AS callee_count, \
+                      (count(<-calls) + count(->calls)) AS total_edges \
+                      FROM `function` WHERE repo = $repo \
+                      ORDER BY total_edges DESC LIMIT 50";
+        let top_functions: Vec<serde_json::Value> = match ctx
+            .db
+            .query(top_q)
+            .bind(("repo", ctx.repo_name.clone()))
+            .await
+        {
+            Ok(mut r) => r.take(0).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+
+        for tf in &top_functions {
+            let name = tf.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let fp = tf.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+            let lang = tf
+                .get("language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let start = tf.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            let end = tf.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+            let sig = tf.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+
+            let mut md = format!(
+                "---\nkind: function\nfile_path: {}\nlanguage: {}\nstart_line: {}\nend_line: {}\n---\n\n",
+                fp, lang, start, end
+            );
+            md.push_str(&format!("## {}\n\n", name));
+            if !sig.is_empty() {
+                md.push_str(&format!("`{}`\n\n", sig));
+            }
+
+            // Query callers for this function
+            let caller_q = "SELECT <-calls<-`function`.name AS callers FROM `function` \
+                            WHERE name = $name AND repo = $repo LIMIT 1";
+            if let Ok(mut cr) = ctx
+                .db
+                .query(caller_q)
+                .bind(("name", name.to_string()))
+                .bind(("repo", ctx.repo_name.clone()))
+                .await
+            {
+                let rows: Vec<serde_json::Value> = cr.take(0).unwrap_or_default();
+                if let Some(row) = rows.first() {
+                    if let Some(callers) = row.get("callers").and_then(|v| v.as_array()) {
+                        if !callers.is_empty() {
+                            md.push_str("### Called By\n\n");
+                            for c in callers {
+                                if let Some(cn) = c.as_str() {
+                                    md.push_str(&format!("- [[{}]]\n", cn));
+                                }
+                            }
+                            md.push('\n');
+                        }
+                    }
+                }
+            }
+
+            // Query callees for this function
+            let callee_q = "SELECT ->calls->`function`.name AS callees FROM `function` \
+                            WHERE name = $name AND repo = $repo LIMIT 1";
+            if let Ok(mut cr) = ctx
+                .db
+                .query(callee_q)
+                .bind(("name", name.to_string()))
+                .bind(("repo", ctx.repo_name.clone()))
+                .await
+            {
+                let rows: Vec<serde_json::Value> = cr.take(0).unwrap_or_default();
+                if let Some(row) = rows.first() {
+                    if let Some(callees) = row.get("callees").and_then(|v| v.as_array()) {
+                        if !callees.is_empty() {
+                            md.push_str("### Calls\n\n");
+                            for c in callees {
+                                if let Some(cn) = c.as_str() {
+                                    md.push_str(&format!("- [[{}]]\n", cn));
+                                }
+                            }
+                            md.push('\n');
+                        }
+                    }
+                }
+            }
+
+            // Sanitize filename (replace problematic chars)
+            let safe_name = name.replace(['/', '\\', ':', '<', '>', '|', '?', '*'], "_");
+            if let Err(e) = std::fs::write(output_dir.join(format!("{}.md", safe_name)), &md) {
+                return format!("Error writing {}.md: {}", safe_name, e);
+            }
+            file_count += 1;
+        }
+
+        format!(
+            "Exported {} files to {}\n- index.md with {} functions and {} classes\n- {} individual entity files (top connected functions)",
+            file_count,
+            output_dir.display(),
+            functions.len(),
+            classes.len(),
+            file_count - 1
+        )
+    }
 }
