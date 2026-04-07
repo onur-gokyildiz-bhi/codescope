@@ -305,7 +305,7 @@ pub struct MemoryPinParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CaptureInsightParams {
-    /// Type: "decision", "problem", "solution", "learning"
+    /// Type: "decision", "problem", "solution", "learning", "correction"
     pub kind: String,
     /// Short summary (1 line)
     pub summary: String,
@@ -315,4 +315,6 @@ pub struct CaptureInsightParams {
     pub file_path: Option<String>,
     /// Related function/class name (optional)
     pub entity_name: Option<String>,
+    /// Agent identity: "claude-code", "cursor", "codex-cli", etc (auto-detected if empty)
+    pub agent: Option<String>,
 }

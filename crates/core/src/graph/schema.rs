@@ -240,6 +240,10 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS tier ON decision TYPE option<int> DEFAULT 2;
         DEFINE FIELD IF NOT EXISTS rationale ON decision TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS scope ON decision TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS agent ON decision TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS agent ON problem TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS agent ON solution TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS agent ON conv_topic TYPE option<string>;
 
         DEFINE TABLE IF NOT EXISTS problem SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS name ON problem TYPE string;

@@ -4056,11 +4056,13 @@ impl GraphRagServer {
 
     // ===== Capture Insight (real-time memory write) =====
 
-    /// Record a decision, problem, solution, or learning insight in real-time
+    /// Record a decision, problem, solution, correction, or learning insight in real-time
     #[tool(
-        description = "Record an insight (decision, problem, solution, or learning) into the knowledge graph in real-time. \
-        Call this after making a decision, encountering a problem, finding a solution, or learning something. \
-        The insight is stored with timestamp, repo, and optional file/entity links."
+        description = "Record an insight into the knowledge graph in real-time. Types: decision, problem, solution, correction, learning. \
+        Call this after making a decision, encountering a problem, finding a solution, or when the user corrects you (correction). \
+        Corrections are especially important — they record what went wrong and the correct approach. \
+        The agent field identifies which AI tool recorded this (claude-code, cursor, codex-cli, etc). \
+        The insight is stored with timestamp, repo, scope, and optional entity links."
     )]
     async fn capture_insight(
         &self,
@@ -4072,7 +4074,7 @@ impl GraphRagServer {
         };
 
         // Validate kind
-        let valid_kinds = ["decision", "problem", "solution", "learning"];
+        let valid_kinds = ["decision", "problem", "solution", "learning", "correction"];
         let kind = params.kind.to_lowercase();
         if !valid_kinds.contains(&kind.as_str()) {
             return format!(
@@ -4087,9 +4089,16 @@ impl GraphRagServer {
             "decision" => "decision",
             "problem" => "problem",
             "solution" => "solution",
+            "correction" => "solution", // corrections stored as solutions (they fix problems)
             "learning" => "conv_topic",
             _ => unreachable!(),
         };
+
+        // Agent identity (auto-detect from client info or use provided)
+        let agent = params
+            .agent
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
 
         // Derive scope from file_path if given
         let scope = params.file_path.as_deref().map(derive_scope_from_file_path);
@@ -4130,7 +4139,8 @@ impl GraphRagServer {
              end_line = 0, \
              body = '{body}', \
              timestamp = '{ts}', \
-             scope = '{scope}';",
+             scope = '{scope}', \
+             agent = '{agent}';",
             table = table,
             name = esc(&params.summary),
             qname = esc(&qname),
@@ -4140,6 +4150,7 @@ impl GraphRagServer {
             body = esc(&body),
             ts = timestamp,
             scope = esc(scope.as_deref().unwrap_or("root")),
+            agent = esc(&agent),
         );
 
         if let Err(e) = ctx.db.query(&create_query).await {
@@ -4196,8 +4207,8 @@ impl GraphRagServer {
         }
 
         let mut confirmation = format!(
-            "Captured {} insight: \"{}\"\n- Repo: {}\n- Timestamp: {}",
-            kind, params.summary, ctx.repo_name, timestamp
+            "Captured {} insight: \"{}\"\n- Repo: {}\n- Agent: {}\n- Timestamp: {}",
+            kind, params.summary, ctx.repo_name, agent, timestamp
         );
         if let Some(scope) = &scope {
             confirmation.push_str(&format!("\n- Scope: {}", scope));
