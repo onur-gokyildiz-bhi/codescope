@@ -40,7 +40,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 
 ## Features
 
-- **47 supported formats**: 35 programming languages + 9 content formats (JSON, YAML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests)
+- **57 supported formats**: 47 programming languages + 10 content formats (JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests, Gradle)
 - **SurrealDB graph engine**: Native graph relations (RELATE), vector search (HNSW), embedded mode — zero external dependencies
 - **52 MCP tools**: Code search, call graphs, Obsidian-like exploration, semantic search, conversation history, git analysis, and more
 - **Obsidian-like knowledge navigation**: `explore` (local graph), `context_bundle` (file overview), `backlinks` (incoming references), `related` (cross-type search)
@@ -461,16 +461,26 @@ codescope mcp stop --port 9877
 | `conversation_search` | Search past decisions, problems, solutions |
 | `conversation_timeline` | Track changes to a specific entity over time |
 | `memory_save` | Save persistent memory notes across sessions |
-| `memory_search` | Search saved memories and past decisions |
+| `memory_search` | Search saved memories and past decisions (with optional scope filter) |
+| `memory_pin` | Pin critical decisions (tier 0/1/2) — tier 0 always shown in CONTEXT.md |
 
 **Code Quality & Patterns:**
 
 | Tool | Description |
 |------|-------------|
+| `detect_code_smells` | God functions, high fan-in/out, circular deps, duplicate code, dense files |
+| `custom_lint` | User-defined SurrealQL rules — run any graph query as a lint check |
 | `team_patterns` | Detect naming, import, and structure conventions |
 | `edit_preflight` | Check if a planned edit aligns with team patterns |
 | `community_detection` | Find code clusters, bridge modules, central nodes |
 | `manage_adr` | Create and manage Architecture Decision Records |
+| `api_changelog` | List recently changed/added functions and classes |
+
+**Export & Integration:**
+
+| Tool | Description |
+|------|-------------|
+| `export_obsidian` | Export knowledge graph as Obsidian vault with [[wikilinks]] |
 
 **Infrastructure:**
 
@@ -478,7 +488,7 @@ codescope mcp stop --port 9877
 |------|-------------|
 | `graph_stats` | Get graph statistics |
 | `raw_query` | Execute raw SurrealQL |
-| `ask` | Natural language question → SurrealQL |
+| `ask` | Natural language question → SurrealQL (English + Turkish) |
 | `index_codebase` | Re-index (incremental by default) |
 | `init_project` | Initialize a project (daemon mode) |
 | `list_projects` | List open projects (daemon mode) |
@@ -500,7 +510,7 @@ The `ask` tool translates plain English questions to SurrealQL:
 
 ## Supported Languages & Formats
 
-### Programming Languages (35, tree-sitter)
+### Programming Languages (47, tree-sitter)
 
 | Language | Extensions |
 |----------|-----------|
@@ -539,8 +549,20 @@ The `ask` tool translates plain English questions to SurrealQL:
 | Fortran | `.f`, `.f90`, `.f95`, `.f03`, `.f08` |
 | GLSL | `.glsl`, `.vert`, `.frag`, `.comp` |
 | GraphQL | `.graphql`, `.gql` |
+| D | `.d` |
+| Solidity | `.sol` |
+| GDScript (Godot) | `.gd` |
+| Elm | `.elm` |
+| Groovy | `.groovy` |
+| Pascal / Delphi | `.pas`, `.pp`, `.dpr`, `.lpr` |
+| Ada | `.adb`, `.ads` |
+| Common Lisp | `.lisp`, `.cl`, `.lsp` |
+| Scheme | `.scm`, `.ss` |
+| Racket | `.rkt` |
+| XML / SVG / XSLT | `.xml`, `.xsl`, `.xslt`, `.svg`, `.xhtml` |
+| Protobuf | `.proto` |
 
-### Content Formats (custom parsers)
+### Content Formats (10, custom parsers)
 
 | Format | Extensions | Extracted Entities |
 |--------|-----------|-------------------|
@@ -553,6 +575,9 @@ The `ask` tool translates plain English questions to SurrealQL:
 | Terraform | `.tf`, `.tfvars` | Resources, variables, providers, modules |
 | OpenAPI | (auto-detected) | Endpoints, schemas, fields |
 | Package manifests | `package.json`, `Cargo.toml` | Package info, dependencies, scripts |
+| Gradle | `.gradle`, `.gradle.kts` | Plugins, dependencies, config values |
+| Protobuf | `.proto` | Services, RPCs, messages, enums |
+| .env | `.env`, `.env.*` | Environment variables (KEY=value) |
 
 ---
 
@@ -811,7 +836,7 @@ codescope/
 **Tech stack:**
 - **Rust** — Core language, zero-cost abstractions
 - **SurrealDB 2.x** — Embedded graph + document + vector database (SurrealKV backend)
-- **tree-sitter** — Incremental parsing for 35 programming languages
+- **tree-sitter** — Incremental parsing for 47 programming languages
 - **FastEmbed** — In-process ONNX embeddings (zero external deps)
 - **rmcp** — Official Rust MCP SDK for AI agent integration
 - **git2** — Native git history analysis
@@ -907,7 +932,7 @@ How does Codescope compare to other code intelligence tools?
 
 1. **Graph + Embeddings + Conversations + Skills + 3D Viz** — Structural code graph, semantic search, conversation memory, knowledge/skill graphs, AND interactive 3D visualization in a single binary. No other tool does all five.
 2. **Zero external dependencies** — SurrealDB embedded, FastEmbed in-process (ONNX Runtime). No Docker, no API keys, no external databases.
-3. **Beyond code** — 47 formats: 35 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests.
+3. **Beyond code** — 57 formats: 47 programming languages + JSON, YAML, TOML, Markdown, Dockerfile, SQL, Terraform, OpenAPI, package manifests, Gradle, Protobuf, .env.
 4. **Obsidian-like navigation** — `explore`, `backlinks`, `context_bundle`, `related` — browse your codebase like an Obsidian vault.
 5. **Conversation memory** — Auto-indexes Claude Code sessions, extracts decisions/problems/solutions, links them to code entities. Auto-generates CONTEXT.md so Claude knows your project history.
 6. **Auto project insights** — After indexing, automatically identifies hotspots, dead code, complex files, and suggests refactoring opportunities.
