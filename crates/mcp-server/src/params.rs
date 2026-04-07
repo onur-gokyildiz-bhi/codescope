@@ -264,3 +264,17 @@ pub struct CommunityDetectionParams {
     /// Maximum results per analysis (default: 20)
     pub limit: Option<usize>,
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeSmellParams {
+    /// Maximum results per category (default: 10)
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CustomLintParams {
+    /// SurrealQL query that returns violations (e.g. SELECT name, file_path FROM `function` WHERE ...)
+    pub rule: String,
+    /// Human-readable description of what this rule checks
+    pub description: String,
+}

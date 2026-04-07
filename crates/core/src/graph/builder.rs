@@ -299,6 +299,66 @@ impl GraphBuilder {
         }
     }
 
+    /// Resolve virtual dispatch edges for OOP languages (C#, Java).
+    ///
+    /// Finds methods with "override" in their signature, then links the base
+    /// class method to the override via a `calls` edge with kind = 'virtual_dispatch'.
+    pub async fn resolve_virtual_dispatch(&self, repo: &str) -> Result<usize> {
+        // Find all override methods
+        let overrides: Vec<serde_json::Value> = self
+            .db
+            .query(
+                "SELECT name, qualified_name, file_path, signature FROM `function` \
+                 WHERE signature != NONE AND (signature ~ 'override' OR signature ~ '@Override') AND repo = $repo",
+            )
+            .bind(("repo", repo.to_string()))
+            .await?
+            .take(0)?;
+
+        let mut count = 0;
+        for ov in &overrides {
+            let name = match ov.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            let ov_qname = match ov.get("qualified_name").and_then(|v| v.as_str()) {
+                Some(q) => q,
+                None => continue,
+            };
+
+            // Find base class methods with the same name but different qualified_name
+            let bases: Vec<serde_json::Value> = self
+                .db
+                .query(
+                    "SELECT qualified_name FROM `function` WHERE name = $name AND qualified_name != $qname AND repo = $repo LIMIT 10",
+                )
+                .bind(("name", name.to_string()))
+                .bind(("qname", ov_qname.to_string()))
+                .bind(("repo", repo.to_string()))
+                .await?
+                .take(0)?;
+
+            for base in &bases {
+                if let Some(base_qname) = base.get("qualified_name").and_then(|v| v.as_str()) {
+                    let from_id = sanitize_id(base_qname);
+                    let to_id = sanitize_id(ov_qname);
+                    let query = format!(
+                        "RELATE `function`:`{}`->calls->`function`:`{}` SET kind = 'virtual_dispatch'",
+                        from_id, to_id
+                    );
+                    if self.db.query(&query).await.is_ok() {
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        if count > 0 {
+            tracing::info!("Resolved {} virtual dispatch edges", count);
+        }
+        Ok(count)
+    }
+
     /// Get stats about the current graph
     pub async fn stats(&self) -> Result<IndexResult> {
         let mut response = self

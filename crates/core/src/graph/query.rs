@@ -241,6 +241,25 @@ impl GraphQuery {
                 "sibling_functions".into(),
                 serde_json::Value::Array(siblings),
             );
+        } else if found_type == "class" {
+            // For classes, get inheritance relationships
+            let mut resp2 = self
+                .db
+                .query(
+                    "SELECT ->inherits->class.name AS parent, ->inherits->class.file_path AS parent_file FROM class WHERE name = $name; \
+                     SELECT <-inherits<-class.name AS child, <-inherits<-class.file_path AS child_file FROM class WHERE name = $name; \
+                     SELECT ->implements->class.name AS iface FROM class WHERE name = $name;",
+                )
+                .bind(("name", n.clone()))
+                .await?;
+
+            let parents: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
+            let children: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
+            let ifaces: Vec<serde_json::Value> = resp2.take(2).unwrap_or_default();
+
+            entity.insert("inherits_from".into(), serde_json::Value::Array(parents));
+            entity.insert("inherited_by".into(), serde_json::Value::Array(children));
+            entity.insert("implements".into(), serde_json::Value::Array(ifaces));
         } else if found_type == "skill" {
             // For skills, get wikilink neighbors
             let mut resp2 = self

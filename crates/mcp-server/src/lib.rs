@@ -168,6 +168,15 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                 Err(e) => tracing::warn!("Call target resolution failed: {}", e),
             }
 
+            // Phase 2.6: Resolve virtual dispatch for OOP languages (C#, Java)
+            match builder.resolve_virtual_dispatch(&index_repo).await {
+                Ok(resolved) if resolved > 0 => {
+                    tracing::info!("Resolved {} virtual dispatch edges", resolved);
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("Virtual dispatch resolution failed: {}", e),
+            }
+
             // Phase 3: Auto-index conversations + memory files
             let project_dir = helpers::find_claude_project_dir(&index_path, &index_repo);
             tracing::info!("Auto-indexing conversations from {}", project_dir.display());
@@ -238,6 +247,29 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
             mcp_handle.load_context_summary().await;
 
             tracing::info!("Context summary loaded into MCP server instructions");
+
+            // Phase 4.5: Auto-embed functions for semantic search
+            match codescope_core::embeddings::FastEmbedProvider::new() {
+                Ok(provider) => {
+                    let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(
+                        index_db.clone(),
+                        Box::new(provider),
+                    );
+                    match pipeline.embed_functions(500).await {
+                        Ok(result) => {
+                            if result.embedded > 0 {
+                                tracing::info!(
+                                    "Auto-embedded {} functions ({} BQ)",
+                                    result.embedded,
+                                    result.binary_quantized
+                                );
+                            }
+                        }
+                        Err(e) => tracing::debug!("Auto-embed skipped: {}", e),
+                    }
+                }
+                Err(e) => tracing::debug!("FastEmbed not available: {}", e),
+            }
 
             // Phase 5: Start file watcher for live re-indexing
             match watcher::start_watcher(&index_path) {

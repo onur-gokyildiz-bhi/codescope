@@ -1924,6 +1924,7 @@ impl GraphRagServer {
             Ok(c) => c,
             Err(e) => return e,
         };
+        let db = ctx.db.clone();
         let gq = GraphQuery::new(ctx.db);
 
         match gq.file_context(&params.file_path).await {
@@ -2006,6 +2007,48 @@ impl GraphRagServer {
                             let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                             let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                             output.push_str(&format!("- [{}] {}\n", kind, name));
+                        }
+                        output.push('\n');
+                    }
+                }
+
+                // Cross-file call links
+                let cross_query = format!(
+                    "SELECT in.name AS caller, in.file_path AS caller_file \
+                     FROM calls WHERE out.file_path = '{}' AND in.file_path != '{}' AND in.name != NONE LIMIT 20; \
+                     SELECT out.name AS callee, out.file_path AS callee_file \
+                     FROM calls WHERE in.file_path = '{}' AND out.file_path != '{}' AND out.name != NONE LIMIT 20;",
+                    params.file_path.replace('\'', "\\'"),
+                    params.file_path.replace('\'', "\\'"),
+                    params.file_path.replace('\'', "\\'"),
+                    params.file_path.replace('\'', "\\'"),
+                );
+                if let Ok(mut cross_resp) = db.query(&cross_query).await {
+                    let incoming: Vec<serde_json::Value> = cross_resp.take(0).unwrap_or_default();
+                    let outgoing: Vec<serde_json::Value> = cross_resp.take(1).unwrap_or_default();
+
+                    if !incoming.is_empty() {
+                        output.push_str(&format!(
+                            "### Incoming Cross-File Calls ({})\n",
+                            incoming.len()
+                        ));
+                        for c in &incoming {
+                            let caller = c.get("caller").and_then(|v| v.as_str()).unwrap_or("?");
+                            let file = c.get("caller_file").and_then(|v| v.as_str()).unwrap_or("?");
+                            output.push_str(&format!("- **{}** from {}\n", caller, file));
+                        }
+                        output.push('\n');
+                    }
+
+                    if !outgoing.is_empty() {
+                        output.push_str(&format!(
+                            "### Outgoing Cross-File Calls ({})\n",
+                            outgoing.len()
+                        ));
+                        for c in &outgoing {
+                            let callee = c.get("callee").and_then(|v| v.as_str()).unwrap_or("?");
+                            let file = c.get("callee_file").and_then(|v| v.as_str()).unwrap_or("?");
+                            output.push_str(&format!("- **{}** in {}\n", callee, file));
                         }
                         output.push('\n');
                     }
@@ -2767,6 +2810,171 @@ impl GraphRagServer {
                 output
             }
             Err(e) => format!("Error finding dead code: {}", e),
+        }
+    }
+
+    /// Detect code smells: god functions, high fan-in/out, dense files
+    #[tool(
+        description = "Detect code smells in the codebase: god functions (>200 lines), high fan-in (called by many), \
+        high fan-out (calls many), and dense files (many functions). Use for codebase health assessment."
+    )]
+    async fn detect_code_smells(&self, #[tool(aggr)] params: CodeSmellParams) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+        let limit = params.limit.unwrap_or(10);
+        let mut output = "## Code Smell Report\n\n".to_string();
+
+        // 1. God functions (>200 lines)
+        let god_q = format!(
+            "SELECT name, file_path, math::max(end_line - start_line, 0) AS lines \
+             FROM `function` WHERE end_line - start_line > 200 ORDER BY end_line - start_line DESC LIMIT {}",
+            limit
+        );
+        if let Ok(mut r) = ctx.db.query(&god_q).await {
+            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            output.push_str(&format!(
+                "### God Functions (>200 lines): {}\n",
+                results.len()
+            ));
+            if results.is_empty() {
+                output.push_str("None found.\n\n");
+            } else {
+                output.push_str("| Function | File | Lines |\n|----------|------|-------|\n");
+                for r in &results {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let lines = r.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, lines));
+                }
+                output.push('\n');
+            }
+        }
+
+        // 2. High fan-in (called by many)
+        let fanin_q = format!(
+            "SELECT out.name AS name, out.file_path AS file_path, count() AS caller_count \
+             FROM calls GROUP BY out.name, out.file_path ORDER BY caller_count DESC LIMIT {}",
+            limit
+        );
+        if let Ok(mut r) = ctx.db.query(&fanin_q).await {
+            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            output.push_str(&format!(
+                "### High Fan-In (most callers): {}\n",
+                results.len()
+            ));
+            if !results.is_empty() {
+                output.push_str("| Function | File | Callers |\n|----------|------|---------|\n");
+                for r in &results {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let count = r.get("caller_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
+                }
+                output.push('\n');
+            }
+        }
+
+        // 3. High fan-out (calls many)
+        let fanout_q = format!(
+            "SELECT in.name AS name, in.file_path AS file_path, count() AS callee_count \
+             FROM calls GROUP BY in.name, in.file_path ORDER BY callee_count DESC LIMIT {}",
+            limit
+        );
+        if let Ok(mut r) = ctx.db.query(&fanout_q).await {
+            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            output.push_str(&format!(
+                "### High Fan-Out (most callees): {}\n",
+                results.len()
+            ));
+            if !results.is_empty() {
+                output.push_str("| Function | File | Callees |\n|----------|------|---------|\n");
+                for r in &results {
+                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let count = r.get("callee_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
+                }
+                output.push('\n');
+            }
+        }
+
+        // 4. Dense files (many functions)
+        let dense_q = format!(
+            "SELECT file_path, count() AS func_count FROM `function` GROUP BY file_path ORDER BY func_count DESC LIMIT {}",
+            limit
+        );
+        if let Ok(mut r) = ctx.db.query(&dense_q).await {
+            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+            output.push_str(&format!(
+                "### Dense Files (most functions): {}\n",
+                results.len()
+            ));
+            if !results.is_empty() {
+                output.push_str("| File | Functions |\n|------|-----------|\n");
+                for r in &results {
+                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let count = r.get("func_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    output.push_str(&format!("| {} | {} |\n", fp, count));
+                }
+                output.push('\n');
+            }
+        }
+
+        output
+    }
+
+    /// Run a custom SurrealQL lint rule and format results as violations
+    #[tool(
+        description = "Run a custom SurrealQL query as a lint rule. Provide a query that returns violations \
+        and a description of what the rule checks. Results are formatted as a violation report. \
+        Example rule: SELECT name, file_path FROM `function` WHERE end_line - start_line > 100"
+    )]
+    async fn custom_lint(&self, #[tool(aggr)] params: CustomLintParams) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        let mut output = format!("## Custom Lint: {}\n\n", params.description);
+        output.push_str(&format!("**Rule query:** `{}`\n\n", params.rule));
+
+        match ctx.db.query(&params.rule).await {
+            Ok(mut response) => {
+                let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                if results.is_empty() {
+                    output.push_str("No violations found.\n");
+                } else {
+                    output.push_str(&format!("**{} violations found:**\n\n", results.len()));
+                    for (i, r) in results.iter().enumerate() {
+                        output.push_str(&format!("{}. ", i + 1));
+                        // Format each result as key: value pairs
+                        if let Some(obj) = r.as_object() {
+                            let parts: Vec<String> = obj
+                                .iter()
+                                .filter(|(k, _)| k.as_str() != "id")
+                                .map(|(k, v)| {
+                                    let val = match v.as_str() {
+                                        Some(s) => s.to_string(),
+                                        None => v.to_string(),
+                                    };
+                                    format!("**{}**: {}", k, val)
+                                })
+                                .collect();
+                            output.push_str(&parts.join(" | "));
+                        } else {
+                            output.push_str(&r.to_string());
+                        }
+                        output.push('\n');
+                    }
+                }
+                output
+            }
+            Err(e) => {
+                output.push_str(&format!("Query error: {}\n", e));
+                output
+            }
         }
     }
 
