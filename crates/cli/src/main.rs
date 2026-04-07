@@ -313,7 +313,8 @@ async fn connect_db(
     }
 
     // Migrate from old RocksDB format if needed
-    if path.join("CURRENT").exists() || path.join("LOCK").exists() {
+    // RocksDB has a "CURRENT" file; SurrealKV has "manifest" + "LOCK" — don't confuse them
+    if path.join("CURRENT").exists() && !path.join("manifest").exists() {
         let backup = path.with_extension("rocksdb.bak");
         eprintln!(
             "⚠ Old RocksDB data detected at {}.\n  Moving to {} — will re-index with SurrealKV.",
