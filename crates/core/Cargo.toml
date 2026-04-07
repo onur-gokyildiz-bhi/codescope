@@ -64,4 +64,6 @@ toml = "0.8"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+surrealdb = { workspace = true, features = ["kv-mem"] }
+serde = { workspace = true }
 tempfile = "3"

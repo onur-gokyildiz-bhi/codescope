@@ -1,6 +1,6 @@
-pub mod languages;
-pub mod extractor;
 pub mod content;
+pub mod extractor;
+pub mod languages;
 
 use anyhow::Result;
 use sha2::{Digest, Sha256};
@@ -8,9 +8,9 @@ use std::path::Path;
 use tree_sitter::Parser;
 
 use crate::{CodeEntity, CodeRelation, EntityKind};
-use languages::LanguageRegistry;
-use extractor::EntityExtractor;
 use content::ContentParserRegistry;
+use extractor::EntityExtractor;
+use languages::LanguageRegistry;
 
 /// Check if a file should be skipped during indexing (build artifacts, generated code, etc.)
 pub fn should_skip_file(path: &Path) -> bool {
@@ -98,6 +98,12 @@ pub struct CodeParser {
     content_registry: ContentParserRegistry,
 }
 
+impl Default for CodeParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeParser {
     pub fn new() -> Self {
         Self {
@@ -124,15 +130,9 @@ impl CodeParser {
         source: &str,
         repo_name: &str,
     ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-        let filename = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         let rel_path = file_path.to_string_lossy().to_string();
 
@@ -174,7 +174,10 @@ impl CodeParser {
             hex::encode(hasher.finalize())
         };
 
-        if let Some(file_entity) = entities.iter_mut().find(|e| matches!(e.kind, EntityKind::File)) {
+        if let Some(file_entity) = entities
+            .iter_mut()
+            .find(|e| matches!(e.kind, EntityKind::File))
+        {
             // File entity exists (from content parser or extractor) — ensure hash is set
             if file_entity.body_hash.is_none() {
                 file_entity.body_hash = Some(file_hash);

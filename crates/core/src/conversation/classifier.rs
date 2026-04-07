@@ -156,7 +156,11 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
         // Solutions (assistant messages, especially after a problem)
         if turn.role == "assistant" {
             let solution_score = score_patterns(&lower, SOLUTION_SIGNALS);
-            let boosted = if recent_has_problem { solution_score + 0.15 } else { solution_score };
+            let boosted = if recent_has_problem {
+                solution_score + 0.15
+            } else {
+                solution_score
+            };
             if boosted >= 0.6 {
                 let name = extract_segment_name(&turn.text, &lower, SOLUTION_SIGNALS);
                 segments.push(ClassifiedSegment {
@@ -257,10 +261,12 @@ fn extract_segment_name(text: &str, lower: &str, signals: &[(&str, f32)]) -> Str
     // byte-position mismatch (to_lowercase() can change byte lengths for
     // Turkish İ→i, etc.)
     if let Some(pos) = lower.find(best_pattern) {
-        let start = lower[..pos].rfind(|c: char| c == '.' || c == '\n' || c == '!')
+        let start = lower[..pos]
+            .rfind(['.', '\n', '!'])
             .map(|p| next_char_boundary(lower, p + 1))
             .unwrap_or_else(|| floor_char_boundary(lower, pos.saturating_sub(40)));
-        let end = lower[pos..].find(|c: char| c == '.' || c == '\n')
+        let end = lower[pos..]
+            .find(['.', '\n'])
             .map(|p| pos + p)
             .unwrap_or_else(|| floor_char_boundary(lower, (pos + 120).min(lower.len())));
         let sentence = lower[start..end].trim();
@@ -354,8 +360,6 @@ fn next_char_boundary(s: &str, pos: usize) -> usize {
 }
 
 fn dedup_segments(segments: &mut Vec<ClassifiedSegment>) {
-    segments.dedup_by(|a, b| {
-        a.line_number == b.line_number
-            || (a.kind == b.kind && a.name == b.name)
-    });
+    segments
+        .dedup_by(|a, b| a.line_number == b.line_number || (a.kind == b.kind && a.name == b.name));
 }

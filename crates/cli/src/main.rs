@@ -3,10 +3,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
-use codescope_core::parser::CodeParser;
-use codescope_core::graph::schema;
 use codescope_core::graph::builder::GraphBuilder;
 use codescope_core::graph::query::GraphQuery;
+use codescope_core::graph::schema;
+use codescope_core::parser::CodeParser;
 use codescope_core::temporal::GitAnalyzer;
 
 #[derive(Parser)]
@@ -198,7 +198,8 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Index { path, clean } => {
-            let repo_name = path.file_name()
+            let repo_name = path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| global_repo.clone());
             cmd_index(path, &repo_name, clean, cli.db_path).await?;
@@ -221,17 +222,46 @@ async fn main() -> Result<()> {
         Commands::Hotspots => {
             cmd_hotspots(&global_repo, cli.db_path).await?;
         }
-        Commands::Embed { provider, batch_size, ollama_url, model } => {
-            cmd_embed(&provider, batch_size, &ollama_url, &model, &global_repo, cli.db_path).await?;
+        Commands::Embed {
+            provider,
+            batch_size,
+            ollama_url,
+            model,
+        } => {
+            cmd_embed(
+                &provider,
+                batch_size,
+                &ollama_url,
+                &model,
+                &global_repo,
+                cli.db_path,
+            )
+            .await?;
         }
-        Commands::SemanticSearch { query, limit, provider, ollama_url, model } => {
-            cmd_semantic_search(&query, limit, &provider, &ollama_url, &model, &global_repo, cli.db_path).await?;
+        Commands::SemanticSearch {
+            query,
+            limit,
+            provider,
+            ollama_url,
+            model,
+        } => {
+            cmd_semantic_search(
+                &query,
+                limit,
+                &provider,
+                &ollama_url,
+                &model,
+                &global_repo,
+                cli.db_path,
+            )
+            .await?;
         }
         Commands::Languages => {
             cmd_languages();
         }
         Commands::Init { path } => {
-            let project_path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            let project_path = path
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
             cmd_init(project_path, &global_repo, cli.db_path).await?;
         }
         Commands::Install => {
@@ -239,13 +269,21 @@ async fn main() -> Result<()> {
         }
         Commands::Mcp { path, auto_index } => {
             // Derive repo from target path, not CWD
-            let repo = path.canonicalize().ok()
+            let repo = path
+                .canonicalize()
+                .ok()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
             codescope_mcp::run_stdio(path, repo, auto_index).await?;
         }
-        Commands::Web { path, port, auto_index } => {
+        Commands::Web {
+            path,
+            port,
+            auto_index,
+        } => {
             // Derive repo from target path, not CWD
-            let repo = path.canonicalize().ok()
+            let repo = path
+                .canonicalize()
+                .ok()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
             codescope_web::run_web(path, repo, port, auto_index, cli.db_path).await?;
         }
@@ -263,7 +301,10 @@ fn default_db_path(repo_name: &str) -> PathBuf {
         .join(repo_name)
 }
 
-async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surrealdb::Surreal<surrealdb::engine::local::Db>> {
+async fn connect_db(
+    db_path: Option<PathBuf>,
+    repo_name: &str,
+) -> Result<surrealdb::Surreal<surrealdb::engine::local::Db>> {
     let path = db_path.unwrap_or_else(|| default_db_path(repo_name));
 
     // Ensure directory exists
@@ -276,15 +317,18 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
         let backup = path.with_extension("rocksdb.bak");
         eprintln!(
             "⚠ Old RocksDB data detected at {}.\n  Moving to {} — will re-index with SurrealKV.",
-            path.display(), backup.display()
+            path.display(),
+            backup.display()
         );
         let _ = std::fs::rename(&path, &backup);
         std::fs::create_dir_all(&path)?;
     }
 
     let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-        path.to_string_lossy().as_ref()
-    ).await {
+        path.to_string_lossy().as_ref(),
+    )
+    .await
+    {
         Ok(db) => db,
         Err(e) => {
             anyhow::bail!(
@@ -292,7 +336,10 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
                  Error: {}\n\
                  \n\
                  Try re-indexing or removing the DB directory:\n\
-                 rm -rf {}", path.display(), e, path.display()
+                 rm -rf {}",
+                path.display(),
+                e,
+                path.display()
             );
         }
     };
@@ -303,7 +350,12 @@ async fn connect_db(db_path: Option<PathBuf>, repo_name: &str) -> Result<surreal
     Ok(db)
 }
 
-async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<PathBuf>) -> Result<()> {
+async fn cmd_index(
+    path: PathBuf,
+    repo_name: &str,
+    clean: bool,
+    db_path: Option<PathBuf>,
+) -> Result<()> {
     use codescope_core::graph::IncrementalIndexer;
     use std::collections::HashMap;
     use std::time::Instant;
@@ -314,10 +366,17 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
     let incremental = IncrementalIndexer::new(db.clone());
 
     if clean {
-        println!("Full re-index: clearing existing data for '{}'...", repo_name);
+        println!(
+            "Full re-index: clearing existing data for '{}'...",
+            repo_name
+        );
         builder.clear_repo(repo_name).await?;
     } else {
-        println!("Incremental index of {} as '{}'...", path.display(), repo_name);
+        println!(
+            "Incremental index of {} as '{}'...",
+            path.display(),
+            repo_name
+        );
         let deleted = incremental.cleanup_deleted_files(&path, repo_name).await?;
         if deleted > 0 {
             println!("  Cleaned up {} deleted files", deleted);
@@ -377,7 +436,16 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
         let parser = CodeParser::new();
         let skipped = AtomicUsize::new(0);
 
-        let results: Vec<(String, Result<(Vec<codescope_core::CodeEntity>, Vec<codescope_core::CodeRelation>), String>)> = all_files
+        let results: Vec<(
+            String,
+            Result<
+                (
+                    Vec<codescope_core::CodeEntity>,
+                    Vec<codescope_core::CodeRelation>,
+                ),
+                String,
+            >,
+        )> = all_files
             .par_iter()
             .filter_map(|file_path| {
                 let rel_path = file_path
@@ -447,7 +515,7 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
                 total_relations += rel_count;
                 files_processed += 1;
 
-                if files_processed % 100 == 0 {
+                if files_processed.is_multiple_of(100) {
                     println!("  ... {} files indexed", files_processed);
                 }
             }
@@ -459,7 +527,10 @@ async fn cmd_index(path: PathBuf, repo_name: &str, clean: bool, db_path: Option<
 
     let total_time = start_time.elapsed();
     println!();
-    println!("Indexing complete! ({:.1}s total)", total_time.as_secs_f64());
+    println!(
+        "Indexing complete! ({:.1}s total)",
+        total_time.as_secs_f64()
+    );
     println!("  Files indexed:      {}", files_processed);
     if files_skipped > 0 {
         println!("  Files unchanged:    {}", files_skipped);
@@ -580,7 +651,12 @@ fn cmd_history(path: PathBuf, action: HistoryAction) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_sync_history(path: PathBuf, repo_name: &str, limit: usize, db_path: Option<PathBuf>) -> Result<()> {
+async fn cmd_sync_history(
+    path: PathBuf,
+    repo_name: &str,
+    limit: usize,
+    db_path: Option<PathBuf>,
+) -> Result<()> {
     use codescope_core::temporal::{GitAnalyzer, TemporalGraphSync};
 
     let db = connect_db(db_path, repo_name).await?;
@@ -607,7 +683,10 @@ async fn cmd_hotspots(repo: &str, db_path: Option<PathBuf>) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<30} {:<40} {:>6} {:>6} {:>10}", "Function", "File", "Size", "Churn", "Risk");
+    println!(
+        "{:<30} {:<40} {:>6} {:>6} {:>10}",
+        "Function", "File", "Size", "Churn", "Risk"
+    );
     println!("{}", "-".repeat(96));
 
     for h in &hotspots {
@@ -632,11 +711,14 @@ async fn cmd_embed(
     repo: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
-    use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
+    use codescope_core::embeddings::{
+        EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider,
+    };
 
     let db = connect_db(db_path, repo).await?;
 
-    let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
+    let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider
+    {
         "fastembed" => {
             println!("Using FastEmbed (local, in-process). Model downloads on first run.");
             Box::new(FastEmbedProvider::from_name(model)?)
@@ -650,7 +732,12 @@ async fn cmd_embed(
                 .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY environment variable not set"))?;
             Box::new(OpenAIProvider::new(api_key, Some(model.to_string())))
         }
-        _ => return Err(anyhow::anyhow!("Unknown provider: {}. Use 'fastembed', 'ollama', or 'openai'", provider)),
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown provider: {}. Use 'fastembed', 'ollama', or 'openai'",
+                provider
+            ))
+        }
     };
 
     println!("Embedding with {} (model: {})...", provider, model);
@@ -659,12 +746,19 @@ async fn cmd_embed(
     let result = pipeline.embed_functions(batch_size).await?;
     let backfilled = pipeline.backfill_binary_quantization().await.unwrap_or(0);
     let dims = pipeline.dimensions();
-    let bq_bytes = (dims + 7) / 8;
+    let bq_bytes = dims.div_ceil(8);
 
-    println!("Embedded {} functions with Binary Quantization", result.embedded);
+    println!(
+        "Embedded {} functions with Binary Quantization",
+        result.embedded
+    );
     println!("  BQ backfilled: {}", backfilled);
-    println!("  Memory: f32 = {} bytes/vec, BQ = {} bytes/vec ({}x smaller)",
-        dims * 4, bq_bytes, (dims * 4) / bq_bytes);
+    println!(
+        "  Memory: f32 = {} bytes/vec, BQ = {} bytes/vec ({}x smaller)",
+        dims * 4,
+        bq_bytes,
+        (dims * 4) / bq_bytes
+    );
     Ok(())
 }
 
@@ -677,11 +771,14 @@ async fn cmd_semantic_search(
     repo: &str,
     db_path: Option<PathBuf>,
 ) -> Result<()> {
-    use codescope_core::embeddings::{EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider};
+    use codescope_core::embeddings::{
+        EmbeddingPipeline, FastEmbedProvider, OllamaProvider, OpenAIProvider,
+    };
 
     let db = connect_db(db_path, repo).await?;
 
-    let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider {
+    let embedding_provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider
+    {
         "fastembed" => Box::new(FastEmbedProvider::from_name(model)?),
         "ollama" => Box::new(OllamaProvider::new(
             Some(ollama_url.to_string()),
@@ -704,10 +801,17 @@ async fn cmd_semantic_search(
     }
 
     let has_bq = results.first().and_then(|r| r.hamming_distance).is_some();
-    let mode = if has_bq { "BQ + Cosine (two-stage)" } else { "Cosine only" };
+    let mode = if has_bq {
+        "BQ + Cosine (two-stage)"
+    } else {
+        "Cosine only"
+    };
     println!("Semantic search results for '{}' [{}]:\n", query, mode);
     for (i, r) in results.iter().enumerate() {
-        let hamming = r.hamming_distance.map(|h| format!(" hamming:{}", h)).unwrap_or_default();
+        let hamming = r
+            .hamming_distance
+            .map(|h| format!(" hamming:{}", h))
+            .unwrap_or_default();
         println!(
             "{}. {} ({}:{}) — cosine: {:.4}{}",
             i + 1,
@@ -736,13 +840,13 @@ fn cmd_languages() {
 async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf>) -> Result<()> {
     use std::time::Instant;
 
-    let project_path = std::fs::canonicalize(&project_path)
-        .unwrap_or_else(|_| project_path.clone());
+    let project_path =
+        std::fs::canonicalize(&project_path).unwrap_or_else(|_| project_path.clone());
     // Strip Windows extended-length prefix (\\?\)
     let project_path = {
         let s = project_path.to_string_lossy();
-        if s.starts_with(r"\\?\") {
-            PathBuf::from(&s[4..])
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            PathBuf::from(stripped)
         } else {
             project_path
         }
@@ -801,7 +905,10 @@ async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBu
                 .append(true)
                 .open(&gitignore_path)?;
             use std::io::Write;
-            writeln!(f, "\n# Codescope MCP config (user-specific paths)\n.mcp.json")?;
+            writeln!(
+                f,
+                "\n# Codescope MCP config (user-specific paths)\n.mcp.json"
+            )?;
             println!("📝 Added .mcp.json to .gitignore");
         }
     }
@@ -856,14 +963,21 @@ async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBu
             eprint!("\r   ... {} files indexed", file_count);
         }
     }
-    if file_count >= 100 { eprintln!(); }
+    if file_count >= 100 {
+        eprintln!();
+    }
 
     // Resolve call targets
     let _ = builder.resolve_call_targets(&repo_name).await;
 
     let elapsed = start.elapsed();
-    println!("   {} files, {} entities, {} relations ({:.1}s)",
-        file_count, entity_count, relation_count, elapsed.as_secs_f64());
+    println!(
+        "   {} files, {} entities, {} relations ({:.1}s)",
+        file_count,
+        entity_count,
+        relation_count,
+        elapsed.as_secs_f64()
+    );
 
     // Step 5: Summary
     println!("\n✅ Codescope initialized!\n");
@@ -879,13 +993,26 @@ async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBu
 
 fn cmd_install() -> Result<()> {
     // Find the compiled binary
-    let exe_name = if cfg!(windows) { "codescope-mcp.exe" } else { "codescope-mcp" };
-    let cli_exe = if cfg!(windows) { "codescope.exe" } else { "codescope" };
-    let web_exe = if cfg!(windows) { "codescope-web.exe" } else { "codescope-web" };
+    let exe_name = if cfg!(windows) {
+        "codescope-mcp.exe"
+    } else {
+        "codescope-mcp"
+    };
+    let cli_exe = if cfg!(windows) {
+        "codescope.exe"
+    } else {
+        "codescope"
+    };
+    let web_exe = if cfg!(windows) {
+        "codescope-web.exe"
+    } else {
+        "codescope-web"
+    };
 
     // Try to find from same directory as current executable, or from target/release
     let current_exe = std::env::current_exe().ok();
-    let source_dir = current_exe.as_ref()
+    let source_dir = current_exe
+        .as_ref()
         .and_then(|p| p.parent())
         .map(|p| p.to_path_buf());
 
@@ -893,7 +1020,12 @@ fn cmd_install() -> Result<()> {
         // Match install.ps1: %LOCALAPPDATA%\codescope\bin
         std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("AppData").join("Local"))
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("AppData")
+                    .join("Local")
+            })
             .join("codescope")
             .join("bin")
     } else {
@@ -926,7 +1058,11 @@ fn cmd_install() -> Result<()> {
         return Ok(());
     }
 
-    println!("✅ Installed {} binaries to {}:\n", installed.len(), install_dir.display());
+    println!(
+        "✅ Installed {} binaries to {}:\n",
+        installed.len(),
+        install_dir.display()
+    );
     for p in &installed {
         println!("   {}", p);
     }
@@ -938,9 +1074,15 @@ fn cmd_install() -> Result<()> {
         println!("\n⚠ {} is not in your PATH. Add it:", install_dir.display());
         if cfg!(windows) {
             println!("\n  PowerShell (permanent):");
-            println!("  [Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';{}', 'User')", install_dir.display());
+            println!(
+                "  [Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';{}', 'User')",
+                install_dir.display()
+            );
         } else {
-            println!("\n  echo 'export PATH=\"{}:$PATH\"' >> ~/.bashrc && source ~/.bashrc", install_dir.display());
+            println!(
+                "\n  echo 'export PATH=\"{}:$PATH\"' >> ~/.bashrc && source ~/.bashrc",
+                install_dir.display()
+            );
         }
     }
 
@@ -953,35 +1095,45 @@ fn cmd_install() -> Result<()> {
 
 /// Find the codescope-mcp binary — check PATH, common locations, and sibling dir.
 fn find_mcp_binary() -> Option<PathBuf> {
-    let exe_name = if cfg!(windows) { "codescope-mcp.exe" } else { "codescope-mcp" };
+    let exe_name = if cfg!(windows) {
+        "codescope-mcp.exe"
+    } else {
+        "codescope-mcp"
+    };
 
     // Check platform-specific install dir
     if cfg!(windows) {
-        let win_path = std::env::var("LOCALAPPDATA").ok()
-            .map(|d| PathBuf::from(d).join("codescope").join("bin").join(exe_name));
+        let win_path = std::env::var("LOCALAPPDATA").ok().map(|d| {
+            PathBuf::from(d)
+                .join("codescope")
+                .join("bin")
+                .join(exe_name)
+        });
         if let Some(ref p) = win_path {
-            if p.exists() { return Some(p.clone()); }
+            if p.exists() {
+                return Some(p.clone());
+            }
         }
     }
-    let local_bin = dirs::home_dir()
-        .map(|h| h.join(".local").join("bin").join(exe_name));
+    let local_bin = dirs::home_dir().map(|h| h.join(".local").join("bin").join(exe_name));
     if let Some(ref p) = local_bin {
-        if p.exists() { return Some(p.clone()); }
+        if p.exists() {
+            return Some(p.clone());
+        }
     }
 
     // Check same directory as current executable
     if let Ok(current) = std::env::current_exe() {
         let sibling = current.parent().map(|p| p.join(exe_name));
         if let Some(ref p) = sibling {
-            if p.exists() { return Some(p.clone()); }
+            if p.exists() {
+                return Some(p.clone());
+            }
         }
     }
 
     // Check if in PATH
-    if let Ok(output) = std::process::Command::new("which")
-        .arg(exe_name)
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("which").arg(exe_name).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -998,7 +1150,11 @@ fn find_mcp_binary() -> Option<PathBuf> {
         {
             if output.status.success() {
                 let path = String::from_utf8_lossy(&output.stdout)
-                    .lines().next().unwrap_or("").trim().to_string();
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
                 if !path.is_empty() {
                     return Some(PathBuf::from(path));
                 }

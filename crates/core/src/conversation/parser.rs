@@ -33,7 +33,9 @@ pub struct ConversationParseResult {
 pub struct ConversationParser;
 
 impl ConversationParser {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Parse a JSONL transcript into structured conversation turns.
     /// Streams line-by-line for memory efficiency.
@@ -82,7 +84,10 @@ impl ConversationParser {
                 continue;
             }
 
-            let timestamp = entry.get("timestamp").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let timestamp = entry
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let content = msg.get("content");
 
             let (text, has_tool_use, has_tool_error, tool_error_text) = match content {
@@ -117,7 +122,8 @@ impl ConversationParser {
 
         if session_id.is_empty() {
             // Derive from filename
-            session_id = path.file_stem()
+            session_id = path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -166,19 +172,21 @@ fn extract_content(content: &serde_json::Value) -> (String, bool, bool, Option<S
                         }
                     }
                     "tool_result" => {
-                        let is_err = item.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let is_err = item
+                            .get("is_error")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         if is_err {
                             has_tool_error = true;
                             // Extract error content
                             if let Some(err_content) = item.get("content") {
                                 let err_text = match err_content {
                                     serde_json::Value::String(s) => s.clone(),
-                                    serde_json::Value::Array(arr) => {
-                                        arr.iter()
-                                            .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
-                                            .collect::<Vec<_>>()
-                                            .join("\n")
-                                    }
+                                    serde_json::Value::Array(arr) => arr
+                                        .iter()
+                                        .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
+                                        .collect::<Vec<_>>()
+                                        .join("\n"),
                                     _ => String::new(),
                                 };
                                 if !err_text.is_empty() {
@@ -186,7 +194,9 @@ fn extract_content(content: &serde_json::Value) -> (String, bool, bool, Option<S
                                     let preview_end = {
                                         let max = 200.min(err_text.len());
                                         let mut i = max;
-                                        while i > 0 && !err_text.is_char_boundary(i) { i -= 1; }
+                                        while i > 0 && !err_text.is_char_boundary(i) {
+                                            i -= 1;
+                                        }
                                         i
                                     };
                                     texts.push(format!("[error: {}]", &err_text[..preview_end]));
@@ -202,5 +212,10 @@ fn extract_content(content: &serde_json::Value) -> (String, bool, bool, Option<S
         _ => {}
     }
 
-    (texts.join("\n"), has_tool_use, has_tool_error, tool_error_text)
+    (
+        texts.join("\n"),
+        has_tool_use,
+        has_tool_error,
+        tool_error_text,
+    )
 }

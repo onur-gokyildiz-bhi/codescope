@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 
 /// High-level graph query interface
 pub struct GraphQuery {
@@ -58,7 +58,7 @@ impl GraphQuery {
                 "SELECT in.qualified_name AS qualified_name, in.name AS name, \
                  in.file_path AS file_path, in.start_line AS start_line, \
                  in.end_line AS end_line, in.language AS language, in.signature AS signature \
-                 FROM calls WHERE out.name = $name AND in.name != NONE"
+                 FROM calls WHERE out.name = $name AND in.name != NONE",
             )
             .bind(("name", name))
             .await?
@@ -75,7 +75,7 @@ impl GraphQuery {
                 "SELECT out.qualified_name AS qualified_name, out.name AS name, \
                  out.file_path AS file_path, out.start_line AS start_line, \
                  out.end_line AS end_line, out.language AS language, out.signature AS signature \
-                 FROM calls WHERE in.name = $name AND out.name != NONE"
+                 FROM calls WHERE in.name = $name AND out.name != NONE",
             )
             .bind(("name", name))
             .await?
@@ -124,7 +124,10 @@ impl GraphQuery {
 
         // If single statement, return flat array for backward compatibility
         if all_results.len() <= 1 {
-            Ok(all_results.into_iter().next().unwrap_or(serde_json::Value::Array(vec![])))
+            Ok(all_results
+                .into_iter()
+                .next()
+                .unwrap_or(serde_json::Value::Array(vec![])))
         } else {
             Ok(serde_json::Value::Array(all_results))
         }
@@ -132,8 +135,9 @@ impl GraphQuery {
 
     /// Get graph statistics — full knowledge graph overview
     pub async fn stats(&self) -> Result<serde_json::Value> {
-        let result = self.raw_query(
-            "RETURN {
+        let result = self
+            .raw_query(
+                "RETURN {
                 files: (SELECT count() FROM file GROUP ALL),
                 functions: (SELECT count() FROM `function` GROUP ALL),
                 classes: (SELECT count() FROM class GROUP ALL),
@@ -145,8 +149,9 @@ impl GraphQuery {
                 contains_edges: (SELECT count() FROM contains GROUP ALL),
                 calls_edges: (SELECT count() FROM calls GROUP ALL),
                 imports_edges: (SELECT count() FROM imports GROUP ALL)
-            };"
-        ).await?;
+            };",
+            )
+            .await?;
         Ok(result)
     }
 
@@ -158,8 +163,10 @@ impl GraphQuery {
         let n = name.to_string();
 
         // Multi-statement: find entity + get neighborhood in one round-trip
-        let mut response = self.db.query(
-            "SELECT name, qualified_name, file_path, signature, start_line, end_line, \
+        let mut response = self
+            .db
+            .query(
+                "SELECT name, qualified_name, file_path, signature, start_line, end_line, \
                     'function' AS entity_type FROM `function` WHERE name = $name; \
              SELECT name, qualified_name, file_path, kind, start_line, end_line, \
                     'class' AS entity_type FROM class WHERE name = $name; \
@@ -171,8 +178,10 @@ impl GraphQuery {
                     'package' AS entity_type FROM package WHERE name = $name; \
              SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name; \
              SELECT name, qualified_name, file_path, description, node_type, \
-                    'skill' AS entity_type FROM skill WHERE name = $name;"
-        ).bind(("name", n.clone())).await?;
+                    'skill' AS entity_type FROM skill WHERE name = $name;",
+            )
+            .bind(("name", n.clone()))
+            .await?;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let classes: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -228,17 +237,24 @@ impl GraphQuery {
 
             entity.insert("calls_to".into(), serde_json::Value::Array(callees));
             entity.insert("called_by".into(), serde_json::Value::Array(callers));
-            entity.insert("sibling_functions".into(), serde_json::Value::Array(siblings));
+            entity.insert(
+                "sibling_functions".into(),
+                serde_json::Value::Array(siblings),
+            );
         } else if found_type == "skill" {
             // For skills, get wikilink neighbors
-            let mut resp2 = self.db.query(
-                "SELECT out.name AS name, out.description AS description, \
+            let mut resp2 = self
+                .db
+                .query(
+                    "SELECT out.name AS name, out.description AS description, \
                         out.node_type AS node_type, context \
                      FROM links_to WHERE in.name = $name; \
                  SELECT in.name AS name, in.description AS description, \
                         in.node_type AS node_type, context \
-                     FROM links_to WHERE out.name = $name;"
-            ).bind(("name", n.clone())).await?;
+                     FROM links_to WHERE out.name = $name;",
+                )
+                .bind(("name", n.clone()))
+                .await?;
 
             let links_to: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
             let linked_from: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
@@ -281,23 +297,31 @@ impl GraphQuery {
         let infra: Vec<serde_json::Value> = response.take(7).unwrap_or_default();
 
         // Batch query: get ALL cross-file callers for ALL functions in this file at once (avoids N+1)
-        let mut resp2 = self.db.query(
-            "SELECT out.name AS callee_name, in.name AS name, in.file_path AS file_path \
+        let mut resp2 = self
+            .db
+            .query(
+                "SELECT out.name AS callee_name, in.name AS name, in.file_path AS file_path \
                  FROM calls WHERE out.file_path = $fpath \
-                 AND in.name != NONE AND in.file_path != $fpath;"
-        ).bind(("fpath", p.clone())).await?;
+                 AND in.name != NONE AND in.file_path != $fpath;",
+            )
+            .bind(("fpath", p.clone()))
+            .await?;
 
         let all_ext_callers: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
 
         // Group external callers by callee function name
-        let mut caller_map: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+        let mut caller_map: std::collections::HashMap<String, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
         for caller in all_ext_callers {
             if let Some(callee) = caller.get("callee_name").and_then(|v| v.as_str()) {
                 let mut entry = caller.clone();
                 if let Some(obj) = entry.as_object_mut() {
                     obj.remove("callee_name");
                 }
-                caller_map.entry(callee.to_string()).or_default().push(entry);
+                caller_map
+                    .entry(callee.to_string())
+                    .or_default()
+                    .push(entry);
             }
         }
 
@@ -307,21 +331,38 @@ impl GraphQuery {
             let mut entry = func.clone();
             if let Some(ext_callers) = caller_map.remove(fname) {
                 if let Some(obj) = entry.as_object_mut() {
-                    obj.insert("external_callers".into(), serde_json::Value::Array(ext_callers));
+                    obj.insert(
+                        "external_callers".into(),
+                        serde_json::Value::Array(ext_callers),
+                    );
                 }
             }
             fn_with_links.push(entry);
         }
 
         let mut ctx = serde_json::Map::new();
-        ctx.insert("file".into(), file_info.into_iter().next().unwrap_or(serde_json::Value::Null));
+        ctx.insert(
+            "file".into(),
+            file_info
+                .into_iter()
+                .next()
+                .unwrap_or(serde_json::Value::Null),
+        );
         ctx.insert("functions".into(), serde_json::Value::Array(fn_with_links));
         ctx.insert("classes".into(), serde_json::Value::Array(classes));
         ctx.insert("imports".into(), serde_json::Value::Array(imports));
-        if !configs.is_empty() { ctx.insert("configs".into(), serde_json::Value::Array(configs)); }
-        if !docs.is_empty() { ctx.insert("docs".into(), serde_json::Value::Array(docs)); }
-        if !packages.is_empty() { ctx.insert("packages".into(), serde_json::Value::Array(packages)); }
-        if !infra.is_empty() { ctx.insert("infra".into(), serde_json::Value::Array(infra)); }
+        if !configs.is_empty() {
+            ctx.insert("configs".into(), serde_json::Value::Array(configs));
+        }
+        if !docs.is_empty() {
+            ctx.insert("docs".into(), serde_json::Value::Array(docs));
+        }
+        if !packages.is_empty() {
+            ctx.insert("packages".into(), serde_json::Value::Array(packages));
+        }
+        if !infra.is_empty() {
+            ctx.insert("infra".into(), serde_json::Value::Array(infra));
+        }
 
         Ok(serde_json::Value::Object(ctx))
     }
@@ -333,8 +374,10 @@ impl GraphQuery {
         let kw = keyword.to_lowercase();
         let lim = limit as u32;
 
-        let mut response = self.db.query(
-            "SELECT name, file_path, start_line, signature, 'function' AS type \
+        let mut response = self
+            .db
+            .query(
+                "SELECT name, file_path, start_line, signature, 'function' AS type \
                  FROM `function` WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, start_line, 'class' AS type \
                  FROM class WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
@@ -349,8 +392,11 @@ impl GraphQuery {
              SELECT name, file_path, 'import' AS type \
                  FROM import_decl WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim; \
              SELECT name, file_path, kind, 'infra' AS type \
-                 FROM infra WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim;"
-        ).bind(("kw", kw)).bind(("lim", lim)).await?;
+                 FROM infra WHERE string::contains(string::lowercase(name), $kw) LIMIT $lim;",
+            )
+            .bind(("kw", kw))
+            .bind(("lim", lim))
+            .await?;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let classes: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -362,17 +408,42 @@ impl GraphQuery {
         let infra: Vec<serde_json::Value> = response.take(7).unwrap_or_default();
 
         let mut result = serde_json::Map::new();
-        let total = functions.len() + classes.len() + configs.len() + docs.len()
-            + packages.len() + files.len() + imports.len() + infra.len();
-        result.insert("total_results".into(), serde_json::Value::Number(total.into()));
-        if !functions.is_empty() { result.insert("functions".into(), serde_json::Value::Array(functions)); }
-        if !classes.is_empty() { result.insert("classes".into(), serde_json::Value::Array(classes)); }
-        if !configs.is_empty() { result.insert("configs".into(), serde_json::Value::Array(configs)); }
-        if !docs.is_empty() { result.insert("docs".into(), serde_json::Value::Array(docs)); }
-        if !packages.is_empty() { result.insert("packages".into(), serde_json::Value::Array(packages)); }
-        if !files.is_empty() { result.insert("files".into(), serde_json::Value::Array(files)); }
-        if !imports.is_empty() { result.insert("imports".into(), serde_json::Value::Array(imports)); }
-        if !infra.is_empty() { result.insert("infra".into(), serde_json::Value::Array(infra)); }
+        let total = functions.len()
+            + classes.len()
+            + configs.len()
+            + docs.len()
+            + packages.len()
+            + files.len()
+            + imports.len()
+            + infra.len();
+        result.insert(
+            "total_results".into(),
+            serde_json::Value::Number(total.into()),
+        );
+        if !functions.is_empty() {
+            result.insert("functions".into(), serde_json::Value::Array(functions));
+        }
+        if !classes.is_empty() {
+            result.insert("classes".into(), serde_json::Value::Array(classes));
+        }
+        if !configs.is_empty() {
+            result.insert("configs".into(), serde_json::Value::Array(configs));
+        }
+        if !docs.is_empty() {
+            result.insert("docs".into(), serde_json::Value::Array(docs));
+        }
+        if !packages.is_empty() {
+            result.insert("packages".into(), serde_json::Value::Array(packages));
+        }
+        if !files.is_empty() {
+            result.insert("files".into(), serde_json::Value::Array(files));
+        }
+        if !imports.is_empty() {
+            result.insert("imports".into(), serde_json::Value::Array(imports));
+        }
+        if !infra.is_empty() {
+            result.insert("infra".into(), serde_json::Value::Array(infra));
+        }
 
         Ok(serde_json::Value::Object(result))
     }
@@ -398,7 +469,7 @@ impl GraphQuery {
                 .db
                 .query(
                     "SELECT name, qualified_name, file_path, start_line, end_line, kind AS method \
-                     FROM http_call ORDER BY file_path, start_line"
+                     FROM http_call ORDER BY file_path, start_line",
                 )
                 .await?
                 .take(0)?;
@@ -407,7 +478,10 @@ impl GraphQuery {
     }
 
     /// Find which functions make HTTP calls to a given endpoint path pattern.
-    pub async fn find_endpoint_callers(&self, endpoint_pattern: &str) -> Result<Vec<serde_json::Value>> {
+    pub async fn find_endpoint_callers(
+        &self,
+        endpoint_pattern: &str,
+    ) -> Result<Vec<serde_json::Value>> {
         let pattern = endpoint_pattern.to_lowercase();
         let results: Vec<serde_json::Value> = self
             .db
@@ -416,7 +490,7 @@ impl GraphQuery {
                  in.signature AS caller_signature, \
                  out.name AS http_call, out.kind AS method, out.file_path AS call_file, \
                  out.start_line AS call_line \
-                 FROM calls_endpoint WHERE string::contains(string::lowercase(out.name), $pattern)"
+                 FROM calls_endpoint WHERE string::contains(string::lowercase(out.name), $pattern)",
             )
             .bind(("pattern", pattern))
             .await?
@@ -465,10 +539,21 @@ impl GraphQuery {
         if let Some(entity) = entities.into_iter().next() {
             result.insert("entity".into(), entity);
         }
-        if !parents.is_empty() { result.insert("parents".into(), serde_json::Value::Array(parents)); }
-        if !children.is_empty() { result.insert("children".into(), serde_json::Value::Array(children)); }
-        if !interfaces.is_empty() { result.insert("implements".into(), serde_json::Value::Array(interfaces)); }
-        if !implementors.is_empty() { result.insert("implemented_by".into(), serde_json::Value::Array(implementors)); }
+        if !parents.is_empty() {
+            result.insert("parents".into(), serde_json::Value::Array(parents));
+        }
+        if !children.is_empty() {
+            result.insert("children".into(), serde_json::Value::Array(children));
+        }
+        if !interfaces.is_empty() {
+            result.insert("implements".into(), serde_json::Value::Array(interfaces));
+        }
+        if !implementors.is_empty() {
+            result.insert(
+                "implemented_by".into(),
+                serde_json::Value::Array(implementors),
+            );
+        }
 
         let _ = d; // depth reserved for recursive traversal in future
         Ok(serde_json::Value::Object(result))
@@ -486,18 +571,27 @@ impl GraphQuery {
         let n = name.to_string();
 
         // Level 1: Find the root skill node
-        let mut response = self.db.query(
-            "SELECT name, qualified_name, kind, file_path, description, node_type, created \
-             FROM skill WHERE name = $name OR string::contains(qualified_name, $name) LIMIT 5"
-        ).bind(("name", n.clone())).await?;
+        let mut response = self
+            .db
+            .query(
+                "SELECT name, qualified_name, kind, file_path, description, node_type, created \
+             FROM skill WHERE name = $name OR string::contains(qualified_name, $name) LIMIT 5",
+            )
+            .bind(("name", n.clone()))
+            .await?;
 
         let roots: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         if roots.is_empty() {
-            return Ok(serde_json::json!({"error": format!("No skill node found matching '{}'", name)}));
+            return Ok(
+                serde_json::json!({"error": format!("No skill node found matching '{}'", name)}),
+            );
         }
 
         let root = &roots[0];
-        let qname = root.get("qualified_name").and_then(|v| v.as_str()).unwrap_or("");
+        let qname = root
+            .get("qualified_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let file_path = root.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
 
         let mut result = serde_json::Map::new();
@@ -509,14 +603,18 @@ impl GraphQuery {
 
         // Level 2: Get outgoing and incoming wikilinks
         let qn = qname.to_string();
-        let mut resp2 = self.db.query(
-            "SELECT out.name AS name, out.description AS description, \
+        let mut resp2 = self
+            .db
+            .query(
+                "SELECT out.name AS name, out.description AS description, \
                     out.node_type AS node_type, context \
              FROM links_to WHERE in.qualified_name = $qn; \
              SELECT in.name AS name, in.description AS description, \
                     in.node_type AS node_type, context \
-             FROM links_to WHERE out.qualified_name = $qn;"
-        ).bind(("qn", qn)).await?;
+             FROM links_to WHERE out.qualified_name = $qn;",
+            )
+            .bind(("qn", qn))
+            .await?;
 
         let links_to: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
         let linked_from: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
@@ -530,10 +628,14 @@ impl GraphQuery {
 
         // Level 3: Get sections (headings) from the same file
         let fp = file_path.to_string();
-        let mut resp3 = self.db.query(
-            "SELECT name, kind, start_line FROM doc WHERE file_path = $fp \
-             AND kind = 'DocSection' ORDER BY start_line"
-        ).bind(("fp", fp)).await?;
+        let mut resp3 = self
+            .db
+            .query(
+                "SELECT name, kind, start_line FROM doc WHERE file_path = $fp \
+             AND kind = 'DocSection' ORDER BY start_line",
+            )
+            .bind(("fp", fp))
+            .await?;
 
         let sections: Vec<serde_json::Value> = resp3.take(0).unwrap_or_default();
         result.insert("sections".into(), serde_json::Value::Array(sections));
@@ -556,9 +658,11 @@ impl GraphQuery {
     pub async fn find_all_references(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
 
-        let mut response = self.db.query(
-            // Definition sites
-            "SELECT name, qualified_name, file_path, start_line, end_line, signature, \
+        let mut response = self
+            .db
+            .query(
+                // Definition sites
+                "SELECT name, qualified_name, file_path, start_line, end_line, signature, \
                     'definition' AS ref_type FROM `function` WHERE name = $name; \
              SELECT name, qualified_name, file_path, start_line, end_line, kind, \
                     'definition' AS ref_type FROM class WHERE name = $name; \
@@ -569,8 +673,10 @@ impl GraphQuery {
                     FROM calls WHERE out.name = $name AND in.name != NONE; \
              // Import references
              SELECT name, file_path, start_line, 'import' AS ref_type \
-                    FROM import_decl WHERE string::contains(name, $name);"
-        ).bind(("name", n)).await?;
+                    FROM import_decl WHERE string::contains(name, $name);",
+            )
+            .bind(("name", n))
+            .await?;
 
         let definitions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let class_defs: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -585,7 +691,10 @@ impl GraphQuery {
 
         let mut result = serde_json::Map::new();
         result.insert("symbol".into(), serde_json::Value::String(name.to_string()));
-        result.insert("total_references".into(), serde_json::Value::Number(all_refs.len().into()));
+        result.insert(
+            "total_references".into(),
+            serde_json::Value::Number(all_refs.len().into()),
+        );
         result.insert("references".into(), serde_json::Value::Array(all_refs));
 
         Ok(serde_json::Value::Object(result))
@@ -594,8 +703,10 @@ impl GraphQuery {
     /// Find unused symbols — functions/classes with zero callers/importers.
     /// Filters out entry points (main, test_, handler, new, init).
     pub async fn find_unused_symbols(&self, min_lines: u32) -> Result<Vec<serde_json::Value>> {
-        let results: Vec<serde_json::Value> = self.db.query(
-            "SELECT name, file_path, start_line, end_line, signature, \
+        let results: Vec<serde_json::Value> = self
+            .db
+            .query(
+                "SELECT name, file_path, start_line, end_line, signature, \
                     (end_line - start_line) AS line_count \
              FROM `function` WHERE \
                  name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
@@ -608,8 +719,11 @@ impl GraphQuery {
                  AND name != 'serialize' AND name != 'deserialize' \
                  AND (end_line - start_line) >= $min_lines \
              ORDER BY (end_line - start_line) DESC \
-             LIMIT 50"
-        ).bind(("min_lines", min_lines)).await?.take(0)?;
+             LIMIT 50",
+            )
+            .bind(("min_lines", min_lines))
+            .await?
+            .take(0)?;
 
         Ok(results)
     }
@@ -618,28 +732,34 @@ impl GraphQuery {
     pub async fn safe_delete_check(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
 
-        let mut response = self.db.query(
-            // Check callers
-            "SELECT count() AS cnt FROM calls WHERE out.name = $name GROUP ALL; \
+        let mut response = self
+            .db
+            .query(
+                // Check callers
+                "SELECT count() AS cnt FROM calls WHERE out.name = $name GROUP ALL; \
              // Check if imported anywhere
              SELECT count() AS cnt FROM import_decl WHERE string::contains(name, $name) GROUP ALL; \
              // Get the entity details
              SELECT name, file_path, start_line, end_line, signature \
                     FROM `function` WHERE name = $name; \
              SELECT name, file_path, start_line, end_line, kind \
-                    FROM class WHERE name = $name;"
-        ).bind(("name", n)).await?;
+                    FROM class WHERE name = $name;",
+            )
+            .bind(("name", n))
+            .await?;
 
         let callers: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let importers: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
         let fn_defs: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
         let class_defs: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
 
-        let caller_count = callers.first()
+        let caller_count = callers
+            .first()
             .and_then(|v| v.get("cnt"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        let import_count = importers.first()
+        let import_count = importers
+            .first()
             .and_then(|v| v.get("cnt"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
@@ -653,13 +773,23 @@ impl GraphQuery {
         let mut result = serde_json::Map::new();
         result.insert("symbol".into(), serde_json::Value::String(name.to_string()));
         result.insert("safe_to_delete".into(), serde_json::Value::Bool(is_safe));
-        result.insert("caller_count".into(), serde_json::Value::Number(caller_count.into()));
-        result.insert("import_count".into(), serde_json::Value::Number(import_count.into()));
+        result.insert(
+            "caller_count".into(),
+            serde_json::Value::Number(caller_count.into()),
+        );
+        result.insert(
+            "import_count".into(),
+            serde_json::Value::Number(import_count.into()),
+        );
         result.insert("definitions".into(), serde_json::Value::Array(definitions));
         if !is_safe {
-            result.insert("reason".into(), serde_json::Value::String(
-                format!("{} callers, {} imports still reference this symbol", caller_count, import_count)
-            ));
+            result.insert(
+                "reason".into(),
+                serde_json::Value::String(format!(
+                    "{} callers, {} imports still reference this symbol",
+                    caller_count, import_count
+                )),
+            );
         }
 
         Ok(serde_json::Value::Object(result))
@@ -695,13 +825,27 @@ impl GraphQuery {
         let wikilinks: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
 
         let mut result = serde_json::Map::new();
-        let total = callers.len() + importers.len() + containers.len() + dependents.len() + wikilinks.len();
-        result.insert("total_backlinks".into(), serde_json::Value::Number(total.into()));
-        if !callers.is_empty() { result.insert("callers".into(), serde_json::Value::Array(callers)); }
-        if !importers.is_empty() { result.insert("importers".into(), serde_json::Value::Array(importers)); }
-        if !containers.is_empty() { result.insert("contained_in".into(), serde_json::Value::Array(containers)); }
-        if !dependents.is_empty() { result.insert("dependents".into(), serde_json::Value::Array(dependents)); }
-        if !wikilinks.is_empty() { result.insert("wikilinks".into(), serde_json::Value::Array(wikilinks)); }
+        let total =
+            callers.len() + importers.len() + containers.len() + dependents.len() + wikilinks.len();
+        result.insert(
+            "total_backlinks".into(),
+            serde_json::Value::Number(total.into()),
+        );
+        if !callers.is_empty() {
+            result.insert("callers".into(), serde_json::Value::Array(callers));
+        }
+        if !importers.is_empty() {
+            result.insert("importers".into(), serde_json::Value::Array(importers));
+        }
+        if !containers.is_empty() {
+            result.insert("contained_in".into(), serde_json::Value::Array(containers));
+        }
+        if !dependents.is_empty() {
+            result.insert("dependents".into(), serde_json::Value::Array(dependents));
+        }
+        if !wikilinks.is_empty() {
+            result.insert("wikilinks".into(), serde_json::Value::Array(wikilinks));
+        }
 
         Ok(serde_json::Value::Object(result))
     }

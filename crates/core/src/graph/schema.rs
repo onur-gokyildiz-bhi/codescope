@@ -1,6 +1,6 @@
 use anyhow::Result;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 
 /// Initialize the SurrealDB schema for the knowledge graph
 pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {

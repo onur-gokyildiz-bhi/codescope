@@ -112,6 +112,14 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | sort
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.zip" -o -name "*.tar.gz" \) -exec sha256sum {} \; | sort > ../SHA256SUMS.txt
+          cd ..
+          echo "### SHA256 Checksums" >> SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Generate release notes
         id: notes
         run: |
@@ -141,7 +149,7 @@ jobs:
           ```bash
           cd your-project
           codescope init          # creates .mcp.json + indexes codebase
-          # That's it! Claude Code now has 36 code intelligence tools.
+          # That's it! Claude Code now has 45 code intelligence tools.
           ```
 
           ### Supported Platforms
@@ -158,6 +166,8 @@ jobs:
           body_path: release_notes.md
           draft: false
           prerelease: false
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,14 +1,17 @@
 use rmcp::model::*;
-use rmcp::{ServerHandler, tool};
+use rmcp::{tool, ServerHandler};
 use std::path::PathBuf;
 use std::sync::Arc;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 
 use codescope_core::graph::query::GraphQuery;
 
 use crate::daemon::DaemonState;
-use crate::helpers::{build_context_summary, check_conversation_hash, extract_path_from_question, link_cross_session_topics, load_known_entities};
+use crate::helpers::{
+    build_context_summary, check_conversation_hash, extract_path_from_question,
+    link_cross_session_topics, load_known_entities,
+};
 use crate::params::*;
 
 /// Active project context — DB handle + metadata
@@ -109,7 +112,9 @@ TOOL CHEAT SHEET:\n\
 | Read file to understand it | explore(entity_name)             | ~75%  |";
 
         // Try to include cached conversation context (non-blocking)
-        let context = self.context_summary.try_read()
+        let context = self
+            .context_summary
+            .try_read()
             .map(|c| c.clone())
             .unwrap_or_default();
 
@@ -120,7 +125,7 @@ TOOL CHEAT SHEET:\n\
         };
 
         ServerInfo {
-            instructions: Some(instructions.into()),
+            instructions: Some(instructions),
             capabilities: ServerCapabilities {
                 tools: Some(ToolsCapability::default()),
                 ..Default::default()
@@ -133,7 +138,9 @@ TOOL CHEAT SHEET:\n\
 #[tool(tool_box)]
 impl GraphRagServer {
     /// Initialize a project for this session (daemon mode). Opens the DB and optionally indexes the codebase.
-    #[tool(description = "Initialize a project for this session. Required in daemon mode before using other tools. Pass the repo name and codebase path.")]
+    #[tool(
+        description = "Initialize a project for this session. Required in daemon mode before using other tools. Pass the repo name and codebase path."
+    )]
     async fn init_project(&self, #[tool(aggr)] params: InitProjectParams) -> String {
         let daemon = match &self.daemon {
             Some(d) => d.clone(),
@@ -203,7 +210,11 @@ impl GraphRagServer {
                                 .replace('\\', "/");
                             let content = std::fs::read_to_string(file_path).ok()?;
                             parser
-                                .parse_source(std::path::Path::new(&rel_path), &content, &parse_repo)
+                                .parse_source(
+                                    std::path::Path::new(&rel_path),
+                                    &content,
+                                    &parse_repo,
+                                )
                                 .ok()
                         })
                         .collect::<Vec<_>>()
@@ -223,11 +234,17 @@ impl GraphRagServer {
             });
         }
 
-        format!("Project '{}' initialized at {}. DB ready.", repo_name, codebase_path.display())
+        format!(
+            "Project '{}' initialized at {}. DB ready.",
+            repo_name,
+            codebase_path.display()
+        )
     }
 
     /// List all projects currently open in the daemon
-    #[tool(description = "List all projects currently open in the daemon. Only available in daemon mode.")]
+    #[tool(
+        description = "List all projects currently open in the daemon. Only available in daemon mode."
+    )]
     async fn list_projects(&self) -> String {
         match &self.daemon {
             Some(d) => {
@@ -249,7 +266,9 @@ impl GraphRagServer {
     }
 
     /// Search for functions by name or pattern in the code graph
-    #[tool(description = "Search for functions by name or pattern. Returns matching functions with file paths and line numbers.")]
+    #[tool(
+        description = "Search for functions by name or pattern. Returns matching functions with file paths and line numbers."
+    )]
     async fn search_functions(&self, #[tool(aggr)] params: SearchParams) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -263,7 +282,11 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No functions found matching '{}'", params.query);
                 }
-                let mut output = format!("Found {} functions matching '{}':\n\n", results.len().min(limit), params.query);
+                let mut output = format!(
+                    "Found {} functions matching '{}':\n\n",
+                    results.len().min(limit),
+                    params.query
+                );
                 for (i, r) in results.iter().enumerate().take(limit) {
                     output.push_str(&format!(
                         "{}. **{}** ({}:{})\n",
@@ -283,9 +306,14 @@ impl GraphRagServer {
     }
 
     /// Find a function by exact name
-    #[tool(description = "Find a function by exact name. Returns detailed info including signature, file path, and line numbers.")]
+    #[tool(
+        description = "Find a function by exact name. Returns detailed info including signature, file path, and line numbers."
+    )]
     async fn find_function(&self, #[tool(aggr)] params: SearchParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_function(&params.query).await {
@@ -293,16 +321,22 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No function found with name '{}'", params.query);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting results".into())
+                serde_json::to_string_pretty(&results)
+                    .unwrap_or_else(|_| "Error formatting results".into())
             }
             Err(e) => format!("Error: {}", e),
         }
     }
 
     /// List all code entities (functions, classes) in a specific file
-    #[tool(description = "List all functions and classes in a file. Provides an overview of the file's structure.")]
+    #[tool(
+        description = "List all functions and classes in a file. Provides an overview of the file's structure."
+    )]
     async fn file_entities(&self, #[tool(aggr)] params: FileEntitiesParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.file_entities(&params.file_path).await {
@@ -329,9 +363,14 @@ impl GraphRagServer {
     }
 
     /// Find all functions that call the specified function (callers / incoming calls)
-    #[tool(description = "Find all functions that call the specified function. Useful for understanding who depends on a function.")]
+    #[tool(
+        description = "Find all functions that call the specified function. Useful for understanding who depends on a function."
+    )]
     async fn find_callers(&self, #[tool(aggr)] params: FindCallersParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_callers(&params.function_name).await {
@@ -346,9 +385,14 @@ impl GraphRagServer {
     }
 
     /// Find all functions called by the specified function (callees / outgoing calls)
-    #[tool(description = "Find all functions called by the specified function. Useful for understanding a function's dependencies.")]
+    #[tool(
+        description = "Find all functions called by the specified function. Useful for understanding a function's dependencies."
+    )]
     async fn find_callees(&self, #[tool(aggr)] params: FindCalleesParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_callees(&params.function_name).await {
@@ -363,23 +407,32 @@ impl GraphRagServer {
     }
 
     /// Get statistics about the indexed code graph
-    #[tool(description = "Get statistics about the code graph: number of files, functions, classes, and relationships indexed.")]
+    #[tool(
+        description = "Get statistics about the code graph: number of files, functions, classes, and relationships indexed."
+    )]
     async fn graph_stats(&self) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.stats().await {
-            Ok(stats) => {
-                serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "Error formatting stats".into())
-            }
+            Ok(stats) => serde_json::to_string_pretty(&stats)
+                .unwrap_or_else(|_| "Error formatting stats".into()),
             Err(e) => format!("Error: {}", e),
         }
     }
 
     /// Execute a raw SurrealQL query against the code graph
-    #[tool(description = "Execute a raw SurrealQL query against the code graph database. Use for advanced queries like graph traversals.")]
+    #[tool(
+        description = "Execute a raw SurrealQL query against the code graph database. Use for advanced queries like graph traversals."
+    )]
     async fn raw_query(&self, #[tool(aggr)] params: RawQueryParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.raw_query(&params.query).await {
@@ -391,9 +444,14 @@ impl GraphRagServer {
     }
 
     /// Index or re-index the codebase into the graph database
-    #[tool(description = "Index the codebase into the knowledge graph. Parses source files and extracts entities and relationships.")]
+    #[tool(
+        description = "Index the codebase into the knowledge graph. Parses source files and extracts entities and relationships."
+    )]
     async fn index_codebase(&self, #[tool(aggr)] params: IndexParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let target_path = match &params.path {
             Some(p) => ctx.codebase_path.join(p),
             None => ctx.codebase_path.clone(),
@@ -401,7 +459,8 @@ impl GraphRagServer {
 
         let parser = codescope_core::parser::CodeParser::new();
         let builder = codescope_core::graph::builder::GraphBuilder::new(ctx.db.clone());
-        let incremental = codescope_core::graph::incremental::IncrementalIndexer::new(ctx.db.clone());
+        let incremental =
+            codescope_core::graph::incremental::IncrementalIndexer::new(ctx.db.clone());
 
         let clean = params.clean.unwrap_or(false);
         if clean {
@@ -412,7 +471,10 @@ impl GraphRagServer {
 
         // Load existing hashes in bulk for incremental comparison
         let existing_hashes = if !clean {
-            incremental.load_file_hashes(&ctx.repo_name).await.unwrap_or_default()
+            incremental
+                .load_file_hashes(&ctx.repo_name)
+                .await
+                .unwrap_or_default()
         } else {
             std::collections::HashMap::new()
         };
@@ -466,7 +528,9 @@ impl GraphRagServer {
                     continue;
                 }
                 // File changed — delete old entities before re-inserting
-                let _ = builder.delete_file_entities(&rel_path, &ctx.repo_name).await;
+                let _ = builder
+                    .delete_file_entities(&rel_path, &ctx.repo_name)
+                    .await;
             }
 
             match parser.parse_source(std::path::Path::new(&rel_path), &content, &ctx.repo_name) {
@@ -485,7 +549,10 @@ impl GraphRagServer {
 
         // Clean up entities from deleted files
         let deleted = if !clean {
-            incremental.cleanup_deleted_files(&target_path, &ctx.repo_name).await.unwrap_or(0)
+            incremental
+                .cleanup_deleted_files(&target_path, &ctx.repo_name)
+                .await
+                .unwrap_or(0)
         } else {
             0
         };
@@ -504,21 +571,24 @@ impl GraphRagServer {
     }
 
     /// Analyze the impact of changing a function — what else could be affected
-    #[tool(description = "Analyze the impact of changing a function. Shows the transitive call graph to understand what would be affected by a change.")]
+    #[tool(
+        description = "Analyze the impact of changing a function. Shows the transitive call graph to understand what would be affected by a change."
+    )]
     async fn impact_analysis(&self, #[tool(aggr)] params: ImpactAnalysisParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let _depth = params.depth.unwrap_or(3);
 
         // Direct edge traversal — much faster than subquery on large graphs (21K+ edges)
-        let query = format!(
-            "SELECT name, qualified_name, file_path, start_line FROM `function` WHERE name = $name;\
+        let query = "SELECT name, qualified_name, file_path, start_line FROM `function` WHERE name = $name;\
              SELECT in.name AS name, in.file_path AS file_path \
                FROM calls WHERE out.name = $name AND in.name != NONE;\
              SELECT in.name AS name, in.file_path AS file_path \
                FROM calls WHERE out.name IN \
                  (SELECT VALUE in.name FROM calls WHERE out.name = $name AND in.name != NONE) \
-                 AND in.name != NONE AND in.name != $name;"
-        );
+                 AND in.name != NONE AND in.name != $name;".to_string();
 
         let name = params.function_name.clone();
         match ctx.db.query(query).bind(("name", name)).await {
@@ -530,8 +600,11 @@ impl GraphRagServer {
                 let mut output = format!("## Impact Analysis: {}\n\n", params.function_name);
 
                 if let Some(info) = func_info.first() {
-                    output.push_str(&format!("**Location:** {}:{}\n\n",
-                        info.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                    output.push_str(&format!(
+                        "**Location:** {}:{}\n\n",
+                        info.get("file_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
                         info.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0),
                     ));
                 }
@@ -559,9 +632,14 @@ impl GraphRagServer {
     // ===== HTTP Cross-Service Linking =====
 
     /// Find HTTP client calls in the codebase
-    #[tool(description = "Find all HTTP client calls (reqwest, fetch, axios, requests) in the codebase. Optionally filter by HTTP method (GET, POST, PUT, DELETE, PATCH). Shows which functions make HTTP requests and to which endpoints.")]
+    #[tool(
+        description = "Find all HTTP client calls (reqwest, fetch, axios, requests) in the codebase. Optionally filter by HTTP method (GET, POST, PUT, DELETE, PATCH). Shows which functions make HTTP requests and to which endpoints."
+    )]
     async fn find_http_calls(&self, #[tool(aggr)] params: HttpCallParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_http_calls(params.method.as_deref()).await {
@@ -583,17 +661,29 @@ impl GraphRagServer {
     }
 
     /// Find which functions call a specific HTTP endpoint
-    #[tool(description = "Find all code functions that call a specific HTTP endpoint by URL pattern. Example: '/users' finds all code that makes HTTP requests to any /users endpoint. Shows the calling function, HTTP method, and location.")]
+    #[tool(
+        description = "Find all code functions that call a specific HTTP endpoint by URL pattern. Example: '/users' finds all code that makes HTTP requests to any /users endpoint. Shows the calling function, HTTP method, and location."
+    )]
     async fn find_endpoint_callers(&self, #[tool(aggr)] params: SearchParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_endpoint_callers(&params.query).await {
             Ok(results) => {
                 if results.is_empty() {
-                    return format!("No functions found calling endpoint matching '{}'", params.query);
+                    return format!(
+                        "No functions found calling endpoint matching '{}'",
+                        params.query
+                    );
                 }
-                let mut output = format!("Found {} callers of endpoint '{}':\n\n", results.len(), params.query);
+                let mut output = format!(
+                    "Found {} callers of endpoint '{}':\n\n",
+                    results.len(),
+                    params.query
+                );
                 for (i, r) in results.iter().enumerate() {
                     let caller = r.get("caller_name").and_then(|v| v.as_str()).unwrap_or("?");
                     let file = r.get("caller_file").and_then(|v| v.as_str()).unwrap_or("?");
@@ -601,7 +691,11 @@ impl GraphRagServer {
                     let http_call = r.get("http_call").and_then(|v| v.as_str()).unwrap_or("?");
                     output.push_str(&format!(
                         "{}. **{}** ({}) calls {} {}\n",
-                        i + 1, caller, file, method, http_call,
+                        i + 1,
+                        caller,
+                        file,
+                        method,
+                        http_call,
                     ));
                 }
                 output
@@ -613,31 +707,51 @@ impl GraphRagServer {
     // ===== Symbol-Level Operations =====
 
     /// Find all references to a symbol for rename planning
-    #[tool(description = "Find all references to a symbol (function/class) across the codebase. Shows definitions, call sites, and imports. Use this to plan a rename — it shows every location that would need to change.")]
+    #[tool(
+        description = "Find all references to a symbol (function/class) across the codebase. Shows definitions, call sites, and imports. Use this to plan a rename — it shows every location that would need to change."
+    )]
     async fn rename_symbol(&self, #[tool(aggr)] params: RenameSymbolParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.find_all_references(&params.symbol_name).await {
             Ok(result) => {
-                let total = result.get("total_references").and_then(|v| v.as_u64()).unwrap_or(0);
+                let total = result
+                    .get("total_references")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 if total == 0 {
                     return format!("No references found for symbol '{}'", params.symbol_name);
                 }
-                let mut output = format!("**Symbol: {}** — {} references found\n\n", params.symbol_name, total);
+                let mut output = format!(
+                    "**Symbol: {}** — {} references found\n\n",
+                    params.symbol_name, total
+                );
 
                 if let Some(refs) = result.get("references").and_then(|v| v.as_array()) {
                     for r in refs {
                         let ref_type = r.get("ref_type").and_then(|v| v.as_str()).unwrap_or("?");
                         let file = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                         let line = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let name = r.get("name").or_else(|| r.get("caller_name"))
-                            .and_then(|v| v.as_str()).unwrap_or("?");
-                        output.push_str(&format!("- [{}] **{}** at {}:{}\n", ref_type, name, file, line));
+                        let name = r
+                            .get("name")
+                            .or_else(|| r.get("caller_name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        output.push_str(&format!(
+                            "- [{}] **{}** at {}:{}\n",
+                            ref_type, name, file, line
+                        ));
                     }
                 }
 
-                output.push_str(&format!("\nTo rename '{}', all {} locations above need updating.", params.symbol_name, total));
+                output.push_str(&format!(
+                    "\nTo rename '{}', all {} locations above need updating.",
+                    params.symbol_name, total
+                ));
                 output
             }
             Err(e) => format!("Error: {}", e),
@@ -645,9 +759,14 @@ impl GraphRagServer {
     }
 
     /// Find unused symbols (functions with zero references)
-    #[tool(description = "Find unused symbols — functions that are never called by any other function. Filters out known entry points (main, test functions, handlers, constructors). Useful for codebase cleanup and reducing maintenance burden.")]
+    #[tool(
+        description = "Find unused symbols — functions that are never called by any other function. Filters out known entry points (main, test functions, handlers, constructors). Useful for codebase cleanup and reducing maintenance burden."
+    )]
     async fn find_unused(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
         let min_lines = params.min_lines.unwrap_or(3);
 
@@ -657,13 +776,23 @@ impl GraphRagServer {
                     return "No unused symbols found (or all are entry points/trivial).".into();
                 }
                 let limit = params.limit.unwrap_or(50);
-                let mut output = format!("Found {} potentially unused symbols (min {} lines):\n\n", results.len().min(limit), min_lines);
+                let mut output = format!(
+                    "Found {} potentially unused symbols (min {} lines):\n\n",
+                    results.len().min(limit),
+                    min_lines
+                );
                 for (i, r) in results.iter().enumerate().take(limit) {
                     let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                     let file = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                     let lines = r.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
                     let sig = r.get("signature").and_then(|v| v.as_str()).unwrap_or("");
-                    output.push_str(&format!("{}. **{}** ({}, {} lines)\n", i + 1, name, file, lines));
+                    output.push_str(&format!(
+                        "{}. **{}** ({}, {} lines)\n",
+                        i + 1,
+                        name,
+                        file,
+                        lines
+                    ));
                     if !sig.is_empty() {
                         output.push_str(&format!("   `{}`\n", sig));
                     }
@@ -675,19 +804,36 @@ impl GraphRagServer {
     }
 
     /// Check if a symbol can be safely deleted
-    #[tool(description = "Check if a symbol (function/class) can be safely deleted. Returns whether it has zero callers and zero importers. If not safe, shows what still references it.")]
+    #[tool(
+        description = "Check if a symbol (function/class) can be safely deleted. Returns whether it has zero callers and zero importers. If not safe, shows what still references it."
+    )]
     async fn safe_delete(&self, #[tool(aggr)] params: SafeDeleteParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.safe_delete_check(&params.symbol_name).await {
             Ok(result) => {
-                let safe = result.get("safe_to_delete").and_then(|v| v.as_bool()).unwrap_or(false);
-                let callers = result.get("caller_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                let imports = result.get("import_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let safe = result
+                    .get("safe_to_delete")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let callers = result
+                    .get("caller_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let imports = result
+                    .get("import_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
 
                 if safe {
-                    let mut output = format!("**{}** can be safely deleted. No callers or imports reference it.\n\n", params.symbol_name);
+                    let mut output = format!(
+                        "**{}** can be safely deleted. No callers or imports reference it.\n\n",
+                        params.symbol_name
+                    );
                     if let Some(defs) = result.get("definitions").and_then(|v| v.as_array()) {
                         output.push_str("Definitions to remove:\n");
                         for d in defs {
@@ -714,9 +860,14 @@ impl GraphRagServer {
     // ===== Type Hierarchy =====
 
     /// Show inheritance chain for a class/struct/trait/interface
-    #[tool(description = "Show the type hierarchy for a class, struct, trait, or interface. Shows parent types (extends), child types (subtypes), implemented interfaces, and implementors.")]
+    #[tool(
+        description = "Show the type hierarchy for a class, struct, trait, or interface. Shows parent types (extends), child types (subtypes), implemented interfaces, and implementors."
+    )]
     async fn type_hierarchy(&self, #[tool(aggr)] params: TypeHierarchyParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
         let depth = params.depth.unwrap_or(3);
 
@@ -726,19 +877,31 @@ impl GraphRagServer {
 
                 if let Some(entity) = result.get("entity") {
                     let kind = entity.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
-                    let file = entity.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let file = entity
+                        .get("file_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
                     output.push_str(&format!("**{}** [{}] in {}\n\n", params.name, kind, file));
                 }
 
-                for (key, title) in [("parents", "Extends"), ("children", "Subtypes"), ("implements", "Implements"), ("implemented_by", "Implemented By")] {
+                for (key, title) in [
+                    ("parents", "Extends"),
+                    ("children", "Subtypes"),
+                    ("implements", "Implements"),
+                    ("implemented_by", "Implemented By"),
+                ] {
                     if let Some(items) = result.get(key).and_then(|v| v.as_array()) {
                         if !items.is_empty() {
                             output.push_str(&format!("### {}\n", title));
                             for item in items {
                                 // Try all possible field names from the query
-                                let name = item.get("parent").or(item.get("child"))
-                                    .or(item.get("iface")).or(item.get("implementor"))
-                                    .and_then(|v| v.as_str()).unwrap_or("?");
+                                let name = item
+                                    .get("parent")
+                                    .or(item.get("child"))
+                                    .or(item.get("iface"))
+                                    .or(item.get("implementor"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
                                 output.push_str(&format!("- {}\n", name));
                             }
                             output.push('\n');
@@ -747,7 +910,10 @@ impl GraphRagServer {
                 }
 
                 if output.lines().count() <= 3 {
-                    format!("No type '{}' found or no inheritance relationships.", params.name)
+                    format!(
+                        "No type '{}' found or no inheritance relationships.",
+                        params.name
+                    )
                 } else {
                     output
                 }
@@ -759,9 +925,14 @@ impl GraphRagServer {
     // ===== Skill/Knowledge Graph =====
 
     /// Index a folder of markdown skill/knowledge files into the graph
-    #[tool(description = "Index a folder of markdown skill/knowledge files into the graph. Parses YAML frontmatter (description, type, created) and [[wikilinks]] to create a navigable skill graph. Works alongside the code graph — existing tools (explore, backlinks, search) work with skill entities too.")]
+    #[tool(
+        description = "Index a folder of markdown skill/knowledge files into the graph. Parses YAML frontmatter (description, type, created) and [[wikilinks]] to create a navigable skill graph. Works alongside the code graph — existing tools (explore, backlinks, search) work with skill entities too."
+    )]
     async fn index_skill_graph(&self, #[tool(aggr)] params: IndexSkillGraphParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let target_path = ctx.codebase_path.join(&params.path);
 
         if !target_path.is_dir() {
@@ -770,7 +941,10 @@ impl GraphRagServer {
 
         // Optionally clear existing skill data
         if params.clean.unwrap_or(false) {
-            let _ = ctx.db.query("DELETE FROM skill; DELETE FROM links_to;").await;
+            let _ = ctx
+                .db
+                .query("DELETE FROM skill; DELETE FROM links_to;")
+                .await;
         }
 
         let parser = codescope_core::parser::CodeParser::new();
@@ -795,9 +969,12 @@ impl GraphRagServer {
             }
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext != "md" && ext != "mdx" { continue; }
+            if ext != "md" && ext != "mdx" {
+                continue;
+            }
 
-            let rel_path = path.strip_prefix(&base)
+            let rel_path = path
+                .strip_prefix(&base)
                 .unwrap_or(path)
                 .to_string_lossy()
                 .to_string()
@@ -805,12 +982,21 @@ impl GraphRagServer {
 
             match std::fs::read_to_string(path) {
                 Ok(content) => {
-                    match parser.parse_source(std::path::Path::new(&rel_path), &content, &repo_name) {
+                    match parser.parse_source(std::path::Path::new(&rel_path), &content, &repo_name)
+                    {
                         Ok((entities, relations)) => {
-                            let skills = entities.iter()
-                                .filter(|e| matches!(e.kind, codescope_core::EntityKind::SkillNode | codescope_core::EntityKind::SkillMOC))
+                            let skills = entities
+                                .iter()
+                                .filter(|e| {
+                                    matches!(
+                                        e.kind,
+                                        codescope_core::EntityKind::SkillNode
+                                            | codescope_core::EntityKind::SkillMOC
+                                    )
+                                })
                                 .count();
-                            let links = relations.iter()
+                            let links = relations
+                                .iter()
                                 .filter(|r| matches!(r.kind, codescope_core::RelationKind::LinksTo))
                                 .count();
 
@@ -842,9 +1028,14 @@ impl GraphRagServer {
     }
 
     /// Navigate the skill/knowledge graph with progressive disclosure
-    #[tool(description = "Navigate the skill/knowledge graph with progressive disclosure. Start from any skill note and explore connected knowledge. Detail levels: 1=names+descriptions, 2=+links (default), 3=+sections, 4=+full content. Use this to traverse arscontexta-style skill graphs.")]
+    #[tool(
+        description = "Navigate the skill/knowledge graph with progressive disclosure. Start from any skill note and explore connected knowledge. Detail levels: 1=names+descriptions, 2=+links (default), 3=+sections, 4=+full content. Use this to traverse arscontexta-style skill graphs."
+    )]
     async fn traverse_skill_graph(&self, #[tool(aggr)] params: TraverseSkillGraphParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
         let depth = params.depth.unwrap_or(1);
         let detail = params.detail_level.unwrap_or(2);
@@ -860,8 +1051,14 @@ impl GraphRagServer {
                 // Skill header
                 if let Some(skill) = result.get("skill") {
                     let name = skill.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let desc = skill.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let ntype = skill.get("node_type").and_then(|v| v.as_str()).unwrap_or("skill");
+                    let desc = skill
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let ntype = skill
+                        .get("node_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("skill");
                     output.push_str(&format!("# {} [{}]\n\n", name, ntype));
                     if !desc.is_empty() {
                         output.push_str(&format!("{}\n\n", desc));
@@ -874,7 +1071,10 @@ impl GraphRagServer {
                         output.push_str("## Links To\n\n");
                         for link in links {
                             let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let desc = link.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                            let desc = link
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             let ctx = link.get("context").and_then(|v| v.as_str()).unwrap_or("");
                             output.push_str(&format!("- [[{}]]", name));
                             if !desc.is_empty() {
@@ -895,7 +1095,10 @@ impl GraphRagServer {
                         output.push_str("## Linked From\n\n");
                         for link in links {
                             let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let desc = link.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                            let desc = link
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             output.push_str(&format!("- [[{}]]", name));
                             if !desc.is_empty() {
                                 output.push_str(&format!(" — {}", desc));
@@ -928,17 +1131,28 @@ impl GraphRagServer {
     }
 
     /// Auto-generate skill notes from conversation history
-    #[tool(description = "Auto-generate markdown skill notes from conversation history. Extracts decisions, problems, and solutions from indexed conversations and creates arscontexta-compatible skill files with [[wikilinks]] and YAML frontmatter. Creates an index.md MOC file.")]
+    #[tool(
+        description = "Auto-generate markdown skill notes from conversation history. Extracts decisions, problems, and solutions from indexed conversations and creates arscontexta-compatible skill files with [[wikilinks]] and YAML frontmatter. Creates an index.md MOC file."
+    )]
     async fn generate_skill_notes(&self, #[tool(aggr)] params: GenerateSkillNotesParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
-        let output_dir = ctx.codebase_path.join(params.output_dir.as_deref().unwrap_or("skills"));
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+        let output_dir = ctx
+            .codebase_path
+            .join(params.output_dir.as_deref().unwrap_or("skills"));
 
         // Fetch all conversation segments from DB
-        let mut response = match ctx.db.query(
-            "SELECT name, body, kind, timestamp FROM decision; \
+        let mut response = match ctx
+            .db
+            .query(
+                "SELECT name, body, kind, timestamp FROM decision; \
              SELECT name, body, kind, timestamp FROM problem; \
-             SELECT name, body, kind, timestamp FROM solution;"
-        ).await {
+             SELECT name, body, kind, timestamp FROM solution;",
+            )
+            .await
+        {
             Ok(r) => r,
             Err(e) => return format!("Error querying conversations: {}", e),
         };
@@ -949,11 +1163,26 @@ impl GraphRagServer {
 
         // Collect segments
         let mut segments = Vec::new();
-        for (kind, items) in [("decision", &decisions), ("problem", &problems), ("solution", &solutions)] {
+        for (kind, items) in [
+            ("decision", &decisions),
+            ("problem", &problems),
+            ("solution", &solutions),
+        ] {
             for item in items {
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let ts = item.get("timestamp").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let body = item
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ts = item
+                    .get("timestamp")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 if !name.is_empty() {
                     segments.push((kind.to_string(), name, body, ts));
                 }
@@ -965,9 +1194,11 @@ impl GraphRagServer {
         }
 
         // Get known code entity names for wikilink generation
-        let code_refs: Vec<String> = match ctx.db.query(
-            "SELECT VALUE name FROM `function` LIMIT 200"
-        ).await {
+        let code_refs: Vec<String> = match ctx
+            .db
+            .query("SELECT VALUE name FROM `function` LIMIT 200")
+            .await
+        {
             Ok(mut r) => r.take(0).unwrap_or_default(),
             Err(_) => Vec::new(),
         };
@@ -993,7 +1224,11 @@ impl GraphRagServer {
             "Generated {} skill notes in {}\n\nFiles:\n{}",
             written,
             output_dir.display(),
-            files.iter().map(|(f, _)| format!("- {}", f)).collect::<Vec<_>>().join("\n"),
+            files
+                .iter()
+                .map(|(f, _)| format!("- {}", f))
+                .collect::<Vec<_>>()
+                .join("\n"),
         )
     }
 
@@ -1006,10 +1241,16 @@ impl GraphRagServer {
     }
 
     /// Sync git commit history into the graph database for temporal analysis
-    #[tool(description = "Sync git commit history into the graph database. Enables temporal queries like hotspot detection, change coupling, and code evolution tracking.")]
+    #[tool(
+        description = "Sync git commit history into the graph database. Enables temporal queries like hotspot detection, change coupling, and code evolution tracking."
+    )]
     async fn sync_git_history(&self, #[tool(aggr)] params: SyncHistoryParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
-        let git_path = params.git_path
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+        let git_path = params
+            .git_path
             .map(|p| ctx.codebase_path.join(p))
             .unwrap_or_else(|| ctx.codebase_path.clone());
         let limit = params.limit.unwrap_or(200);
@@ -1017,7 +1258,9 @@ impl GraphRagServer {
         let commits = match tokio::task::spawn_blocking(move || {
             let analyzer = codescope_core::temporal::GitAnalyzer::open(&git_path)?;
             analyzer.recent_commits(limit)
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => return format!("Error reading git history: {}", e),
             Err(e) => return format!("Task error: {}", e),
@@ -1031,9 +1274,14 @@ impl GraphRagServer {
     }
 
     /// Detect code hotspots — files/functions with high complexity AND high churn
-    #[tool(description = "Detect code hotspots: functions with high complexity and high change frequency. These are high-risk areas that may need refactoring.")]
+    #[tool(
+        description = "Detect code hotspots: functions with high complexity and high change frequency. These are high-risk areas that may need refactoring."
+    )]
     async fn hotspot_detection(&self, #[tool(aggr)] params: HotspotParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let sync = codescope_core::temporal::TemporalGraphSync::new(ctx.db);
         match sync.calculate_hotspots(&ctx.repo_name).await {
             Ok(hotspots) => {
@@ -1041,7 +1289,8 @@ impl GraphRagServer {
                     return "No hotspots found. Make sure to sync git history first with sync_git_history.".into();
                 }
                 let min_score = params.min_score.unwrap_or(0);
-                let filtered: Vec<_> = hotspots.iter()
+                let filtered: Vec<_> = hotspots
+                    .iter()
                     .filter(|h| h.risk_score.unwrap_or(0) >= min_score)
                     .collect();
 
@@ -1065,16 +1314,23 @@ impl GraphRagServer {
     }
 
     /// Get file churn — most frequently changed files in git history
-    #[tool(description = "Get the most frequently changed files in git history. High-churn files may indicate instability or active development areas.")]
+    #[tool(
+        description = "Get the most frequently changed files in git history. High-churn files may indicate instability or active development areas."
+    )]
     async fn file_churn(&self, #[tool(aggr)] params: ChurnParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(20);
         let git_path = ctx.codebase_path.clone();
 
         match tokio::task::spawn_blocking(move || {
             let analyzer = codescope_core::temporal::GitAnalyzer::open(&git_path)?;
             analyzer.file_churn(limit)
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(churn)) => {
                 let mut output = "## File Churn (Most Changed Files)\n\n".to_string();
                 output.push_str("| Changes | File |\n|---------|------|\n");
@@ -1089,16 +1345,23 @@ impl GraphRagServer {
     }
 
     /// Get change coupling — files that are frequently changed together
-    #[tool(description = "Find files that are frequently changed together in commits. High coupling suggests hidden dependencies or that files should be colocated.")]
+    #[tool(
+        description = "Find files that are frequently changed together in commits. High coupling suggests hidden dependencies or that files should be colocated."
+    )]
     async fn change_coupling(&self, #[tool(aggr)] params: CouplingParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(20);
         let git_path = ctx.codebase_path.clone();
 
         match tokio::task::spawn_blocking(move || {
             let analyzer = codescope_core::temporal::GitAnalyzer::open(&git_path)?;
             analyzer.change_coupling(limit)
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(coupling)) => {
                 let mut output = "## Change Coupling (Files Changed Together)\n\n".to_string();
                 output.push_str("| Count | File A | File B |\n|-------|--------|--------|\n");
@@ -1113,59 +1376,77 @@ impl GraphRagServer {
     }
 
     /// Review a git diff with graph context — analyze which functions and relationships are affected
-    #[tool(description = "Review a git diff with graph context. Shows which functions, classes, and call relationships are affected by changes between two git refs.")]
+    #[tool(
+        description = "Review a git diff with graph context. Shows which functions, classes, and call relationships are affected by changes between two git refs."
+    )]
     async fn review_diff(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
-        let head_ref_str = params.head_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+        let head_ref_str = params
+            .head_ref
+            .clone()
+            .unwrap_or_else(|| "HEAD".to_string());
 
         // Get changed files in blocking task
-        let changed_files = match tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(String, String)>> {
-            let repo = git2::Repository::open(&git_path)?;
-            let base = repo.revparse_single(&base_ref)?;
-            let head = repo.revparse_single(&head_ref_str)?;
-            let base_tree = base.peel_to_tree()?;
-            let head_tree = head.peel_to_tree()?;
-            let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
+        let changed_files =
+            match tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(String, String)>> {
+                let repo = git2::Repository::open(&git_path)?;
+                let base = repo.revparse_single(&base_ref)?;
+                let head = repo.revparse_single(&head_ref_str)?;
+                let base_tree = base.peel_to_tree()?;
+                let head_tree = head.peel_to_tree()?;
+                let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
 
-            let mut files = Vec::new();
-            diff.foreach(
-                &mut |delta, _| {
-                    let path = delta.new_file().path()
-                        .or_else(|| delta.old_file().path())
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    let status = match delta.status() {
-                        git2::Delta::Added => "added",
-                        git2::Delta::Deleted => "deleted",
-                        git2::Delta::Modified => "modified",
-                        git2::Delta::Renamed => "renamed",
-                        _ => "other",
-                    };
-                    files.push((path, status.to_string()));
-                    true
-                },
-                None, None, None,
-            )?;
-            Ok(files)
-        }).await {
-            Ok(Ok(f)) => f,
-            Ok(Err(e)) => return format!("Error computing diff: {}", e),
-            Err(e) => return format!("Task error: {}", e),
-        };
+                let mut files = Vec::new();
+                diff.foreach(
+                    &mut |delta, _| {
+                        let path = delta
+                            .new_file()
+                            .path()
+                            .or_else(|| delta.old_file().path())
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let status = match delta.status() {
+                            git2::Delta::Added => "added",
+                            git2::Delta::Deleted => "deleted",
+                            git2::Delta::Modified => "modified",
+                            git2::Delta::Renamed => "renamed",
+                            _ => "other",
+                        };
+                        files.push((path, status.to_string()));
+                        true
+                    },
+                    None,
+                    None,
+                    None,
+                )?;
+                Ok(files)
+            })
+            .await
+            {
+                Ok(Ok(f)) => f,
+                Ok(Err(e)) => return format!("Error computing diff: {}", e),
+                Err(e) => return format!("Task error: {}", e),
+            };
 
         let gq = GraphQuery::new(ctx.db);
         let head_display = params.head_ref.as_deref().unwrap_or("HEAD");
 
         let mut output = format!(
             "## Diff Review: {} → {}\n\n**{} files changed**\n\n",
-            params.base_ref, head_display, changed_files.len()
+            params.base_ref,
+            head_display,
+            changed_files.len()
         );
 
         // Batch query: get ALL entities for ALL changed files in one DB call (not N+1)
         if !changed_files.is_empty() {
-            let file_list = changed_files.iter()
+            let file_list = changed_files
+                .iter()
                 .map(|(fp, _)| format!("'{}'", fp.replace('\'', "\\'")))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -1183,12 +1464,18 @@ impl GraphRagServer {
                     for stmt_result in arr {
                         if let Some(rows) = stmt_result.as_array() {
                             for row in rows {
-                                let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+                                let fp =
+                                    row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                                 let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let sl = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                                let el = row.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                                entities_by_file.entry(fp.to_string()).or_default()
-                                    .push((name.to_string(), sl, el));
+                                let sl = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0)
+                                    as u32;
+                                let el = row.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0)
+                                    as u32;
+                                entities_by_file.entry(fp.to_string()).or_default().push((
+                                    name.to_string(),
+                                    sl,
+                                    el,
+                                ));
                             }
                         }
                     }
@@ -1207,20 +1494,30 @@ impl GraphRagServer {
             }
         }
 
-        output.push_str(&format!("\n---\n**Summary:** {} files affected.\n", changed_files.len()));
+        output.push_str(&format!(
+            "\n---\n**Summary:** {} files affected.\n",
+            changed_files.len()
+        ));
         output
     }
 
     /// Get contributor expertise map — who knows which parts of the codebase
-    #[tool(description = "Get a contributor expertise map showing who has the most knowledge about which files. Useful for finding the right reviewer for a change.")]
+    #[tool(
+        description = "Get a contributor expertise map showing who has the most knowledge about which files. Useful for finding the right reviewer for a change."
+    )]
     async fn contributor_map(&self) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let git_path = ctx.codebase_path.clone();
 
         match tokio::task::spawn_blocking(move || {
             let analyzer = codescope_core::temporal::GitAnalyzer::open(&git_path)?;
             analyzer.contributor_map()
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(map)) => {
                 let mut output = "## Contributor Expertise Map\n\n".to_string();
                 for (author, files) in &map {
@@ -1241,12 +1538,20 @@ impl GraphRagServer {
     }
 
     /// Suggest reviewers for changed files based on git history
-    #[tool(description = "Suggest code reviewers for a set of changed files based on who has the most expertise with those files.")]
+    #[tool(
+        description = "Suggest code reviewers for a set of changed files based on who has the most expertise with those files."
+    )]
     async fn suggest_reviewers(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
-        let head_ref_str = params.head_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+        let head_ref_str = params
+            .head_ref
+            .clone()
+            .unwrap_or_else(|| "HEAD".to_string());
 
         // All git2 work in blocking task
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<String>, std::collections::HashMap<String, Vec<(String, usize)>>)> {
@@ -1268,7 +1573,7 @@ impl GraphRagServer {
                 None, None, None,
             )?;
 
-            let analyzer = codescope_core::temporal::GitAnalyzer::open(&repo.path().parent().unwrap_or(repo.path()))?;
+            let analyzer = codescope_core::temporal::GitAnalyzer::open(repo.path().parent().unwrap_or(repo.path()))?;
             let contributor_map = analyzer.contributor_map()?;
 
             Ok((changed_files, contributor_map))
@@ -1280,10 +1585,14 @@ impl GraphRagServer {
             Err(e) => return format!("Task error: {}", e),
         };
 
-        let mut reviewer_scores: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut reviewer_scores: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for (author, files) in &contributor_map {
             for (file, count) in files {
-                if changed_files.iter().any(|cf| file.contains(cf) || cf.contains(file)) {
+                if changed_files
+                    .iter()
+                    .any(|cf| file.contains(cf) || cf.contains(file))
+                {
                     *reviewer_scores.entry(author.clone()).or_insert(0) += count;
                 }
             }
@@ -1295,7 +1604,9 @@ impl GraphRagServer {
         let head_display = params.head_ref.as_deref().unwrap_or("HEAD");
         let mut output = format!(
             "## Suggested Reviewers for {} → {}\n\n**{} files changed**\n\n",
-            params.base_ref, head_display, changed_files.len()
+            params.base_ref,
+            head_display,
+            changed_files.len()
         );
 
         if reviewers.is_empty() {
@@ -1311,61 +1622,99 @@ impl GraphRagServer {
     }
 
     /// Translate a natural language question to a SurrealQL query and execute it
-    #[tool(description = "Ask a question about the codebase in natural language. Translates to a graph query and returns results. Examples: 'what functions are in main.rs?', 'find all structs', 'show call graph for parse_file'")]
+    #[tool(
+        description = "Ask a question about the codebase in natural language. Translates to a graph query and returns results. Examples: 'what functions are in main.rs?', 'find all structs', 'show call graph for parse_file'"
+    )]
     async fn ask(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let question = params.question.to_lowercase();
 
         // Sanitize user input for safe SurrealQL interpolation
-        let sanitize = |s: &str| -> String {
-            s.replace('\'', "")
-             .replace('\\', "")
-             .replace(';', "")
-             .replace("--", "")
-        };
+        let sanitize = |s: &str| -> String { s.replace(['\'', '\\', ';'], "").replace("--", "") };
 
         // Pattern matching for common questions — all parameterized where possible
-        let (surql, binds): (String, Vec<(&str, String)>) =
-            if question.contains("how many") && question.contains("file") {
-                ("SELECT count() FROM file GROUP ALL".into(), vec![])
-            } else if question.contains("how many") && question.contains("function") {
-                ("SELECT count() FROM `function` GROUP ALL".into(), vec![])
-            } else if question.contains("how many") && question.contains("class") {
-                ("SELECT count() FROM class GROUP ALL".into(), vec![])
-            } else if question.contains("all function") || question.contains("list function") {
-                ("SELECT name, file_path, start_line FROM `function` ORDER BY name LIMIT 50".into(), vec![])
-            } else if question.contains("all class") || question.contains("list class") || question.contains("all struct") || question.contains("list struct") {
-                ("SELECT name, kind, file_path, start_line FROM class ORDER BY name LIMIT 50".into(), vec![])
-            } else if question.contains("all file") || question.contains("list file") {
-                ("SELECT path, language, line_count FROM file ORDER BY path LIMIT 50".into(), vec![])
-            } else if question.contains("call graph") || question.contains("calls") {
-                let words: Vec<&str> = question.split_whitespace().collect();
-                if let Some(idx) = words.iter().position(|w| *w == "for" || *w == "of") {
-                    let func_name = sanitize(&words[idx + 1..].join(" ").trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string());
-                    ("SELECT ->calls->`function`.name AS calls FROM `function` WHERE name = $name".into(),
-                     vec![("name", func_name)])
-                } else {
-                    ("SELECT *, ->calls->`function`.name AS calls FROM `function` WHERE array::len(->calls) > 0 LIMIT 20".into(), vec![])
-                }
-            } else if question.contains("in file") || question.contains("in ") && question.contains(".rs") || question.contains(".ts") || question.contains(".py") {
-                let path = sanitize(&extract_path_from_question(&question));
-                ("SELECT name, qualified_name, start_line, end_line FROM `function` WHERE file_path CONTAINS $path \
+        let (surql, binds): (String, Vec<(&str, String)>) = if question.contains("how many")
+            && question.contains("file")
+        {
+            ("SELECT count() FROM file GROUP ALL".into(), vec![])
+        } else if question.contains("how many") && question.contains("function") {
+            ("SELECT count() FROM `function` GROUP ALL".into(), vec![])
+        } else if question.contains("how many") && question.contains("class") {
+            ("SELECT count() FROM class GROUP ALL".into(), vec![])
+        } else if question.contains("all function") || question.contains("list function") {
+            (
+                "SELECT name, file_path, start_line FROM `function` ORDER BY name LIMIT 50".into(),
+                vec![],
+            )
+        } else if question.contains("all class")
+            || question.contains("list class")
+            || question.contains("all struct")
+            || question.contains("list struct")
+        {
+            (
+                "SELECT name, kind, file_path, start_line FROM class ORDER BY name LIMIT 50".into(),
+                vec![],
+            )
+        } else if question.contains("all file") || question.contains("list file") {
+            (
+                "SELECT path, language, line_count FROM file ORDER BY path LIMIT 50".into(),
+                vec![],
+            )
+        } else if question.contains("call graph") || question.contains("calls") {
+            let words: Vec<&str> = question.split_whitespace().collect();
+            if let Some(idx) = words.iter().position(|w| *w == "for" || *w == "of") {
+                let func_name = sanitize(
+                    words[idx + 1..]
+                        .join(" ")
+                        .trim_matches(|c: char| !c.is_alphanumeric() && c != '_'),
+                );
+                (
+                    "SELECT ->calls->`function`.name AS calls FROM `function` WHERE name = $name"
+                        .into(),
+                    vec![("name", func_name)],
+                )
+            } else {
+                ("SELECT *, ->calls->`function`.name AS calls FROM `function` WHERE array::len(->calls) > 0 LIMIT 20".into(), vec![])
+            }
+        } else if question.contains("in file")
+            || question.contains("in ") && question.contains(".rs")
+            || question.contains(".ts")
+            || question.contains(".py")
+        {
+            let path = sanitize(&extract_path_from_question(&question));
+            ("SELECT name, qualified_name, start_line, end_line FROM `function` WHERE file_path CONTAINS $path \
                   UNION \
                   SELECT name, qualified_name, start_line, end_line FROM class WHERE file_path CONTAINS $path".into(),
                  vec![("path", path)])
-            } else if question.contains("largest") || question.contains("biggest") || question.contains("longest") {
-                ("SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".into(), vec![])
-            } else if question.contains("import") {
-                ("SELECT name, file_path FROM import_decl ORDER BY file_path LIMIT 50".into(), vec![])
-            } else {
-                let search_term = question.split_whitespace()
-                    .filter(|w| w.len() > 3 && !["what", "where", "which", "find", "show", "list", "does", "that", "this", "from", "with"].contains(w))
-                    .next()
-                    .unwrap_or(&question);
-                let safe_term = sanitize(search_term);
-                ("SELECT name, file_path, start_line, signature FROM `function` WHERE name ~ $term LIMIT 20".into(),
+        } else if question.contains("largest")
+            || question.contains("biggest")
+            || question.contains("longest")
+        {
+            ("SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".into(), vec![])
+        } else if question.contains("import") {
+            (
+                "SELECT name, file_path FROM import_decl ORDER BY file_path LIMIT 50".into(),
+                vec![],
+            )
+        } else {
+            let search_term = question
+                .split_whitespace()
+                .find(|w| {
+                    w.len() > 3
+                        && ![
+                            "what", "where", "which", "find", "show", "list", "does", "that",
+                            "this", "from", "with",
+                        ]
+                        .contains(w)
+                })
+                .unwrap_or(&question);
+            let safe_term = sanitize(search_term);
+            ("SELECT name, file_path, start_line, signature FROM `function` WHERE name ~ $term LIMIT 20".into(),
                  vec![("term", safe_term)])
-            };
+        };
 
         // Build parameterized query
         let mut query = ctx.db.query(&surql);
@@ -1387,11 +1736,16 @@ impl GraphRagServer {
     // ===== Obsidian-like Context Exploration Tools =====
 
     /// Explore an entity's full graph neighborhood — like Obsidian's local graph view
-    #[tool(description = "Explore the full neighborhood of any entity (function, class, config, doc, package, file). \
+    #[tool(
+        description = "Explore the full neighborhood of any entity (function, class, config, doc, package, file). \
         Shows all connections: callers, callees, sibling functions, containing file, related configs/docs. \
-        Use this to deeply understand how any piece of code or config fits into the system.")]
+        Use this to deeply understand how any piece of code or config fits into the system."
+    )]
     async fn explore(&self, #[tool(aggr)] params: ExploreParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.explore(&params.name).await {
@@ -1479,10 +1833,15 @@ impl GraphRagServer {
     }
 
     /// Get full context for a file — like opening an Obsidian note with all linked content
-    #[tool(description = "Get complete context for a file: all functions (with external callers), classes, imports, configs, docs, and packages. \
-        Shows cross-file connections. Use this to understand a file's role in the system before reading or modifying it.")]
+    #[tool(
+        description = "Get complete context for a file: all functions (with external callers), classes, imports, configs, docs, and packages. \
+        Shows cross-file connections. Use this to understand a file's role in the system before reading or modifying it."
+    )]
     async fn context_bundle(&self, #[tool(aggr)] params: ContextBundleParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.file_context(&params.file_path).await {
@@ -1493,7 +1852,10 @@ impl GraphRagServer {
                 if let Some(file) = result.get("file") {
                     let lang = file.get("language").and_then(|v| v.as_str()).unwrap_or("?");
                     let lines = file.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("**Language:** {} | **Lines:** {}\n\n", lang, lines));
+                    output.push_str(&format!(
+                        "**Language:** {} | **Lines:** {}\n\n",
+                        lang, lines
+                    ));
                 }
 
                 // Functions with cross-file callers
@@ -1513,7 +1875,10 @@ impl GraphRagServer {
                         if let Some(ext) = f.get("external_callers").and_then(|v| v.as_array()) {
                             for caller in ext {
                                 let cn = caller.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let cf = caller.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                let cf = caller
+                                    .get("file_path")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
                                 output.push_str(&format!("    ← called by **{}** ({})\n", cn, cf));
                             }
                         }
@@ -1547,7 +1912,12 @@ impl GraphRagServer {
                 }
 
                 // Configs, Docs, Packages, Infra
-                for (key, label) in [("configs", "Config"), ("docs", "Documentation"), ("packages", "Packages"), ("infra", "Infrastructure")] {
+                for (key, label) in [
+                    ("configs", "Config"),
+                    ("docs", "Documentation"),
+                    ("packages", "Packages"),
+                    ("infra", "Infrastructure"),
+                ] {
                     if let Some(items) = result.get(key).and_then(|v| v.as_array()) {
                         output.push_str(&format!("### {} ({})\n", label, items.len()));
                         for item in items {
@@ -1566,18 +1936,27 @@ impl GraphRagServer {
     }
 
     /// Search across ALL entity types — universal knowledge graph search
-    #[tool(description = "Search across the entire knowledge graph: code, configs, docs, packages, infrastructure. \
+    #[tool(
+        description = "Search across the entire knowledge graph: code, configs, docs, packages, infrastructure. \
         Unlike search_functions which only searches functions, this searches everything. \
-        Use this when you need to find all mentions of a concept across code AND non-code files.")]
+        Use this when you need to find all mentions of a concept across code AND non-code files."
+    )]
     async fn related(&self, #[tool(aggr)] params: RelatedParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
         let limit = params.limit.unwrap_or(10);
 
         match gq.cross_search(&params.keyword, limit).await {
             Ok(result) => {
-                let total = result.get("total_results").and_then(|v| v.as_u64()).unwrap_or(0);
-                let mut output = format!("## Related: '{}' ({} results)\n\n", params.keyword, total);
+                let total = result
+                    .get("total_results")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let mut output =
+                    format!("## Related: '{}' ({} results)\n\n", params.keyword, total);
 
                 for (key, icon, label) in [
                     ("functions", "fn", "Functions"),
@@ -1611,16 +1990,24 @@ impl GraphRagServer {
     }
 
     /// Find all entities that reference/link to a given entity — Obsidian-like backlinks
-    #[tool(description = "Find all backlinks to an entity: who calls it, who imports it, what file contains it, what depends on it. \
+    #[tool(
+        description = "Find all backlinks to an entity: who calls it, who imports it, what file contains it, what depends on it. \
         Like Obsidian's backlinks panel — shows everything that points TO this entity. \
-        Use this to understand the impact of changing something.")]
+        Use this to understand the impact of changing something."
+    )]
     async fn backlinks(&self, #[tool(aggr)] params: BacklinksParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let gq = GraphQuery::new(ctx.db);
 
         match gq.backlinks(&params.name).await {
             Ok(result) => {
-                let total = result.get("total_backlinks").and_then(|v| v.as_u64()).unwrap_or(0);
+                let total = result
+                    .get("total_backlinks")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let mut output = format!("## Backlinks: {} ({} links)\n\n", params.name, total);
 
                 if let Some(callers) = result.get("callers").and_then(|v| v.as_array()) {
@@ -1680,12 +2067,17 @@ impl GraphRagServer {
     // ===== Conversation Memory Tools =====
 
     /// Index Claude Code conversation transcripts into the knowledge graph
-    #[tool(description = "Index Claude Code conversation history into the knowledge graph. \
+    #[tool(
+        description = "Index Claude Code conversation history into the knowledge graph. \
         Extracts decisions, problems, solutions, and discussion topics from JSONL transcripts. \
         Links them to code entities (functions, classes, files) mentioned in conversations. \
-        After indexing, use conversation_search to query past decisions and problem-solving history.")]
+        After indexing, use conversation_search to query past decisions and problem-solving history."
+    )]
     async fn index_conversations(&self, #[tool(aggr)] params: IndexConversationsParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
 
         // Auto-detect Claude projects directory
         let project_dir = if let Some(dir) = params.project_dir {
@@ -1695,7 +2087,9 @@ impl GraphRagServer {
             let claude_projects = home.join(".claude").join("projects");
 
             // Find project dir matching codebase path
-            let codebase_str = ctx.codebase_path.to_string_lossy()
+            let codebase_str = ctx
+                .codebase_path
+                .to_string_lossy()
                 .replace(['/', '\\', ':'], "-")
                 .replace("--", "-");
 
@@ -1705,7 +2099,10 @@ impl GraphRagServer {
                     for entry in entries.flatten() {
                         let name = entry.file_name().to_string_lossy().to_string();
                         // Match project directory by checking if it contains path components
-                        if name.contains(&ctx.repo_name) || codebase_str.contains(&name) || name.contains("graph-rag") {
+                        if name.contains(&ctx.repo_name)
+                            || codebase_str.contains(&name)
+                            || name.contains("graph-rag")
+                        {
                             found = Some(entry.path());
                             break;
                         }
@@ -1721,7 +2118,8 @@ impl GraphRagServer {
             Ok(entries) => entries
                 .flatten()
                 .filter(|e| {
-                    e.path().extension()
+                    e.path()
+                        .extension()
                         .map(|ext| ext == "jsonl")
                         .unwrap_or(false)
                 })
@@ -1731,7 +2129,10 @@ impl GraphRagServer {
         };
 
         if jsonl_files.is_empty() {
-            return format!("No JSONL conversation files found in {}", project_dir.display());
+            return format!(
+                "No JSONL conversation files found in {}",
+                project_dir.display()
+            );
         }
 
         // Load known entities for code linking
@@ -1741,27 +2142,30 @@ impl GraphRagServer {
         let mut total_result = codescope_core::conversation::ConvIndexResult::default();
 
         for jsonl_path in &jsonl_files {
-            let jsonl_name = jsonl_path.file_name()
+            let jsonl_name = jsonl_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown.jsonl")
                 .to_string();
 
             // Incremental: check if this file is already indexed with same hash
-            if let Ok(existing) = check_conversation_hash(&ctx.db, &jsonl_name).await {
-                if let Some(stored_hash) = existing {
-                    // Compute current file hash
-                    if let Ok(content) = std::fs::read(jsonl_path) {
-                        use sha2::{Digest, Sha256};
-                        let current_hash = hex::encode(Sha256::digest(&content));
-                        if stored_hash == current_hash {
-                            total_result.skipped += 1;
-                            continue;
-                        }
+            if let Ok(Some(stored_hash)) = check_conversation_hash(&ctx.db, &jsonl_name).await {
+                // Compute current file hash
+                if let Ok(content) = std::fs::read(jsonl_path) {
+                    use sha2::{Digest, Sha256};
+                    let current_hash = hex::encode(Sha256::digest(&content));
+                    if stored_hash == current_hash {
+                        total_result.skipped += 1;
+                        continue;
                     }
                 }
             }
 
-            match codescope_core::conversation::parse_conversation(jsonl_path, &ctx.repo_name, &known_entities) {
+            match codescope_core::conversation::parse_conversation(
+                jsonl_path,
+                &ctx.repo_name,
+                &known_entities,
+            ) {
                 Ok((entities, relations, result)) => {
                     let _ = builder.insert_entities(&entities).await;
                     let _ = builder.insert_relations(&relations).await;
@@ -1786,14 +2190,22 @@ impl GraphRagServer {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().map(|e| e == "md").unwrap_or(false) {
-                        match codescope_core::conversation::parse_memory_file(&path, &ctx.repo_name, &known_entities) {
+                        match codescope_core::conversation::parse_memory_file(
+                            &path,
+                            &ctx.repo_name,
+                            &known_entities,
+                        ) {
                             Ok((entities, relations)) => {
                                 let _ = builder.insert_entities(&entities).await;
                                 let _ = builder.insert_relations(&relations).await;
                                 memory_count += 1;
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to parse memory file {}: {}", path.display(), e);
+                                tracing::warn!(
+                                    "Failed to parse memory file {}: {}",
+                                    path.display(),
+                                    e
+                                );
                             }
                         }
                     }
@@ -1830,11 +2242,16 @@ impl GraphRagServer {
     }
 
     /// Search conversation history — find past decisions, problems, and solutions
-    #[tool(description = "Search conversation history for decisions, problems, solutions, and discussion topics. \
+    #[tool(
+        description = "Search conversation history for decisions, problems, solutions, and discussion topics. \
         Finds what was discussed about specific code entities, what decisions were made, and how problems were solved. \
-        Like Obsidian search across your AI conversation notes. Index conversations first with index_conversations.")]
+        Like Obsidian search across your AI conversation notes. Index conversations first with index_conversations."
+    )]
     async fn conversation_search(&self, #[tool(aggr)] params: ConversationSearchParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(20) as u32;
         let filter_type = params.entity_type.as_deref().unwrap_or("all");
 
@@ -1858,26 +2275,29 @@ impl GraphRagServer {
                 table, table
             );
 
-            match ctx.db.query(&query)
+            if let Ok(mut response) = ctx
+                .db
+                .query(&query)
                 .bind(("kw", params.query.clone()))
                 .bind(("lim", limit))
                 .await
             {
-                Ok(mut response) => {
-                    let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-                    all_results.extend(results);
-                }
-                Err(_) => {}
+                let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                all_results.extend(results);
             }
         }
 
         // Also search via code entity links (discussed_in, decided_about)
         if filter_type == "all" || filter_type == "decision" {
-            let link_query = format!(
-                "SELECT <-decided_about<-decision.{{name, body}} AS linked_decisions \
+            let link_query = "SELECT <-decided_about<-decision.{name, body} AS linked_decisions \
                  FROM `function` WHERE name = $kw LIMIT 1;"
-            );
-            if let Ok(mut resp) = ctx.db.query(&link_query).bind(("kw", params.query.clone())).await {
+                .to_string();
+            if let Ok(mut resp) = ctx
+                .db
+                .query(&link_query)
+                .bind(("kw", params.query.clone()))
+                .await
+            {
                 let linked: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
                 if !linked.is_empty() {
                     all_results.push(serde_json::json!({
@@ -1890,7 +2310,10 @@ impl GraphRagServer {
         }
 
         if all_results.is_empty() {
-            return format!("No conversation history found for '{}'. Run index_conversations first.", params.query);
+            return format!(
+                "No conversation history found for '{}'. Run index_conversations first.",
+                params.query
+            );
         }
 
         let mut output = format!("## Conversation History: '{}'\n\n", params.query);
@@ -1923,11 +2346,19 @@ impl GraphRagServer {
     // ===== Temporal Conversation Query =====
 
     /// Search conversation history by time — find what was discussed about an entity recently
-    #[tool(description = "Search conversation history over time for a specific code entity. \
+    #[tool(
+        description = "Search conversation history over time for a specific code entity. \
         Shows decisions, problems, and solutions related to a function/class/file, ordered by time. \
-        Use to answer 'what did we discuss about X last week?' or 'when was this function last changed?'.")]
-    async fn conversation_timeline(&self, #[tool(aggr)] params: ConversationTimelineParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        Use to answer 'what did we discuss about X last week?' or 'when was this function last changed?'."
+    )]
+    async fn conversation_timeline(
+        &self,
+        #[tool(aggr)] params: ConversationTimelineParams,
+    ) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(20) as u32;
         let _days_back = params.days_back.unwrap_or(30);
         let name = params.entity_name.clone();
@@ -1943,7 +2374,9 @@ impl GraphRagServer {
                  ORDER BY timestamp DESC LIMIT $lim",
                 table, table
             );
-            if let Ok(mut resp) = ctx.db.query(&query)
+            if let Ok(mut resp) = ctx
+                .db
+                .query(&query)
                 .bind(("name", name.clone()))
                 .bind(("lim", limit))
                 .await
@@ -1970,7 +2403,10 @@ impl GraphRagServer {
         }
 
         if all_results.is_empty() {
-            return format!("No conversation history found for '{}'. Run index_conversations first.", name);
+            return format!(
+                "No conversation history found for '{}'. Run index_conversations first.",
+                name
+            );
         }
 
         let mut output = format!("## Timeline: '{}'\n\n", name);
@@ -1978,7 +2414,10 @@ impl GraphRagServer {
         for item in &all_results {
             let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("?");
             let item_name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            let timestamp = item.get("timestamp").and_then(|v| v.as_str()).unwrap_or("?");
+            let timestamp = item
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
             let icon = match item_type {
@@ -2004,27 +2443,32 @@ impl GraphRagServer {
     // ===== Semantic Search Tools =====
 
     /// Generate embeddings for all functions in the graph
-    #[tool(description = "Generate vector embeddings for all functions that don't have them yet. \
+    #[tool(
+        description = "Generate vector embeddings for all functions that don't have them yet. \
         Uses local FastEmbed by default (no external service needed). \
-        Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'.")]
+        Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'."
+    )]
     async fn embed_functions(&self, #[tool(aggr)] params: EmbedParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let batch_size = params.batch_size.unwrap_or(100);
         let provider_name = params.provider.as_deref().unwrap_or("fastembed");
 
         let provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider_name {
-            "ollama" => {
-                Box::new(codescope_core::embeddings::OllamaProvider::new(
-                    Some("http://localhost:11434".into()),
-                    Some("nomic-embed-text".into()),
-                ))
-            }
+            "ollama" => Box::new(codescope_core::embeddings::OllamaProvider::new(
+                Some("http://localhost:11434".into()),
+                Some("nomic-embed-text".into()),
+            )),
             "openai" => {
                 let api_key = match std::env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
                     Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
                 };
-                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(
+                    api_key, None,
+                ))
             }
             _ => {
                 // FastEmbed — local, no external service
@@ -2043,7 +2487,7 @@ impl GraphRagServer {
                 // Also backfill BQ for any pre-existing embeddings without binary vectors
                 let backfilled = pipeline.backfill_binary_quantization().await.unwrap_or(0);
                 let dims = pipeline.dimensions();
-                let bq_bytes = (dims + 7) / 8;
+                let bq_bytes = dims.div_ceil(8);
 
                 format!(
                     "## Embedding Complete\n\n\
@@ -2052,9 +2496,13 @@ impl GraphRagServer {
                      - **Memory per vector:** f32 = {} bytes, BQ = {} bytes (**{}x smaller**)\n\
                      - **Provider:** {}\n\
                      - **Search mode:** Two-stage (Hamming pre-filter → Cosine rerank)",
-                    result.embedded, dims,
-                    result.binary_quantized, backfilled,
-                    dims * 4, bq_bytes, (dims * 4) / bq_bytes,
+                    result.embedded,
+                    dims,
+                    result.binary_quantized,
+                    backfilled,
+                    dims * 4,
+                    bq_bytes,
+                    (dims * 4) / bq_bytes,
                     pipeline.provider_name()
                 )
             }
@@ -2063,34 +2511,37 @@ impl GraphRagServer {
     }
 
     /// Search for semantically similar code using vector embeddings
-    #[tool(description = "Search for code by meaning, not just name. Finds semantically similar functions \
+    #[tool(
+        description = "Search for code by meaning, not just name. Finds semantically similar functions \
         using vector embeddings. Run embed_functions first to generate embeddings. \
-        Example: 'parse configuration file' finds all config-parsing functions regardless of naming.")]
+        Example: 'parse configuration file' finds all config-parsing functions regardless of naming."
+    )]
     async fn semantic_search(&self, #[tool(aggr)] params: SemanticSearchParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(10);
         let provider_name = params.provider.as_deref().unwrap_or("fastembed");
 
         let provider: Box<dyn codescope_core::embeddings::EmbeddingProvider> = match provider_name {
-            "ollama" => {
-                Box::new(codescope_core::embeddings::OllamaProvider::new(
-                    Some("http://localhost:11434".into()),
-                    Some("nomic-embed-text".into()),
-                ))
-            }
+            "ollama" => Box::new(codescope_core::embeddings::OllamaProvider::new(
+                Some("http://localhost:11434".into()),
+                Some("nomic-embed-text".into()),
+            )),
             "openai" => {
                 let api_key = match std::env::var("OPENAI_API_KEY") {
                     Ok(k) => k,
                     Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
                 };
-                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(
+                    api_key, None,
+                ))
             }
-            _ => {
-                match codescope_core::embeddings::FastEmbedProvider::new() {
-                    Ok(p) => Box::new(p),
-                    Err(e) => return format!("Error creating FastEmbed provider: {}", e),
-                }
-            }
+            _ => match codescope_core::embeddings::FastEmbedProvider::new() {
+                Ok(p) => Box::new(p),
+                Err(e) => return format!("Error creating FastEmbed provider: {}", e),
+            },
         };
 
         let pipeline = codescope_core::embeddings::EmbeddingPipeline::new(ctx.db, provider);
@@ -2104,11 +2555,24 @@ impl GraphRagServer {
                     );
                 }
                 let has_bq = results.first().and_then(|r| r.hamming_distance).is_some();
-                let mode = if has_bq { "BQ + Cosine (two-stage)" } else { "Cosine only" };
-                let mut output = format!("## Semantic Search: '{}'\n**Mode:** {}\n\n", params.query, mode);
+                let mode = if has_bq {
+                    "BQ + Cosine (two-stage)"
+                } else {
+                    "Cosine only"
+                };
+                let mut output = format!(
+                    "## Semantic Search: '{}'\n**Mode:** {}\n\n",
+                    params.query, mode
+                );
                 for (i, r) in results.iter().enumerate() {
-                    let score = r.score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "?".into());
-                    let hamming = r.hamming_distance.map(|h| format!(" (hamming: {})", h)).unwrap_or_default();
+                    let score = r
+                        .score
+                        .map(|s| format!("{:.3}", s))
+                        .unwrap_or_else(|| "?".into());
+                    let hamming = r
+                        .hamming_distance
+                        .map(|h| format!(" (hamming: {})", h))
+                        .unwrap_or_default();
                     output.push_str(&format!(
                         "{}. **{}** ({}) — cosine: {}{}\n",
                         i + 1,
@@ -2130,11 +2594,16 @@ impl GraphRagServer {
     // ===== Code Quality Tools =====
 
     /// Find potentially dead code — functions with zero callers
-    #[tool(description = "Find dead code: functions that are never called by any other function. \
+    #[tool(
+        description = "Find dead code: functions that are never called by any other function. \
         Filters out known entry points (main, test functions, handlers, constructors). \
-        Useful for codebase cleanup and reducing maintenance burden.")]
+        Useful for codebase cleanup and reducing maintenance burden."
+    )]
     async fn find_dead_code(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let min_lines = params.min_lines.unwrap_or(3);
         let limit = params.limit.unwrap_or(50);
 
@@ -2166,10 +2635,14 @@ impl GraphRagServer {
             Ok(mut response) => {
                 let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
                 if results.is_empty() {
-                    return "No dead code found (all functions have callers or are entry points).".into();
+                    return "No dead code found (all functions have callers or are entry points)."
+                        .into();
                 }
 
-                let mut output = format!("## Dead Code: {} potentially unused functions\n\n", results.len());
+                let mut output = format!(
+                    "## Dead Code: {} potentially unused functions\n\n",
+                    results.len()
+                );
                 output.push_str("| # | Function | File | Lines | Size |\n");
                 output.push_str("|---|----------|------|-------|------|\n");
 
@@ -2180,7 +2653,11 @@ impl GraphRagServer {
                     let size = r.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
                     output.push_str(&format!(
                         "| {} | **{}** | {} | L{} | {} lines |\n",
-                        i + 1, name, fp, start, size
+                        i + 1,
+                        name,
+                        fp,
+                        start,
+                        size
                     ));
                 }
 
@@ -2197,11 +2674,16 @@ impl GraphRagServer {
     // ===== Team Intelligence Tools =====
 
     /// Detect team coding patterns from the codebase
-    #[tool(description = "Detect team coding patterns: naming conventions, import styles, file structure patterns, \
+    #[tool(
+        description = "Detect team coding patterns: naming conventions, import styles, file structure patterns, \
         and common architectural patterns. Analyzes the actual codebase to learn how the team codes. \
-        Use this to understand conventions before writing new code.")]
+        Use this to understand conventions before writing new code."
+    )]
     async fn team_patterns(&self, #[tool(aggr)] params: TeamPatternsParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let focus = params.focus.as_deref().unwrap_or("all");
         let mut output = "## Team Coding Patterns\n\n".to_string();
 
@@ -2210,19 +2692,40 @@ impl GraphRagServer {
             let naming_q = "SELECT name, language, file_path FROM `function` LIMIT 200";
             if let Ok(mut r) = ctx.db.query(naming_q).await {
                 let fns: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-                let mut snake = 0; let mut camel = 0; let mut pascal = 0;
+                let mut snake = 0;
+                let mut camel = 0;
+                let mut pascal = 0;
                 for f in &fns {
                     let n = f.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    if n.contains('_') { snake += 1; }
-                    else if n.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) { camel += 1; }
-                    else { pascal += 1; }
+                    if n.contains('_') {
+                        snake += 1;
+                    } else if n.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+                        camel += 1;
+                    } else {
+                        pascal += 1;
+                    }
                 }
                 let total = snake + camel + pascal;
                 if total > 0 {
                     output.push_str("### Naming Conventions\n");
-                    output.push_str(&format!("- snake_case: {}% ({}/{})\n", snake*100/total, snake, total));
-                    output.push_str(&format!("- camelCase: {}% ({}/{})\n", camel*100/total, camel, total));
-                    output.push_str(&format!("- PascalCase: {}% ({}/{})\n\n", pascal*100/total, pascal, total));
+                    output.push_str(&format!(
+                        "- snake_case: {}% ({}/{})\n",
+                        snake * 100 / total,
+                        snake,
+                        total
+                    ));
+                    output.push_str(&format!(
+                        "- camelCase: {}% ({}/{})\n",
+                        camel * 100 / total,
+                        camel,
+                        total
+                    ));
+                    output.push_str(&format!(
+                        "- PascalCase: {}% ({}/{})\n\n",
+                        pascal * 100 / total,
+                        pascal,
+                        total
+                    ));
                 }
             }
         }
@@ -2234,19 +2737,28 @@ impl GraphRagServer {
                 let imports: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                 if !imports.is_empty() {
                     output.push_str("### Import Patterns\n");
-                    let mut patterns: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    let mut patterns: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
                     for imp in &imports {
                         let body = imp.get("body").and_then(|v| v.as_str()).unwrap_or("");
-                        let pattern = if body.contains("from ") { "ES module (from)" }
-                            else if body.contains("require(") { "CommonJS (require)" }
-                            else if body.contains("use ") { "Rust (use)" }
-                            else if body.contains("import ") { "import statement" }
-                            else { "other" };
+                        let pattern = if body.contains("from ") {
+                            "ES module (from)"
+                        } else if body.contains("require(") {
+                            "CommonJS (require)"
+                        } else if body.contains("use ") {
+                            "Rust (use)"
+                        } else if body.contains("import ") {
+                            "import statement"
+                        } else {
+                            "other"
+                        };
                         *patterns.entry(pattern.to_string()).or_insert(0) += 1;
                     }
                     let mut sorted: Vec<_> = patterns.into_iter().collect();
-                    sorted.sort_by(|a,b| b.1.cmp(&a.1));
-                    for (p,c) in &sorted { output.push_str(&format!("- {}: {} occurrences\n", p, c)); }
+                    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                    for (p, c) in &sorted {
+                        output.push_str(&format!("- {}: {} occurrences\n", p, c));
+                    }
                     output.push('\n');
                 }
             }
@@ -2277,7 +2789,10 @@ impl GraphRagServer {
                 if let Some(s) = stats.first() {
                     let avg = s.get("avg_size").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let max = s.get("max_size").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("### Function Size\n- Average: {:.0} lines\n- Largest: {} lines\n\n", avg, max));
+                    output.push_str(&format!(
+                        "### Function Size\n- Average: {:.0} lines\n- Largest: {} lines\n\n",
+                        avg, max
+                    ));
                 }
             }
 
@@ -2285,7 +2800,8 @@ impl GraphRagServer {
             let dir_q = "SELECT file_path FROM file LIMIT 500";
             if let Ok(mut r) = ctx.db.query(dir_q).await {
                 let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-                let mut dirs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                let mut dirs: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for f in &files {
                     let fp = f.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                     if let Some(first) = fp.split('/').next() {
@@ -2293,9 +2809,11 @@ impl GraphRagServer {
                     }
                 }
                 let mut sorted: Vec<_> = dirs.into_iter().collect();
-                sorted.sort_by(|a,b| b.1.cmp(&a.1));
+                sorted.sort_by(|a, b| b.1.cmp(&a.1));
                 output.push_str("### Project Structure (top-level)\n");
-                for (d,c) in sorted.iter().take(10) { output.push_str(&format!("- {}/  ({} files)\n", d, c)); }
+                for (d, c) in sorted.iter().take(10) {
+                    output.push_str(&format!("- {}/  ({} files)\n", d, c));
+                }
             }
         }
 
@@ -2303,11 +2821,16 @@ impl GraphRagServer {
     }
 
     /// Pre-flight check before editing a file — validates against team patterns
-    #[tool(description = "Check if a planned edit aligns with team coding patterns. \
+    #[tool(
+        description = "Check if a planned edit aligns with team coding patterns. \
         Call before writing code to avoid introducing inconsistencies. \
-        Returns warnings if naming, structure, or style deviates from the codebase norm.")]
+        Returns warnings if naming, structure, or style deviates from the codebase norm."
+    )]
     async fn edit_preflight(&self, #[tool(aggr)] params: EditPreflightParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let mut warnings = Vec::new();
         let mut info = Vec::new();
 
@@ -2320,24 +2843,38 @@ impl GraphRagServer {
         if let Ok(mut r) = ctx.db.query(&file_q).await {
             let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
             if let Some(f) = files.first() {
-                lang = f.get("language").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                lang = f
+                    .get("language")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
             }
         }
 
         let name = &params.entity_name;
         let has_underscore = name.contains('_');
-        let starts_lower = name.chars().next().map(|c| c.is_lowercase()).unwrap_or(true);
+        let starts_lower = name
+            .chars()
+            .next()
+            .map(|c| c.is_lowercase())
+            .unwrap_or(true);
 
         // Naming check
         match lang.as_str() {
             "rust" | "python" | "ruby" | "elixir" => {
                 if !has_underscore && name.len() > 3 && starts_lower {
-                    warnings.push(format!("Naming: '{}' uses camelCase but {} convention is snake_case", name, lang));
+                    warnings.push(format!(
+                        "Naming: '{}' uses camelCase but {} convention is snake_case",
+                        name, lang
+                    ));
                 }
             }
             "typescript" | "javascript" | "java" | "dart" | "kotlin" | "go" => {
                 if has_underscore && starts_lower {
-                    warnings.push(format!("Naming: '{}' uses snake_case but {} convention is camelCase", name, lang));
+                    warnings.push(format!(
+                        "Naming: '{}' uses snake_case but {} convention is camelCase",
+                        name, lang
+                    ));
                 }
             }
             _ => {}
@@ -2350,7 +2887,8 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&siblings_q).await {
             let siblings: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            let sibling_names: Vec<&str> = siblings.iter()
+            let sibling_names: Vec<&str> = siblings
+                .iter()
                 .filter_map(|s| s.get("name").and_then(|v| v.as_str()))
                 .collect();
 
@@ -2359,12 +2897,23 @@ impl GraphRagServer {
                 let ratio = snake_count as f32 / sibling_names.len() as f32;
 
                 if ratio > 0.7 && !has_underscore && name.len() > 3 {
-                    warnings.push(format!("Style: {}% of siblings use snake_case, but '{}' doesn't", (ratio*100.0) as u32, name));
+                    warnings.push(format!(
+                        "Style: {}% of siblings use snake_case, but '{}' doesn't",
+                        (ratio * 100.0) as u32,
+                        name
+                    ));
                 } else if ratio < 0.3 && has_underscore {
-                    warnings.push(format!("Style: {}% of siblings use camelCase, but '{}' uses snake_case", ((1.0-ratio)*100.0) as u32, name));
+                    warnings.push(format!(
+                        "Style: {}% of siblings use camelCase, but '{}' uses snake_case",
+                        ((1.0 - ratio) * 100.0) as u32,
+                        name
+                    ));
                 }
 
-                info.push(format!("File has {} existing functions", sibling_names.len()));
+                info.push(format!(
+                    "File has {} existing functions",
+                    sibling_names.len()
+                ));
             }
         }
 
@@ -2378,26 +2927,36 @@ impl GraphRagServer {
             if let Some(s) = sizes.first() {
                 let lines = s.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
                 if lines > 500 {
-                    warnings.push(format!("File size: {} lines — consider splitting into smaller modules", lines));
+                    warnings.push(format!(
+                        "File size: {} lines — consider splitting into smaller modules",
+                        lines
+                    ));
                 }
                 info.push(format!("File is {} lines", lines));
             }
         }
 
-        let mut output = format!("## Edit Preflight: {} in {}\n\n", params.entity_name, params.file_path);
+        let mut output = format!(
+            "## Edit Preflight: {} in {}\n\n",
+            params.entity_name, params.file_path
+        );
         output.push_str(&format!("**Language:** {}\n\n", lang));
 
         if warnings.is_empty() {
             output.push_str("**All checks passed.** Edit aligns with team patterns.\n\n");
         } else {
             output.push_str(&format!("**{} warnings:**\n", warnings.len()));
-            for w in &warnings { output.push_str(&format!("- {} {}\n", "!!!", w)); }
+            for w in &warnings {
+                output.push_str(&format!("- {} {}\n", "!!!", w));
+            }
             output.push('\n');
         }
 
         if !info.is_empty() {
             output.push_str("**Context:**\n");
-            for i in &info { output.push_str(&format!("- {}\n", i)); }
+            for i in &info {
+                output.push_str(&format!("- {}\n", i));
+            }
         }
 
         output
@@ -2412,7 +2971,10 @@ impl GraphRagServer {
         'get' — retrieve a specific ADR by ID. \
         ADRs are stored in the graph and linked to conversation history.")]
     async fn manage_adr(&self, #[tool(aggr)] params: ManageAdrParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
 
         match params.action.as_str() {
             "list" => {
@@ -2423,14 +2985,19 @@ impl GraphRagServer {
                         if decisions.is_empty() {
                             return "No ADRs found. Decisions are auto-extracted from conversations, or create one with action='create'.".into();
                         }
-                        let mut output = format!("## Architecture Decision Records ({} total)\n\n", decisions.len());
+                        let mut output = format!(
+                            "## Architecture Decision Records ({} total)\n\n",
+                            decisions.len()
+                        );
                         for (i, d) in decisions.iter().enumerate() {
                             let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                             let ts = d.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
                             let body = d.get("body").and_then(|v| v.as_str()).unwrap_or("");
                             let date = if ts.len() >= 10 { &ts[..10] } else { ts };
-                            output.push_str(&format!("### ADR-{:03}: {}\n", i+1, name));
-                            if !date.is_empty() { output.push_str(&format!("*Date: {}*\n\n", date)); }
+                            output.push_str(&format!("### ADR-{:03}: {}\n", i + 1, name));
+                            if !date.is_empty() {
+                                output.push_str(&format!("*Date: {}*\n\n", date));
+                            }
                             if body.len() > 200 {
                                 output.push_str(&format!("{}...\n\n", &body[..200]));
                             } else if !body.is_empty() {
@@ -2445,14 +3012,25 @@ impl GraphRagServer {
             "create" => {
                 let title = params.title.as_deref().unwrap_or("Untitled Decision");
                 let body = params.body.as_deref().unwrap_or("");
-                let qname = format!("{}:adr:{}", ctx.repo_name, title.to_lowercase().replace(' ', "_").chars().take(60).collect::<String>());
+                let qname = format!(
+                    "{}:adr:{}",
+                    ctx.repo_name,
+                    title
+                        .to_lowercase()
+                        .replace(' ', "_")
+                        .chars()
+                        .take(60)
+                        .collect::<String>()
+                );
                 let ts = chrono::Utc::now().to_rfc3339();
 
                 let q = "UPSERT decision SET name = $name, qualified_name = $qname, \
                          body = $body, repo = $repo, language = 'adr', \
                          file_path = 'adr', start_line = 0, end_line = 0, \
                          timestamp = $ts";
-                match ctx.db.query(q)
+                match ctx
+                    .db
+                    .query(q)
                     .bind(("name", title.to_string()))
                     .bind(("qname", qname))
                     .bind(("body", body.to_string()))
@@ -2466,12 +3044,20 @@ impl GraphRagServer {
             }
             "get" => {
                 let id = params.id.as_deref().unwrap_or("");
-                let q = "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
-                match ctx.db.query(q).bind(("search", id.to_string())).bind(("repo", ctx.repo_name.clone())).await {
+                let q =
+                    "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
+                match ctx
+                    .db
+                    .query(q)
+                    .bind(("search", id.to_string()))
+                    .bind(("repo", ctx.repo_name.clone()))
+                    .await
+                {
                     Ok(mut r) => {
                         let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                         if let Some(d) = results.first() {
-                            serde_json::to_string_pretty(d).unwrap_or_else(|_| "Error formatting".into())
+                            serde_json::to_string_pretty(d)
+                                .unwrap_or_else(|_| "Error formatting".into())
                         } else {
                             format!("No ADR found matching '{}'", id)
                         }
@@ -2486,22 +3072,32 @@ impl GraphRagServer {
     // ===== Shared Memory =====
 
     /// Save a persistent memory note that survives across sessions
-    #[tool(description = "Save a persistent memory note that survives across sessions and is shared between all agents \
+    #[tool(
+        description = "Save a persistent memory note that survives across sessions and is shared between all agents \
         (Claude Code, Cursor, etc.) connected to this project. Use for recording: preferences, conventions, \
-        important context, architectural notes, TODOs. Memories are searchable via conversation_search.")]
+        important context, architectural notes, TODOs. Memories are searchable via conversation_search."
+    )]
     async fn memory_save(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let text = &params.question;
         let ts = chrono::Utc::now().to_rfc3339();
-        let slug = text.to_lowercase()
+        let slug = text
+            .to_lowercase()
             .replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
-            .chars().take(60).collect::<String>();
+            .chars()
+            .take(60)
+            .collect::<String>();
         let qname = format!("{}:memory:{}", ctx.repo_name, slug);
 
         let q = "UPSERT conv_topic SET name = $name, qualified_name = $qname, \
                  body = $body, repo = $repo, language = 'memory', kind = 'shared_memory', \
                  file_path = 'memory', start_line = 0, end_line = 0, timestamp = $ts";
-        match ctx.db.query(q)
+        match ctx
+            .db
+            .query(q)
             .bind(("name", text.chars().take(100).collect::<String>()))
             .bind(("qname", qname))
             .bind(("body", text.to_string()))
@@ -2509,16 +3105,24 @@ impl GraphRagServer {
             .bind(("ts", ts))
             .await
         {
-            Ok(_) => format!("Memory saved. Accessible by all agents connected to '{}'.", ctx.repo_name),
+            Ok(_) => format!(
+                "Memory saved. Accessible by all agents connected to '{}'.",
+                ctx.repo_name
+            ),
             Err(e) => format!("Error saving memory: {}", e),
         }
     }
 
     /// Search shared memories and conversation history
-    #[tool(description = "Search shared memories, decisions, and conversation history across all sessions. \
-        Returns memories saved by any agent, plus auto-extracted decisions/problems/solutions.")]
+    #[tool(
+        description = "Search shared memories, decisions, and conversation history across all sessions. \
+        Returns memories saved by any agent, plus auto-extracted decisions/problems/solutions."
+    )]
     async fn memory_search(&self, #[tool(aggr)] params: SearchParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let limit = params.limit.unwrap_or(20) as i64;
         let safe = params.query.replace('\'', "");
 
@@ -2535,7 +3139,9 @@ impl GraphRagServer {
                  WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
                  ORDER BY timestamp DESC LIMIT $lim";
 
-        match ctx.db.query(q)
+        match ctx
+            .db
+            .query(q)
             .bind(("repo", ctx.repo_name.clone()))
             .bind(("search", safe))
             .bind(("lim", limit))
@@ -2546,7 +3152,11 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No memories found for '{}'", params.query);
                 }
-                let mut output = format!("## Memory Search: '{}' ({} results)\n\n", params.query, results.len());
+                let mut output = format!(
+                    "## Memory Search: '{}' ({} results)\n\n",
+                    params.query,
+                    results.len()
+                );
                 for item in &results {
                     let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
                     let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
@@ -2575,13 +3185,18 @@ impl GraphRagServer {
     // ===== Graph Analytics =====
 
     /// Detect code communities and architectural boundaries
-    #[tool(description = "Detect code communities, bridge modules, and central nodes in the codebase graph. \
+    #[tool(
+        description = "Detect code communities, bridge modules, and central nodes in the codebase graph. \
         'clusters' — find groups of tightly-connected files, \
         'bridges' — find modules that connect separate clusters (high betweenness), \
         'central' — find the most connected/important entities (PageRank-like), \
-        'all' — run all analyses.")]
+        'all' — run all analyses."
+    )]
     async fn community_detection(&self, #[tool(aggr)] params: CommunityDetectionParams) -> String {
-        let ctx = match self.ctx().await { Ok(c) => c, Err(e) => return e };
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
         let analysis = params.analysis.as_deref().unwrap_or("all");
         let limit = params.limit.unwrap_or(20);
         let mut output = "## Code Community Analysis\n\n".to_string();
@@ -2602,7 +3217,8 @@ impl GraphRagServer {
                         let out_c = c.get("out_calls").and_then(|v| v.as_u64()).unwrap_or(0);
                         let in_c = c.get("in_calls").and_then(|v| v.as_u64()).unwrap_or(0);
                         let total = c.get("total_edges").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| {} | {} | {} | {} |\n", fp, out_c, in_c, total));
+                        output
+                            .push_str(&format!("| {} | {} | {} | {} |\n", fp, out_c, in_c, total));
                     }
                     output.push('\n');
                 }
@@ -2628,7 +3244,10 @@ impl GraphRagServer {
                         let callers = b.get("callers").and_then(|v| v.as_u64()).unwrap_or(0);
                         let callees = b.get("callees").and_then(|v| v.as_u64()).unwrap_or(0);
                         let score = b.get("bridge_score").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| **{}** | {} | {} | {} | {} |\n", name, fp, callers, callees, score));
+                        output.push_str(&format!(
+                            "| **{}** | {} | {} | {} | {} |\n",
+                            name, fp, callers, callees, score
+                        ));
                     }
                     output.push('\n');
                 }
@@ -2648,7 +3267,13 @@ impl GraphRagServer {
                         let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                         let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                         let deg = c.get("in_degree").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| {} | **{}** | {} | {} |\n", i+1, name, fp, deg));
+                        output.push_str(&format!(
+                            "| {} | **{}** | {} | {} |\n",
+                            i + 1,
+                            name,
+                            fp,
+                            deg
+                        ));
                     }
                 }
             }

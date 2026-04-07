@@ -82,17 +82,22 @@ async fn main() -> Result<()> {
     {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let log = home.join(".codescope").join("startup.log");
-        let _ = std::fs::create_dir_all(log.parent().unwrap());
-        let _ = std::fs::write(&log, format!(
-            "ALIVE at {}\nargs: {:?}\ncwd: {:?}\npid: {}\n",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-            std::env::args().collect::<Vec<_>>(),
-            std::env::current_dir().ok(),
-            std::process::id(),
-        ));
+        if let Some(parent) = log.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(
+            &log,
+            format!(
+                "ALIVE at {}\nargs: {:?}\ncwd: {:?}\npid: {}\n",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                std::env::args().collect::<Vec<_>>(),
+                std::env::current_dir().ok(),
+                std::process::id(),
+            ),
+        );
     }
 
     tracing_subscriber::fmt()
@@ -104,25 +109,17 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Some(Command::Serve { port, bind }) => {
-            run_daemon(&bind, port).await
-        }
-        Some(Command::Start { port }) => {
-            start_daemon_background(port)
-        }
-        Some(Command::Stop { port }) => {
-            stop_daemon(port).await
-        }
-        Some(Command::Status { port }) => {
-            check_status(port).await
-        }
-        Some(Command::Stdio { path, repo, auto_index }) => {
-            codescope_mcp::run_stdio(path, repo, auto_index).await
-        }
+        Some(Command::Serve { port, bind }) => run_daemon(&bind, port).await,
+        Some(Command::Start { port }) => start_daemon_background(port),
+        Some(Command::Stop { port }) => stop_daemon(port).await,
+        Some(Command::Status { port }) => check_status(port).await,
+        Some(Command::Stdio {
+            path,
+            repo,
+            auto_index,
+        }) => codescope_mcp::run_stdio(path, repo, auto_index).await,
         // No subcommand = backward-compatible stdio mode
-        None => {
-            codescope_mcp::run_stdio(args.path, args.repo, args.auto_index).await
-        }
+        None => codescope_mcp::run_stdio(args.path, args.repo, args.auto_index).await,
     }
 }
 
@@ -133,7 +130,9 @@ async fn run_daemon(bind: &str, port: u16) -> Result<()> {
 
     // Write PID file for stop command
     let pid_path = pid_file_path(port);
-    let _ = std::fs::create_dir_all(pid_path.parent().unwrap());
+    if let Some(parent) = pid_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     std::fs::write(&pid_path, std::process::id().to_string())?;
 
     tracing::info!("Codescope daemon starting on {}", addr);
@@ -179,7 +178,9 @@ fn start_daemon_background(port: u16) -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".codescope")
         .join("daemon.log");
-    std::fs::create_dir_all(log_path.parent().unwrap())?;
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let log_file = std::fs::File::create(&log_path)?;
 
     #[cfg(windows)]
@@ -196,7 +197,11 @@ fn start_daemon_background(port: u16) -> Result<()> {
             .stderr(std::process::Stdio::from(log_file))
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn()?;
-        eprintln!("Codescope daemon started (PID {}) on port {}", child.id(), port);
+        eprintln!(
+            "Codescope daemon started (PID {}) on port {}",
+            child.id(),
+            port
+        );
         eprintln!("Log: {}", log_path.display());
     }
 
@@ -210,7 +215,11 @@ fn start_daemon_background(port: u16) -> Result<()> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::from(log_file))
             .spawn()?;
-        eprintln!("Codescope daemon started (PID {}) on port {}", child.id(), port);
+        eprintln!(
+            "Codescope daemon started (PID {}) on port {}",
+            child.id(),
+            port
+        );
         eprintln!("Log: {}", log_path.display());
     }
 
@@ -224,7 +233,10 @@ async fn stop_daemon(port: u16) -> Result<()> {
     let pid_str = match std::fs::read_to_string(&pid_path) {
         Ok(s) => s.trim().to_string(),
         Err(_) => {
-            eprintln!("No daemon PID file found for port {}. Is the daemon running?", port);
+            eprintln!(
+                "No daemon PID file found for port {}. Is the daemon running?",
+                port
+            );
             return Ok(());
         }
     };
@@ -250,7 +262,10 @@ async fn stop_daemon(port: u16) -> Result<()> {
                 eprintln!("Daemon (PID {}) stopped.", pid);
             }
             _ => {
-                eprintln!("Could not stop daemon (PID {}). Process may have already exited.", pid);
+                eprintln!(
+                    "Could not stop daemon (PID {}). Process may have already exited.",
+                    pid
+                );
             }
         }
     }
@@ -258,15 +273,16 @@ async fn stop_daemon(port: u16) -> Result<()> {
     #[cfg(not(windows))]
     {
         use std::process::Command;
-        let result = Command::new("kill")
-            .args([&pid.to_string()])
-            .output();
+        let result = Command::new("kill").args([&pid.to_string()]).output();
         match result {
             Ok(output) if output.status.success() => {
                 eprintln!("Daemon (PID {}) stopped.", pid);
             }
             _ => {
-                eprintln!("Could not stop daemon (PID {}). Process may have already exited.", pid);
+                eprintln!(
+                    "Could not stop daemon (PID {}). Process may have already exited.",
+                    pid
+                );
             }
         }
     }
@@ -293,5 +309,3 @@ async fn check_status(port: u16) -> Result<()> {
     }
     Ok(())
 }
-
-

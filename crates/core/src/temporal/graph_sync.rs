@@ -1,9 +1,9 @@
 use anyhow::Result;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 use tracing::{debug, info};
 
-use super::{CommitInfo, ChangeType};
+use super::{ChangeType, CommitInfo};
 
 /// Syncs git history into the SurrealDB graph
 pub struct TemporalGraphSync {
@@ -49,28 +49,40 @@ impl TemporalGraphSync {
 
     /// Sync pre-fetched commits into the graph (thread-safe, no git2 dependency).
     /// Idempotent: uses UPSERT for commits and checks for existing edges before creating.
-    pub async fn sync_commit_data(
-        &self,
-        commits: &[CommitInfo],
-        repo_name: &str,
-    ) -> Result<usize> {
+    pub async fn sync_commit_data(&self, commits: &[CommitInfo], repo_name: &str) -> Result<usize> {
         self.init_schema().await?;
 
-        info!("Syncing {} commits for repo '{}'...", commits.len(), repo_name);
+        info!(
+            "Syncing {} commits for repo '{}'...",
+            commits.len(),
+            repo_name
+        );
 
         // Phase 1: Batch UPSERT all commits in a single query
         let mut commit_query = String::with_capacity(commits.len() * 200);
         for commit in commits {
-            let sanitized_hash = commit.hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-            let message_escaped = commit.message.lines().next().unwrap_or("")
-                .replace('\\', "\\\\").replace('\'', "\\'");
+            let sanitized_hash = commit
+                .hash
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+            let message_escaped = commit
+                .message
+                .lines()
+                .next()
+                .unwrap_or("")
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'");
             let author_escaped = commit.author.replace('\\', "\\\\").replace('\'', "\\'");
 
             commit_query.push_str(&format!(
                 "UPSERT commit:{} SET hash = '{}', author = '{}', message = '{}', \
                  timestamp = {}, files_changed = {}, repo = '{}';\n",
-                sanitized_hash, commit.hash, author_escaped, message_escaped,
-                commit.timestamp, commit.files_changed.len(), repo_name
+                sanitized_hash,
+                commit.hash,
+                author_escaped,
+                message_escaped,
+                commit.timestamp,
+                commit.files_changed.len(),
+                repo_name
             ));
         }
 
@@ -92,7 +104,9 @@ impl TemporalGraphSync {
                     ChangeType::Renamed => "renamed",
                 };
                 let path_escaped = file_change.path.replace('\\', "\\\\").replace('\'', "\\'");
-                let sanitized_hash = commit.hash.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+                let sanitized_hash = commit
+                    .hash
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
 
                 edge_query.push_str(&format!(
                     "LET $f = (SELECT id FROM file WHERE path CONTAINS '{}' LIMIT 1); \
@@ -130,7 +144,8 @@ impl TemporalGraphSync {
         let repo = repo_name.to_string();
 
         // Get functions with their change frequency (churn)
-        let results: Vec<HotspotEntry> = self.db
+        let results: Vec<HotspotEntry> = self
+            .db
             .query(
                 "SELECT name, file_path, start_line, end_line, \
                  (end_line - start_line) AS size, \
@@ -148,13 +163,11 @@ impl TemporalGraphSync {
     }
 
     /// Get the evolution of a specific entity over time
-    pub async fn entity_evolution(
-        &self,
-        entity_name: &str,
-    ) -> Result<Vec<EvolutionEntry>> {
+    pub async fn entity_evolution(&self, entity_name: &str) -> Result<Vec<EvolutionEntry>> {
         let name = entity_name.to_string();
 
-        let results: Vec<EvolutionEntry> = self.db
+        let results: Vec<EvolutionEntry> = self
+            .db
             .query(
                 "SELECT ->modified_in->commit.{hash, author, message, timestamp} AS commits \
                  FROM file WHERE path CONTAINS $name"

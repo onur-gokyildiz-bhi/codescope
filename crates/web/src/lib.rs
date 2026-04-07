@@ -1,10 +1,10 @@
 use anyhow::Result;
 use axum::{
-    Router,
     extract::{Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Json},
     routing::get,
+    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -50,7 +50,11 @@ pub async fn run_web(
     .await?;
     db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
-    println!("DB: {} (ns: codescope, db: {})", db_path.display(), repo_name);
+    println!(
+        "DB: {} (ns: codescope, db: {})",
+        db_path.display(),
+        repo_name
+    );
 
     // Auto-index if requested
     if auto_index {
@@ -94,7 +98,9 @@ pub async fn run_web(
                         .to_string()
                         .replace('\\', "/");
                     let content = std::fs::read_to_string(file_path).ok()?;
-                    parser.parse_source(std::path::Path::new(&rel_path), &content, &parse_repo).ok()
+                    parser
+                        .parse_source(std::path::Path::new(&rel_path), &content, &parse_repo)
+                        .ok()
                 })
                 .collect::<Vec<_>>()
         })
@@ -228,7 +234,10 @@ async fn api_graph(
 
                 for row in flatten_result(&result) {
                     let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let qname = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                    let qname = row
+                        .get("qualified_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(name);
                     let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                     nodes.push(GraphNode {
                         id: qname.to_string(),
@@ -266,8 +275,12 @@ async fn api_graph(
         let mut seen = std::collections::HashSet::new();
 
         // Helper to add a node if not already seen
-        let add_node = |nodes: &mut Vec<GraphNode>, seen: &mut std::collections::HashSet<String>,
-                            id: &str, name: &str, kind: &str, fp: &str| {
+        let add_node = |nodes: &mut Vec<GraphNode>,
+                        seen: &mut std::collections::HashSet<String>,
+                        id: &str,
+                        name: &str,
+                        kind: &str,
+                        fp: &str| {
             if seen.insert(id.to_string()) {
                 nodes.push(GraphNode {
                     id: id.to_string(),
@@ -283,24 +296,53 @@ async fn api_graph(
         let mut center_fp = String::new();
         let mut center_kind = "function".to_string();
 
-        let fn_q = format!("SELECT name, qualified_name, file_path FROM `function` WHERE name = '{}' LIMIT 1", safe);
+        let fn_q = format!(
+            "SELECT name, qualified_name, file_path FROM `function` WHERE name = '{}' LIMIT 1",
+            safe
+        );
         if let Ok(result) = state.query.raw_query(&fn_q).await {
             if let Some(row) = flatten_result(&result).first() {
-                center_id = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(&safe).to_string();
-                center_fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                center_id = row
+                    .get("qualified_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&safe)
+                    .to_string();
+                center_fp = row
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
             }
         }
         if center_fp.is_empty() {
-            let cls_q = format!("SELECT name, qualified_name, file_path, kind FROM class WHERE name = '{}' LIMIT 1", safe);
+            let cls_q = format!(
+                "SELECT name, qualified_name, file_path, kind FROM class WHERE name = '{}' LIMIT 1",
+                safe
+            );
             if let Ok(result) = state.query.raw_query(&cls_q).await {
                 if let Some(row) = flatten_result(&result).first() {
-                    center_id = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(&safe).to_string();
-                    center_fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    center_id = row
+                        .get("qualified_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&safe)
+                        .to_string();
+                    center_fp = row
+                        .get("file_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     center_kind = "class".to_string();
                 }
             }
         }
-        add_node(&mut nodes, &mut seen, &center_id, &safe, &center_kind, &center_fp);
+        add_node(
+            &mut nodes,
+            &mut seen,
+            &center_id,
+            &safe,
+            &center_kind,
+            &center_fp,
+        );
 
         // 2. Callers (who calls this function)
         let caller_q = format!(
@@ -310,7 +352,9 @@ async fn api_graph(
         );
         if let Ok(result) = state.query.raw_query(&caller_q).await {
             let wrapped = serde_json::json!([{"callers": result}]);
-            extract_neighbors(&wrapped, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true);
+            extract_neighbors(
+                &wrapped, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true,
+            );
         }
 
         // 3. Callees (what this function calls)
@@ -321,7 +365,9 @@ async fn api_graph(
         );
         if let Ok(result) = state.query.raw_query(&callee_q).await {
             let wrapped = serde_json::json!([{"callees": result}]);
-            extract_neighbors(&wrapped, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false);
+            extract_neighbors(
+                &wrapped, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false,
+            );
         }
 
         // 4. Sibling functions in same file
@@ -333,7 +379,10 @@ async fn api_graph(
             if let Ok(result) = state.query.raw_query(&sibling_q).await {
                 for row in flatten_result(&result) {
                     let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let qn = row.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                    let qn = row
+                        .get("qualified_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(name);
                     let fp = row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                     add_node(&mut nodes, &mut seen, qn, name, "sibling", fp);
                     edges.push(GraphEdge {
@@ -346,7 +395,9 @@ async fn api_graph(
 
             // 5. File node
             let file_id = format!("file:{}", center_fp);
-            add_node(&mut nodes, &mut seen, &file_id, &center_fp, "file", &center_fp);
+            add_node(
+                &mut nodes, &mut seen, &file_id, &center_fp, "file", &center_fp,
+            );
             edges.push(GraphEdge {
                 source: file_id,
                 target: center_id.clone(),
@@ -387,7 +438,10 @@ fn extract_neighbors(
         if let Some(neighbors) = row.get(field).and_then(|v| v.as_array()) {
             for n in neighbors {
                 let name = n.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                let qn = n.get("qualified_name").and_then(|v| v.as_str()).unwrap_or(name);
+                let qn = n
+                    .get("qualified_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(name);
                 let fp = n.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                 let kind = if is_caller { "caller" } else { "callee" };
                 if seen.insert(qn.to_string()) {
@@ -403,7 +457,11 @@ fn extract_neighbors(
                 } else {
                     (center_id.to_string(), qn.to_string())
                 };
-                edges.push(GraphEdge { source: src, target: tgt, kind: "calls".to_string() });
+                edges.push(GraphEdge {
+                    source: src,
+                    target: tgt,
+                    kind: "calls".to_string(),
+                });
             }
         }
     }
@@ -425,10 +483,19 @@ async fn api_conversations(State(state): State<Arc<AppState>>) -> impl IntoRespo
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();
-            let keys = ["decisions", "problems", "solutions", "topics", "sessions", "code_decisions", "code_discussions"];
+            let keys = [
+                "decisions",
+                "problems",
+                "solutions",
+                "topics",
+                "sessions",
+                "code_decisions",
+                "code_discussions",
+            ];
             if let Some(arr) = items {
                 for (i, key) in keys.iter().enumerate() {
-                    let data = arr.get(i)
+                    let data = arr
+                        .get(i)
                         .and_then(|v| v.as_array())
                         .cloned()
                         .unwrap_or_default();
@@ -462,7 +529,11 @@ async fn api_raw_query(
 
 // File tree
 async fn api_files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.query.raw_query("SELECT path, language, line_count FROM file ORDER BY path").await {
+    match state
+        .query
+        .raw_query("SELECT path, language, line_count FROM file ORDER BY path")
+        .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -470,7 +541,9 @@ async fn api_files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 // File content
 #[derive(Deserialize)]
-struct FileContentParams { path: Option<String> }
+struct FileContentParams {
+    path: Option<String>,
+}
 
 async fn api_file_content(
     State(state): State<Arc<AppState>>,
@@ -497,12 +570,15 @@ async fn api_file_content(
         "path": path,
         "content": content,
         "entities": entities,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // Node detail
 #[derive(Deserialize)]
-struct NodeDetailParams { name: Option<String> }
+struct NodeDetailParams {
+    name: Option<String>,
+}
 
 async fn api_node_detail(
     State(state): State<Arc<AppState>>,
@@ -540,10 +616,14 @@ async fn api_node_detail(
 
 // Hotspots
 async fn api_hotspots(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.query.raw_query(
-        "SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size \
-         FROM `function` ORDER BY size DESC LIMIT 50"
-    ).await {
+    match state
+        .query
+        .raw_query(
+            "SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size \
+         FROM `function` ORDER BY size DESC LIMIT 50",
+        )
+        .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -551,10 +631,14 @@ async fn api_hotspots(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 // Clusters
 async fn api_clusters(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.query.raw_query(
-        "SELECT file_path, count() AS fn_count, array::group(name) AS functions \
-         FROM `function` GROUP BY file_path ORDER BY fn_count DESC LIMIT 30"
-    ).await {
+    match state
+        .query
+        .raw_query(
+            "SELECT file_path, count() AS fn_count, array::group(name) AS functions \
+         FROM `function` GROUP BY file_path ORDER BY fn_count DESC LIMIT 30",
+        )
+        .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -562,15 +646,26 @@ async fn api_clusters(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 // Skill graph
 async fn api_skill_graph(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let q = "SELECT name, qualified_name, description, node_type, file_path FROM skill ORDER BY name; \
+    let q =
+        "SELECT name, qualified_name, description, node_type, file_path FROM skill ORDER BY name; \
              SELECT in.name AS source, out.name AS target, context FROM links_to";
     match state.query.raw_query(q).await {
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();
             if let Some(arr) = items {
-                out.insert("nodes".into(), arr.get(0).cloned().unwrap_or(serde_json::Value::Array(vec![])));
-                out.insert("edges".into(), arr.get(1).cloned().unwrap_or(serde_json::Value::Array(vec![])));
+                out.insert(
+                    "nodes".into(),
+                    arr.first()
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Array(vec![])),
+                );
+                out.insert(
+                    "edges".into(),
+                    arr.get(1)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Array(vec![])),
+                );
             }
             Json(serde_json::Value::Object(out)).into_response()
         }

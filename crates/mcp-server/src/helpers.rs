@@ -18,8 +18,17 @@ pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
                  SELECT name, qualified_name FROM package;";
 
     let table_names = [
-        "function", "class", "file", "module", "variable",
-        "import_decl", "config", "doc", "api", "infra", "package",
+        "function",
+        "class",
+        "file",
+        "module",
+        "variable",
+        "import_decl",
+        "config",
+        "doc",
+        "api",
+        "infra",
+        "package",
     ];
 
     match db.query(query).await {
@@ -46,8 +55,19 @@ pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
 
 pub(crate) fn extract_path_from_question(question: &str) -> String {
     for word in question.split_whitespace() {
-        let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '\\' && c != '.' && c != '_' && c != '-');
-        if clean.contains('.') && (clean.contains('/') || clean.contains('\\') || clean.ends_with(".rs") || clean.ends_with(".ts") || clean.ends_with(".py") || clean.ends_with(".go") || clean.ends_with(".java") || clean.ends_with(".js")) {
+        let clean = word.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '/' && c != '\\' && c != '.' && c != '_' && c != '-'
+        });
+        if clean.contains('.')
+            && (clean.contains('/')
+                || clean.contains('\\')
+                || clean.ends_with(".rs")
+                || clean.ends_with(".ts")
+                || clean.ends_with(".py")
+                || clean.ends_with(".go")
+                || clean.ends_with(".java")
+                || clean.ends_with(".js"))
+        {
             return clean.to_string();
         }
     }
@@ -76,7 +96,8 @@ pub fn find_claude_project_dir(codebase_path: &Path, repo_name: &str) -> std::pa
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let claude_projects = home.join(".claude").join("projects");
 
-    let codebase_str = codebase_path.to_string_lossy()
+    let codebase_str = codebase_path
+        .to_string_lossy()
         .replace(['/', '\\', ':'], "-")
         .replace("--", "-");
 
@@ -96,10 +117,7 @@ pub fn find_claude_project_dir(codebase_path: &Path, repo_name: &str) -> std::pa
 
 /// Build a concise conversation context summary from indexed conversations.
 /// This gets injected into ServerInfo.instructions so Claude sees it automatically.
-pub(crate) async fn build_context_summary(
-    db: &Surreal<Db>,
-    repo: &str,
-) -> String {
+pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> String {
     let mut sections = Vec::new();
 
     // Recent decisions (last 10)
@@ -171,13 +189,17 @@ pub(crate) async fn build_context_summary(
         .and_then(|mut r| r.take(0).ok())
         .unwrap_or_default();
 
-    let session_count = stats.first()
+    let session_count = stats
+        .first()
         .and_then(|v| v.get("count"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
     if session_count > 0 {
-        sections.push(format!("*{} conversation sessions indexed for this project.*", session_count));
+        sections.push(format!(
+            "*{} conversation sessions indexed for this project.*",
+            session_count
+        ));
     }
 
     if sections.is_empty() {
@@ -189,11 +211,7 @@ pub(crate) async fn build_context_summary(
 
 /// Generate CONTEXT.md in the project's .claude directory.
 /// Claude reads this automatically at session start.
-pub async fn generate_context_md(
-    db: &Surreal<Db>,
-    repo: &str,
-    codebase_path: &Path,
-) {
+pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &Path) {
     let summary = build_context_summary(db, repo).await;
     let insights = build_post_index_insights(db, repo).await;
 
@@ -222,7 +240,9 @@ pub async fn generate_context_md(
         content.push_str("\n\n");
     }
 
-    content.push_str("> Use `conversation_search` for deeper queries, `explore` for entity graph navigation.\n");
+    content.push_str(
+        "> Use `conversation_search` for deeper queries, `explore` for entity graph navigation.\n",
+    );
 
     match std::fs::write(&context_path, &content) {
         Ok(_) => tracing::info!("Generated CONTEXT.md at {}", context_path.display()),
@@ -232,18 +252,20 @@ pub async fn generate_context_md(
 
 /// Post-index project insights — auto-generated recommendations after indexing.
 /// Returned as markdown and injected into CONTEXT.md + MCP server instructions.
-pub(crate) async fn build_post_index_insights(
-    db: &Surreal<Db>,
-    repo: &str,
-) -> String {
+pub(crate) async fn build_post_index_insights(db: &Surreal<Db>, repo: &str) -> String {
     let mut insights = Vec::new();
 
     // 1. Hotspots — largest functions (refactoring candidates)
     let hotspots: Vec<serde_json::Value> = db
-        .query("SELECT name, file_path, (end_line - start_line) AS size FROM `function` \
-                WHERE repo = $repo ORDER BY size DESC LIMIT 5")
+        .query(
+            "SELECT name, file_path, (end_line - start_line) AS size FROM `function` \
+                WHERE repo = $repo ORDER BY size DESC LIMIT 5",
+        )
         .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
 
     if !hotspots.is_empty() {
         let mut s = "### Hotspots (refactor candidates)\n".to_string();
@@ -255,20 +277,27 @@ pub(crate) async fn build_post_index_insights(
                 s.push_str(&format!("- **{}** ({}, {} lines)\n", name, file, size));
             }
         }
-        if s.lines().count() > 1 { insights.push(s); }
+        if s.lines().count() > 1 {
+            insights.push(s);
+        }
     }
 
     // 2. Dead code — functions with zero callers
     let dead: Vec<serde_json::Value> = db
-        .query("SELECT name, file_path, (end_line - start_line) AS size FROM `function` WHERE \
+        .query(
+            "SELECT name, file_path, (end_line - start_line) AS size FROM `function` WHERE \
                 repo = $repo AND \
                 name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
                 AND name != 'main' AND name != 'new' AND name != 'default' \
                 AND string::starts_with(name, 'test_') = false \
                 AND (end_line - start_line) >= 10 \
-                ORDER BY size DESC LIMIT 10")
+                ORDER BY size DESC LIMIT 10",
+        )
         .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
 
     if !dead.is_empty() {
         let mut s = format!("### Dead code ({} unused functions)\n", dead.len());
@@ -283,10 +312,15 @@ pub(crate) async fn build_post_index_insights(
 
     // 3. High coupling — files with many shared functions
     let coupling: Vec<serde_json::Value> = db
-        .query("SELECT file_path, count() AS fn_count FROM `function` \
-                WHERE repo = $repo GROUP BY file_path ORDER BY fn_count DESC LIMIT 3")
+        .query(
+            "SELECT file_path, count() AS fn_count FROM `function` \
+                WHERE repo = $repo GROUP BY file_path ORDER BY fn_count DESC LIMIT 3",
+        )
         .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
 
     if !coupling.is_empty() {
         let mut s = "### Most complex files\n".to_string();
@@ -305,9 +339,13 @@ pub(crate) async fn build_post_index_insights(
     let conv_count: Vec<serde_json::Value> = db
         .query("SELECT count() FROM decision WHERE repo = $repo GROUP ALL")
         .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
 
-    let decisions = conv_count.first()
+    let decisions = conv_count
+        .first()
         .and_then(|v| v.get("count"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
@@ -321,13 +359,19 @@ pub(crate) async fn build_post_index_insights(
 
     // 6. Language distribution summary
     let langs: Vec<serde_json::Value> = db
-        .query("SELECT language, count() AS cnt FROM file WHERE repo = $repo \
-                GROUP BY language ORDER BY cnt DESC LIMIT 5")
+        .query(
+            "SELECT language, count() AS cnt FROM file WHERE repo = $repo \
+                GROUP BY language ORDER BY cnt DESC LIMIT 5",
+        )
         .bind(("repo", repo.to_string()))
-        .await.ok().and_then(|mut r| r.take(0).ok()).unwrap_or_default();
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
 
     if !langs.is_empty() {
-        let lang_summary: Vec<String> = langs.iter()
+        let lang_summary: Vec<String> = langs
+            .iter()
             .filter_map(|l| {
                 let lang = l.get("language").and_then(|v| v.as_str())?;
                 let cnt = l.get("cnt").and_then(|v| v.as_u64())?;
@@ -345,10 +389,7 @@ pub(crate) async fn build_post_index_insights(
 }
 
 /// Create cross-session topic links: sessions discussing the same code entity get co_discusses edges
-pub(crate) async fn link_cross_session_topics(
-    db: &Surreal<Db>,
-    _repo: &str,
-) -> usize {
+pub(crate) async fn link_cross_session_topics(db: &Surreal<Db>, _repo: &str) -> usize {
     // Find code entities discussed in multiple sessions
     let query = "SELECT out AS entity, array::group(in) AS sessions \
                  FROM discussed_in \

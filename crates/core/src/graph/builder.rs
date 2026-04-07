@@ -1,6 +1,6 @@
 use anyhow::Result;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 use tracing::{debug, warn};
 
 use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
@@ -59,10 +59,7 @@ impl GraphBuilder {
                         match self.db.query(&q).await {
                             Ok(_) => total += 1,
                             Err(e2) => {
-                                warn!(
-                                    "Entity upsert failed {}: {}",
-                                    entity.qualified_name, e2
-                                );
+                                warn!("Entity upsert failed {}: {}", entity.qualified_name, e2);
                             }
                         }
                     }
@@ -209,13 +206,12 @@ impl GraphBuilder {
         // Step 3: Delete orphan edge, create new one pointing to correct target
         //
         // We do this in SurrealQL for efficiency:
-        let query = format!(
-            "LET $orphans = (SELECT id, in AS caller, out AS callee, \
+        let query = "LET $orphans = (SELECT id, in AS caller, out AS callee, \
                out.name AS target_name, meta::id(out) AS target_id \
              FROM calls \
              WHERE out.name IS NULL AND meta::tb(out) = 'function');
-             RETURN array::len($orphans);",
-        );
+             RETURN array::len($orphans);"
+            .to_string();
 
         let mut response = self.db.query(&query).await?;
         let orphan_count: Option<i64> = response.take(1).unwrap_or(None);
@@ -225,7 +221,10 @@ impl GraphBuilder {
             return Ok(0);
         }
 
-        debug!("Found {} orphan call targets, attempting resolution...", count);
+        debug!(
+            "Found {} orphan call targets, attempting resolution...",
+            count
+        );
 
         // Build a name→qualified_name index for all functions in the repo
         let resolve_query = format!(
@@ -434,9 +433,9 @@ fn build_entity_set(entity: &CodeEntity) -> String {
             entity.start_line,
             entity.end_line,
             surql_opt_str(&entity.body),
-            surql_opt_str(&entity.body),       // description = body (frontmatter description)
+            surql_opt_str(&entity.body), // description = body (frontmatter description)
             surql_str(&format!("{:?}", entity.kind)), // node_type from kind
-            surql_opt_str(&entity.signature),  // created date in signature field
+            surql_opt_str(&entity.signature), // created date in signature field
         ),
         // All other entities: config, doc, api, db_entity, infra, package, conversation
         _ => format!(
@@ -472,10 +471,7 @@ fn surql_opt_str(s: &Option<String>) -> String {
 /// Build SET clause from relation metadata JSON.
 fn build_meta_set(meta: &serde_json::Value) -> String {
     if let Some(obj) = meta.as_object() {
-        let parts: Vec<String> = obj
-            .iter()
-            .map(|(k, v)| format!("{} = {}", k, v))
-            .collect();
+        let parts: Vec<String> = obj.iter().map(|(k, v)| format!("{} = {}", k, v)).collect();
         if parts.is_empty() {
             String::new()
         } else {
@@ -497,8 +493,8 @@ fn escape_table(name: &str) -> String {
 fn sanitize_id(s: &str) -> String {
     s.replace(
         [
-            '/', '\\', ':', '.', ' ', '<', '>', '"', '\'', '(', ')', ',', ';', '{', '}', '[',
-            ']', '-', '`', '~', '!', '@', '#', '$', '%', '^', '&', '*', '+', '=', '|', '?',
+            '/', '\\', ':', '.', ' ', '<', '>', '"', '\'', '(', ')', ',', ';', '{', '}', '[', ']',
+            '-', '`', '~', '!', '@', '#', '$', '%', '^', '&', '*', '+', '=', '|', '?',
         ],
         "_",
     )

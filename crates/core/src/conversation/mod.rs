@@ -1,18 +1,18 @@
 //! Conversation indexing — extracts decisions, problems, and solutions
 //! from Claude Code JSONL transcripts and links them to code entities.
 
-mod parser;
 mod classifier;
-mod entity_linker;
 pub mod compressor;
+mod entity_linker;
+mod parser;
 
 use anyhow::Result;
 use std::path::Path;
 
 use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
-use parser::ConversationParser;
 use classifier::classify_segments;
 use entity_linker::EntityLinker;
+use parser::ConversationParser;
 
 /// Result of indexing conversation transcripts
 #[derive(Debug, Default)]
@@ -39,7 +39,8 @@ pub fn parse_conversation(
     // Phase 1: Parse JSONL into conversation turns
     let parse_result = parser.parse_jsonl(jsonl_path)?;
     let session_id = &parse_result.session_id;
-    let jsonl_name = jsonl_path.file_name()
+    let jsonl_name = jsonl_path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown.jsonl");
 
@@ -60,7 +61,11 @@ pub fn parse_conversation(
         start_col: 0,
         end_col: 0,
         signature: parse_result.first_timestamp.clone(), // Store timestamp in signature field
-        body: Some(format!("{} turns, {} messages", parse_result.turns.len(), parse_result.message_count)),
+        body: Some(format!(
+            "{} turns, {} messages",
+            parse_result.turns.len(),
+            parse_result.message_count
+        )),
         body_hash: Some(parse_result.file_hash.clone()),
         language: "conversation".to_string(),
     });
@@ -165,7 +170,8 @@ pub fn parse_memory_file(
     known_entities: &[String],
 ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
     let content = std::fs::read_to_string(md_path)?;
-    let filename = md_path.file_name()
+    let filename = md_path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown.md");
 
@@ -204,12 +210,9 @@ fn find_preceding_problem<'a>(
     segments: &'a [classifier::ClassifiedSegment],
     solution: &classifier::ClassifiedSegment,
 ) -> Option<&'a classifier::ClassifiedSegment> {
-    segments.iter()
-        .rev()
-        .find(|s| {
-            matches!(s.kind, classifier::SegmentKind::Problem)
-                && s.line_number < solution.line_number
-        })
+    segments.iter().rev().find(|s| {
+        matches!(s.kind, classifier::SegmentKind::Problem) && s.line_number < solution.line_number
+    })
 }
 
 /// Generate skill note markdown files from conversation segments.
@@ -262,17 +265,26 @@ pub fn generate_skill_notes(
 
     if !decisions.is_empty() {
         index.push_str("## Decisions\n\n");
-        for d in &decisions { index.push_str(d); index.push('\n'); }
+        for d in &decisions {
+            index.push_str(d);
+            index.push('\n');
+        }
         index.push('\n');
     }
     if !problems.is_empty() {
         index.push_str("## Problems\n\n");
-        for p in &problems { index.push_str(p); index.push('\n'); }
+        for p in &problems {
+            index.push_str(p);
+            index.push('\n');
+        }
         index.push('\n');
     }
     if !solutions.is_empty() {
         index.push_str("## Solutions\n\n");
-        for s in &solutions { index.push_str(s); index.push('\n'); }
+        for s in &solutions {
+            index.push_str(s);
+            index.push('\n');
+        }
         index.push('\n');
     }
 
@@ -289,4 +301,3 @@ fn slug_from_name(name: &str) -> String {
         .take(60)
         .collect()
 }
-

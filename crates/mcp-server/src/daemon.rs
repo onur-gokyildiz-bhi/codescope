@@ -1,14 +1,20 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 
 /// Shared daemon state — manages DB connections for all projects.
 /// Each project gets its own SurrealKv directory under ~/.codescope/db/<repo>/.
 pub struct DaemonState {
     dbs: tokio::sync::RwLock<HashMap<String, Surreal<Db>>>,
     base_db_path: PathBuf,
+}
+
+impl Default for DaemonState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DaemonState {
@@ -40,17 +46,23 @@ impl DaemonState {
             std::fs::create_dir_all(parent)?;
         }
 
-        tracing::info!("Opening DB for repo '{}' at {}", repo_name, db_path.display());
+        tracing::info!(
+            "Opening DB for repo '{}' at {}",
+            repo_name,
+            db_path.display()
+        );
 
-        let db = Surreal::new::<surrealdb::engine::local::SurrealKv>(
-            db_path.to_string_lossy().as_ref(),
-        )
-        .await?;
+        let db =
+            Surreal::new::<surrealdb::engine::local::SurrealKv>(db_path.to_string_lossy().as_ref())
+                .await?;
         db.use_ns("codescope").use_db(repo_name).await?;
         codescope_core::graph::schema::init_schema(&db).await?;
 
         // Cache it
-        self.dbs.write().await.insert(repo_name.to_string(), db.clone());
+        self.dbs
+            .write()
+            .await
+            .insert(repo_name.to_string(), db.clone());
 
         Ok(db)
     }

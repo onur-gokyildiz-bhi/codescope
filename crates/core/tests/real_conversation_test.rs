@@ -1,24 +1,50 @@
 /// Test conversation indexing against a real Claude Code JSONL transcript.
-/// This test is ignored by default — run with: cargo test real_conv -- --ignored --nocapture
+/// This test is ignored by default — run with:
+///   CODESCOPE_TEST_JSONL_DIR=/path/to/jsonl/dir cargo test real_conv -- --ignored --nocapture
+
+fn get_test_jsonl_dir() -> Option<std::path::PathBuf> {
+    std::env::var("CODESCOPE_TEST_JSONL_DIR")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.exists())
+}
 
 #[test]
 #[ignore]
 fn real_conv_large_jsonl() {
     use codescope_core::conversation::parse_conversation;
-    use std::path::Path;
     use std::time::Instant;
 
-    let jsonl_path = Path::new("C:/Users/onurg/.claude/projects/C--Users-onurg-OneDrive-Documents-graph-rag/f3c19537-a153-4e6a-9647-784912d5ceb2.jsonl");
+    let dir = match get_test_jsonl_dir() {
+        Some(d) => d,
+        None => {
+            println!("SKIP: Set CODESCOPE_TEST_JSONL_DIR to a directory containing .jsonl files");
+            return;
+        }
+    };
 
-    if !jsonl_path.exists() {
-        println!("SKIP: Large JSONL file not found at {:?}", jsonl_path);
-        return;
-    }
+    // Find the largest .jsonl file in the directory
+    let jsonl_path = match std::fs::read_dir(&dir).ok().and_then(|entries| {
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
+            .max_by_key(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+            .map(|e| e.path())
+    }) {
+        Some(p) => p,
+        None => {
+            println!("SKIP: No .jsonl files found in {:?}", dir);
+            return;
+        }
+    };
 
-    let file_size = std::fs::metadata(jsonl_path).unwrap().len();
-    println!("Testing with real JSONL: {:.1}MB ({} bytes)", file_size as f64 / 1_000_000.0, file_size);
+    let file_size = std::fs::metadata(&jsonl_path).unwrap().len();
+    println!(
+        "Testing with real JSONL: {:.1}MB ({} bytes)",
+        file_size as f64 / 1_000_000.0,
+        file_size
+    );
 
-    // Simulate known entities from an indexed codebase
     let known_entities = vec![
         "function:insert_entities:codescope_core::graph::builder::insert_entities".to_string(),
         "function:insert_relations:codescope_core::graph::builder::insert_relations".to_string(),
@@ -34,7 +60,8 @@ fn real_conv_large_jsonl() {
     ];
 
     let start = Instant::now();
-    let (entities, relations, result) = parse_conversation(jsonl_path, "graph-rag", &known_entities).unwrap();
+    let (entities, relations, result) =
+        parse_conversation(&jsonl_path, "graph-rag", &known_entities).unwrap();
     let elapsed = start.elapsed();
 
     println!("\n=== Conversation Indexing Results ===");
@@ -48,59 +75,111 @@ fn real_conv_large_jsonl() {
     println!("  Topics: {}", result.topics);
     println!("  Code links: {}", result.code_links);
 
-    // Print first 10 entities (not session)
     println!("\n--- First 10 Classified Segments ---");
-    for entity in entities.iter().filter(|e| e.kind != codescope_core::EntityKind::ConversationSession).take(10) {
-        println!("[{:?}] {} (line {})", entity.kind, entity.name, entity.start_line);
+    for entity in entities
+        .iter()
+        .filter(|e| e.kind != codescope_core::EntityKind::ConversationSession)
+        .take(10)
+    {
+        println!(
+            "[{:?}] {} (line {})",
+            entity.kind, entity.name, entity.start_line
+        );
         if let Some(body) = &entity.body {
-            let preview = if body.len() > 150 { &body[..150] } else { body.as_str() };
+            let preview = if body.len() > 150 {
+                &body[..150]
+            } else {
+                body.as_str()
+            };
             println!("  body: {}", preview);
         }
     }
 
-    // Print code link relations
     println!("\n--- Code Links ---");
-    for rel in relations.iter().filter(|r| {
-        r.kind == codescope_core::RelationKind::DiscussedIn || r.kind == codescope_core::RelationKind::DecidedAbout
-    }).take(10) {
+    for rel in relations
+        .iter()
+        .filter(|r| {
+            r.kind == codescope_core::RelationKind::DiscussedIn
+                || r.kind == codescope_core::RelationKind::DecidedAbout
+        })
+        .take(10)
+    {
         println!("[{:?}] {} -> {}", rel.kind, rel.from_entity, rel.to_entity);
     }
 
-    // Print solution-to-problem links
-    println!("\n--- Solution→Problem Links ---");
-    for rel in relations.iter().filter(|r| r.kind == codescope_core::RelationKind::SolvesFor).take(10) {
+    println!("\n--- Solution->Problem Links ---");
+    for rel in relations
+        .iter()
+        .filter(|r| r.kind == codescope_core::RelationKind::SolvesFor)
+        .take(10)
+    {
         println!("{} -> {}", rel.from_entity, rel.to_entity);
     }
 
-    // Sanity checks
-    assert!(result.sessions_indexed == 1, "Should index exactly 1 session");
-    assert!(entities.len() >= 5, "Real conversation should produce at least 5 entities, got {}", entities.len());
-    assert!(result.problems + result.decisions + result.solutions >= 3,
-        "Real conversation should find multiple classified segments");
-    assert!(elapsed.as_secs() < 10, "Should parse 10MB JSONL in under 10 seconds");
+    assert!(
+        result.sessions_indexed == 1,
+        "Should index exactly 1 session"
+    );
+    assert!(
+        entities.len() >= 5,
+        "Real conversation should produce at least 5 entities, got {}",
+        entities.len()
+    );
+    assert!(
+        result.problems + result.decisions + result.solutions >= 3,
+        "Real conversation should find multiple classified segments"
+    );
+    assert!(
+        elapsed.as_secs() < 10,
+        "Should parse 10MB JSONL in under 10 seconds"
+    );
 }
 
 #[test]
 #[ignore]
 fn real_conv_small_jsonl() {
     use codescope_core::conversation::parse_conversation;
-    use std::path::Path;
 
-    let jsonl_path = Path::new("C:/Users/onurg/.claude/projects/C--Users-onurg-OneDrive-Documents-graph-rag/593845ec-7e80-4f35-9411-ccd16be2c0ea.jsonl");
+    let dir = match get_test_jsonl_dir() {
+        Some(d) => d,
+        None => {
+            println!("SKIP: Set CODESCOPE_TEST_JSONL_DIR to a directory containing .jsonl files");
+            return;
+        }
+    };
 
-    if !jsonl_path.exists() {
-        println!("SKIP: Small JSONL file not found");
-        return;
-    }
+    // Find the smallest .jsonl file
+    let jsonl_path = match std::fs::read_dir(&dir).ok().and_then(|entries| {
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
+            .min_by_key(|e| e.metadata().map(|m| m.len()).unwrap_or(u64::MAX))
+            .map(|e| e.path())
+    }) {
+        Some(p) => p,
+        None => {
+            println!("SKIP: No .jsonl files found in {:?}", dir);
+            return;
+        }
+    };
 
-    let (entities, relations, result) = parse_conversation(jsonl_path, "graph-rag", &[]).unwrap();
+    let (entities, relations, result) = parse_conversation(&jsonl_path, "graph-rag", &[]).unwrap();
 
     println!("\n=== Small Session Results ===");
-    println!("Entities: {}, Relations: {}", entities.len(), relations.len());
-    println!("Decisions: {}, Problems: {}, Solutions: {}, Topics: {}",
-        result.decisions, result.problems, result.solutions, result.topics);
+    println!(
+        "Entities: {}, Relations: {}",
+        entities.len(),
+        relations.len()
+    );
+    println!(
+        "Decisions: {}, Problems: {}, Solutions: {}, Topics: {}",
+        result.decisions, result.problems, result.solutions, result.topics
+    );
 
-    for entity in entities.iter().filter(|e| e.kind != codescope_core::EntityKind::ConversationSession) {
+    for entity in entities
+        .iter()
+        .filter(|e| e.kind != codescope_core::EntityKind::ConversationSession)
+    {
         println!("[{:?}] {}", entity.kind, entity.name);
     }
 

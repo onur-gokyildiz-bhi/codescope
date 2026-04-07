@@ -82,7 +82,8 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let repo_name = args.repo.unwrap_or_else(|| {
-        args.path.file_name()
+        args.path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into())
     });
@@ -94,8 +95,12 @@ async fn main() -> Result<()> {
     println!("[1/4] Scanning source files...");
     let parser = CodeParser::new();
     let (total_files, supported_files, total_bytes) = count_files(&args.path, &parser);
-    println!("  Total files: {}, Supported: {}, Source bytes: {}\n",
-        total_files, supported_files, format_bytes(total_bytes));
+    println!(
+        "  Total files: {}, Supported: {}, Source bytes: {}\n",
+        total_files,
+        supported_files,
+        format_bytes(total_bytes)
+    );
 
     // --- Phase 2: Index benchmark ---
     println!("[2/4] Indexing benchmark...");
@@ -103,8 +108,9 @@ async fn main() -> Result<()> {
     let _ = std::fs::remove_dir_all(&db_path); // Clean start
 
     let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-        db_path.to_string_lossy().as_ref()
-    ).await?;
+        db_path.to_string_lossy().as_ref(),
+    )
+    .await?;
     db.use_ns("bench").use_db("code").await?;
     schema::init_schema(&db).await?;
 
@@ -121,11 +127,18 @@ async fn main() -> Result<()> {
         .build();
 
     for entry in walker {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) { continue }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            continue;
+        }
         let file_path = entry.path();
         let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !parser.supports_extension(ext) { continue }
+        if !parser.supports_extension(ext) {
+            continue;
+        }
 
         if let Ok((entities, relations)) = parser.parse_file(file_path, &repo_name) {
             entities_total += entities.len();
@@ -159,7 +172,10 @@ async fn main() -> Result<()> {
     println!("  Entities:          {}", entities_total);
     println!("  Relations:         {}", relations_total);
     println!("  Time:              {:.1}ms", index_time.as_millis());
-    println!("  Speed:             {:.1} files/sec, {:.1} entities/sec", files_per_sec, entities_per_sec);
+    println!(
+        "  Speed:             {:.1} files/sec, {:.1} entities/sec",
+        files_per_sec, entities_per_sec
+    );
     println!("  DB size:           {}\n", format_bytes(db_size));
 
     // --- Phase 3: Query benchmarks ---
@@ -195,8 +211,13 @@ async fn main() -> Result<()> {
             Err(_) => (0, 0),
         };
 
-        println!("  {:<30} {:>8.2}ms  ({} results, ~{} tokens)",
-            name, elapsed.as_secs_f64() * 1000.0, result_count, response_tokens);
+        println!(
+            "  {:<30} {:>8.2}ms  ({} results, ~{} tokens)",
+            name,
+            elapsed.as_secs_f64() * 1000.0,
+            result_count,
+            response_tokens
+        );
 
         query_metrics.push(QueryMetric {
             name: name.to_string(),
@@ -214,56 +235,67 @@ async fn main() -> Result<()> {
 
     // Scenario 1: "Find a function and understand its context"
     let traditional_1 = estimate_traditional_tokens_for_search(&args.path, &parser, 5);
-    let codescope_1 = query_metrics.iter()
+    let codescope_1 = query_metrics
+        .iter()
         .filter(|q| q.name == "search_functions" || q.name == "graph_traversal_callers")
         .map(|q| q.response_tokens)
         .sum::<usize>()
         .max(50);
     scenarios.push(token_scenario(
         "Find function + understand context",
-        traditional_1, codescope_1,
+        traditional_1,
+        codescope_1,
     ));
 
     // Scenario 2: "List all structs/classes"
     let traditional_2 = (total_bytes as usize) / 4; // read all files
-    let codescope_2 = query_metrics.iter()
+    let codescope_2 = query_metrics
+        .iter()
         .find(|q| q.name == "all_structs")
         .map(|q| q.response_tokens)
         .unwrap_or(100);
     scenarios.push(token_scenario(
         "List all structs in project",
-        traditional_2, codescope_2,
+        traditional_2,
+        codescope_2,
     ));
 
     // Scenario 3: "Largest/most complex functions"
     let traditional_3 = (total_bytes as usize) / 4;
-    let codescope_3 = query_metrics.iter()
+    let codescope_3 = query_metrics
+        .iter()
         .find(|q| q.name == "largest_functions")
         .map(|q| q.response_tokens)
         .unwrap_or(100);
     scenarios.push(token_scenario(
         "Find largest functions",
-        traditional_3, codescope_3,
+        traditional_3,
+        codescope_3,
     ));
 
     // Scenario 4: "Impact analysis — who calls this?"
     let traditional_4 = estimate_traditional_tokens_for_search(&args.path, &parser, 8);
-    let codescope_4 = query_metrics.iter()
+    let codescope_4 = query_metrics
+        .iter()
         .filter(|q| q.name.contains("callers") || q.name.contains("callees"))
         .map(|q| q.response_tokens)
         .sum::<usize>()
         .max(50);
     scenarios.push(token_scenario(
         "Impact analysis (callers + callees)",
-        traditional_4, codescope_4,
+        traditional_4,
+        codescope_4,
     ));
 
     println!();
-    println!("  {:<45} {:>12} {:>12} {:>10}",
-        "Scenario", "Traditional", "Codescope", "Saving");
+    println!(
+        "  {:<45} {:>12} {:>12} {:>10}",
+        "Scenario", "Traditional", "Codescope", "Saving"
+    );
     println!("  {}", "-".repeat(83));
     for s in &scenarios {
-        println!("  {:<45} {:>12} {:>12} {:>9.1}%",
+        println!(
+            "  {:<45} {:>12} {:>12} {:>9.1}%",
             s.scenario,
             format_tokens(s.traditional_tokens),
             format_tokens(s.codescope_tokens),
@@ -309,11 +341,20 @@ fn count_files(path: &PathBuf, parser: &CodeParser) -> (usize, usize, u64) {
         .build();
 
     for entry in walker {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) { continue }
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            continue;
+        }
 
         total += 1;
-        let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
         if parser.supports_extension(ext) {
             supported += 1;
             bytes += entry.path().metadata().map(|m| m.len()).unwrap_or(0);
@@ -323,7 +364,11 @@ fn count_files(path: &PathBuf, parser: &CodeParser) -> (usize, usize, u64) {
     (total, supported, bytes)
 }
 
-fn estimate_traditional_tokens_for_search(path: &PathBuf, parser: &CodeParser, files_to_read: usize) -> usize {
+fn estimate_traditional_tokens_for_search(
+    path: &PathBuf,
+    parser: &CodeParser,
+    files_to_read: usize,
+) -> usize {
     let mut sizes = Vec::new();
 
     let walker = ignore::WalkBuilder::new(path)
@@ -332,11 +377,24 @@ fn estimate_traditional_tokens_for_search(path: &PathBuf, parser: &CodeParser, f
         .build();
 
     for entry in walker {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
-        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) { continue }
-        let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
         if parser.supports_extension(ext) {
-            let size = entry.path().metadata().map(|m| m.len() as usize).unwrap_or(0);
+            let size = entry
+                .path()
+                .metadata()
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
             sizes.push(size);
         }
     }
@@ -361,15 +419,23 @@ fn token_scenario(name: &str, traditional: usize, codescope: usize) -> TokenSavi
 }
 
 fn format_bytes(b: u64) -> String {
-    if b >= 1_000_000 { format!("{:.1} MB", b as f64 / 1_000_000.0) }
-    else if b >= 1_000 { format!("{:.1} KB", b as f64 / 1_000.0) }
-    else { format!("{} B", b) }
+    if b >= 1_000_000 {
+        format!("{:.1} MB", b as f64 / 1_000_000.0)
+    } else if b >= 1_000 {
+        format!("{:.1} KB", b as f64 / 1_000.0)
+    } else {
+        format!("{} B", b)
+    }
 }
 
 fn format_tokens(t: usize) -> String {
-    if t >= 1_000_000 { format!("{:.1}M", t as f64 / 1_000_000.0) }
-    else if t >= 1_000 { format!("{:.1}K", t as f64 / 1_000.0) }
-    else { format!("{}", t) }
+    if t >= 1_000_000 {
+        format!("{:.1}M", t as f64 / 1_000_000.0)
+    } else if t >= 1_000 {
+        format!("{:.1}K", t as f64 / 1_000.0)
+    } else {
+        format!("{}", t)
+    }
 }
 
 fn dir_size(path: &PathBuf) -> u64 {

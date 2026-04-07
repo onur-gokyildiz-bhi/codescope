@@ -1,0 +1,33 @@
+#!/bin/bash
+# Pre-commit hook for codescope
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Format check
+echo "  [1/3] cargo fmt..."
+cargo fmt --all -- --check 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "FAIL: Code is not formatted. Run 'cargo fmt' first."
+    exit 1
+fi
+
+# Clippy
+echo "  [2/3] cargo clippy..."
+cargo clippy --workspace -- -D warnings 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "FAIL: Clippy found warnings. Fix them before committing."
+    exit 1
+fi
+
+# Tests
+echo "  [3/3] cargo test..."
+cargo test --workspace 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "FAIL: Tests failed."
+    exit 1
+fi
+
+echo "All pre-commit checks passed."

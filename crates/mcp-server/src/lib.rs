@@ -43,12 +43,19 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
         .join(&repo_name);
 
     // Append to debug log
-    let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
-        use std::io::Write;
-        writeln!(f, "  repo_name: {}\n  db_path: {:?}", repo_name, db_path)
-    });
+    let _ = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_file)
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "  repo_name: {}\n  db_path: {:?}", repo_name, db_path)
+        });
 
-    tracing::info!("Stdio mode: repo '{}', db: {}", repo_name, db_path.display());
+    tracing::info!(
+        "Stdio mode: repo '{}', db: {}",
+        repo_name,
+        db_path.display()
+    );
 
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -56,23 +63,30 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
     let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
         db_path.to_string_lossy().as_ref(),
     )
-    .await {
+    .await
+    {
         Ok(db) => db,
         Err(e) => {
-            let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
-                use std::io::Write;
-                writeln!(f, "  DB ERROR: {}", e)
-            });
+            let _ = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&log_file)
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "  DB ERROR: {}", e)
+                });
             return Err(e.into());
         }
     };
     db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
 
-    let _ = std::fs::OpenOptions::new().append(true).open(&log_file).and_then(|mut f| {
-        use std::io::Write;
-        writeln!(f, "  DB connected, MCP serving...")
-    });
+    let _ = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_file)
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "  DB connected, MCP serving...")
+        });
 
     // Create MCP server BEFORE spawning background tasks so we can share context_summary
     let mcp_server = server::GraphRagServer::new(db.clone(), repo_name.clone(), path.clone());
@@ -162,7 +176,11 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
 
             let mut conv_count = 0;
             for jsonl_path in &jsonl_files {
-                match codescope_core::conversation::parse_conversation(jsonl_path, &index_repo, &known_entities) {
+                match codescope_core::conversation::parse_conversation(
+                    jsonl_path,
+                    &index_repo,
+                    &known_entities,
+                ) {
                     Ok((entities, relations, _)) => {
                         let _ = builder.insert_entities(&entities).await;
                         let _ = builder.insert_relations(&relations).await;
@@ -182,7 +200,13 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if path.extension().map(|e| e == "md").unwrap_or(false) {
-                            if let Ok((ents, rels)) = codescope_core::conversation::parse_memory_file(&path, &index_repo, &known_entities) {
+                            if let Ok((ents, rels)) =
+                                codescope_core::conversation::parse_memory_file(
+                                    &path,
+                                    &index_repo,
+                                    &known_entities,
+                                )
+                            {
                                 let _ = builder.insert_entities(&ents).await;
                                 let _ = builder.insert_relations(&rels).await;
                                 mem_count += 1;
@@ -194,7 +218,8 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
 
             tracing::info!(
                 "Conversation indexing: {} sessions, {} memory files",
-                conv_count, mem_count
+                conv_count,
+                mem_count
             );
 
             // Phase 4: Generate CONTEXT.md + load context summary into MCP server
@@ -206,7 +231,12 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
             // Phase 5: Start file watcher for live re-indexing
             match watcher::start_watcher(&index_path) {
                 Ok(rx) => {
-                    watcher::spawn_reindex_task(rx, index_db.clone(), index_repo.clone(), index_path.clone());
+                    watcher::spawn_reindex_task(
+                        rx,
+                        index_db.clone(),
+                        index_repo.clone(),
+                        index_path.clone(),
+                    );
                     tracing::info!("File watcher active — changes will auto-reindex");
                 }
                 Err(e) => {
@@ -227,7 +257,8 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                     tracing::debug!("Periodic conversation re-index...");
 
                     let project_dir = helpers::find_claude_project_dir(&conv_path, &conv_repo);
-                    let builder = codescope_core::graph::builder::GraphBuilder::new(conv_db.clone());
+                    let builder =
+                        codescope_core::graph::builder::GraphBuilder::new(conv_db.clone());
                     let known: Vec<String> = Vec::new();
 
                     let mut jsonl_files = Vec::new();
@@ -236,20 +267,23 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                     let mut new_count = 0;
                     for jsonl_path in &jsonl_files {
                         // Check hash to skip already-indexed files
-                        let fname = jsonl_path.file_name()
+                        let fname = jsonl_path
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("");
-                        if let Ok(Some(_)) = helpers::check_conversation_hash(&conv_db, fname).await {
+                        if let Ok(Some(_)) = helpers::check_conversation_hash(&conv_db, fname).await
+                        {
                             continue; // already indexed
                         }
 
-                        match codescope_core::conversation::parse_conversation(jsonl_path, &conv_repo, &known) {
-                            Ok((entities, relations, _)) => {
-                                let _ = builder.insert_entities(&entities).await;
-                                let _ = builder.insert_relations(&relations).await;
-                                new_count += 1;
-                            }
-                            Err(_) => {}
+                        if let Ok((entities, relations, _)) =
+                            codescope_core::conversation::parse_conversation(
+                                jsonl_path, &conv_repo, &known,
+                            )
+                        {
+                            let _ = builder.insert_entities(&entities).await;
+                            let _ = builder.insert_relations(&relations).await;
+                            new_count += 1;
                         }
                     }
 

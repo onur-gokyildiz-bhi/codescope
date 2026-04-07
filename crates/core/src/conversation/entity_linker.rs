@@ -20,11 +20,16 @@ impl EntityLinker {
     /// Build a linker from a list of known entity names.
     /// Format: "table:name:qualified_name" per entry.
     pub fn new(known_entities: &[String]) -> Self {
-        let known = known_entities.iter()
+        let known = known_entities
+            .iter()
             .filter_map(|entry| {
                 let parts: Vec<&str> = entry.splitn(3, ':').collect();
                 if parts.len() == 3 {
-                    Some((parts[1].to_string(), parts[0].to_string(), parts[2].to_string()))
+                    Some((
+                        parts[1].to_string(),
+                        parts[0].to_string(),
+                        parts[2].to_string(),
+                    ))
                 } else {
                     None
                 }

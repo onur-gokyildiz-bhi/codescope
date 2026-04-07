@@ -1,14 +1,23 @@
-use anyhow::Result;
-use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
 use super::ContentParser;
+use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
+use anyhow::Result;
 
 pub struct JsonParser;
 
 impl ContentParser for JsonParser {
-    fn name(&self) -> &str { "json" }
-    fn extensions(&self) -> &[&str] { &["json"] }
+    fn name(&self) -> &str {
+        "json"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["json"]
+    }
 
-    fn parse(&self, file_path: &str, source: &str, repo: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+    fn parse(
+        &self,
+        file_path: &str,
+        source: &str,
+        repo: &str,
+    ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
         // Delegate to PackageParser for package.json files
         let filename = file_path.rsplit(&['/', '\\']).next().unwrap_or(file_path);
         if filename.eq_ignore_ascii_case("package.json") {
@@ -29,8 +38,10 @@ impl ContentParser for JsonParser {
             repo: repo.to_string(),
             start_line: 0,
             end_line: source.lines().count() as u32,
-            start_col: 0, end_col: 0,
-            signature: None, body: None,
+            start_col: 0,
+            end_col: 0,
+            signature: None,
+            body: None,
             body_hash: None,
             language: "json".to_string(),
         });
@@ -42,13 +53,23 @@ impl ContentParser for JsonParser {
         };
 
         if let serde_json::Value::Object(map) = &value {
-            extract_json_keys(map, file_path, repo, &file_qname, "", &mut entities, &mut relations, 0);
+            extract_json_keys(
+                map,
+                file_path,
+                repo,
+                &file_qname,
+                "",
+                &mut entities,
+                &mut relations,
+                0,
+            );
         }
 
         Ok((entities, relations))
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_json_keys(
     map: &serde_json::Map<String, serde_json::Value>,
     file_path: &str,
@@ -59,10 +80,16 @@ fn extract_json_keys(
     relations: &mut Vec<CodeRelation>,
     depth: usize,
 ) {
-    if depth > 5 { return; } // Limit nesting depth
+    if depth > 5 {
+        return;
+    } // Limit nesting depth
 
     for (key, value) in map {
-        let full_key = if prefix.is_empty() { key.clone() } else { format!("{}.{}", prefix, key) };
+        let full_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{}.{}", prefix, key)
+        };
         let qname = format!("{}:{}:{}", repo, file_path, full_key);
 
         let kind = if matches!(value, serde_json::Value::Object(_)) {
@@ -85,7 +112,10 @@ fn extract_json_keys(
             qualified_name: qname.clone(),
             file_path: file_path.to_string(),
             repo: repo.to_string(),
-            start_line: 0, end_line: 0, start_col: 0, end_col: 0,
+            start_line: 0,
+            end_line: 0,
+            start_col: 0,
+            end_col: 0,
             signature: None,
             body: body_str,
             body_hash: None,
@@ -96,14 +126,27 @@ fn extract_json_keys(
             kind: RelationKind::Contains,
             from_entity: parent_qname.to_string(),
             to_entity: qname.clone(),
-            from_table: if depth == 0 { "file".to_string() } else { "config".to_string() },
+            from_table: if depth == 0 {
+                "file".to_string()
+            } else {
+                "config".to_string()
+            },
             to_table: "config".to_string(),
             metadata: None,
         });
 
         // Recurse into nested objects
         if let serde_json::Value::Object(nested) = value {
-            extract_json_keys(nested, file_path, repo, &qname, &full_key, entities, relations, depth + 1);
+            extract_json_keys(
+                nested,
+                file_path,
+                repo,
+                &qname,
+                &full_key,
+                entities,
+                relations,
+                depth + 1,
+            );
         }
     }
 }

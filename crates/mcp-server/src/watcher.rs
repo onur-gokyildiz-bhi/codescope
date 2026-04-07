@@ -1,26 +1,21 @@
 //! File watcher — monitors codebase for changes and triggers incremental re-index.
 //! Uses `notify` with debouncing (2s) to avoid rapid-fire re-indexes.
 
-use std::path::{Path, PathBuf};
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
-use tracing::{info, debug, warn};
+use tracing::{debug, info, warn};
 
 /// Start watching a directory for file changes.
 /// Returns a channel receiver that emits batches of changed file paths.
-pub fn start_watcher(
-    codebase_path: &Path,
-) -> anyhow::Result<mpsc::Receiver<Vec<PathBuf>>> {
+pub fn start_watcher(codebase_path: &Path) -> anyhow::Result<mpsc::Receiver<Vec<PathBuf>>> {
     let (tx, rx) = mpsc::channel(50); // Bounded channel — backpressure at 50 pending batches
     let watch_path = codebase_path.to_path_buf();
 
     std::thread::spawn(move || {
         let (notify_tx, notify_rx) = std::sync::mpsc::channel();
 
-        let mut debouncer = match new_debouncer(
-            std::time::Duration::from_secs(2),
-            notify_tx,
-        ) {
+        let mut debouncer = match new_debouncer(std::time::Duration::from_secs(2), notify_tx) {
             Ok(d) => d,
             Err(e) => {
                 warn!("Failed to create file watcher: {}", e);
@@ -28,10 +23,10 @@ pub fn start_watcher(
             }
         };
 
-        if let Err(e) = debouncer.watcher().watch(
-            &watch_path,
-            notify::RecursiveMode::Recursive,
-        ) {
+        if let Err(e) = debouncer
+            .watcher()
+            .watch(&watch_path, notify::RecursiveMode::Recursive)
+        {
             warn!("Failed to watch {}: {}", watch_path.display(), e);
             return;
         }
@@ -150,8 +145,13 @@ fn is_indexable_file(path: &Path) -> bool {
     // Skip hidden, build artifacts, lock files — check components, not string contains
     for component in path.components() {
         let s = component.as_os_str().to_string_lossy();
-        if s == ".git" || s == "target" || s == "node_modules" || s == ".next"
-            || s == "build" || s == "dist" || s == "__pycache__"
+        if s == ".git"
+            || s == "target"
+            || s == "node_modules"
+            || s == ".next"
+            || s == "build"
+            || s == "dist"
+            || s == "__pycache__"
         {
             return false;
         }
@@ -163,14 +163,56 @@ fn is_indexable_file(path: &Path) -> bool {
 
     // Fast extension check — covers 99% of cases
     static INDEXABLE_EXTS: &[&str] = &[
-        "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "rb", "c", "cpp", "h", "hpp",
-        "cs", "swift", "kt", "scala", "vue", "svelte", "css", "scss", "html",
-        "json", "yaml", "yml", "toml", "xml", "md", "dockerfile", "tf", "hcl",
-        "sql", "graphql", "proto", "sh", "bash", "zsh", "ps1", "bat",
+        "rs",
+        "ts",
+        "tsx",
+        "js",
+        "jsx",
+        "py",
+        "go",
+        "java",
+        "rb",
+        "c",
+        "cpp",
+        "h",
+        "hpp",
+        "cs",
+        "swift",
+        "kt",
+        "scala",
+        "vue",
+        "svelte",
+        "css",
+        "scss",
+        "html",
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "xml",
+        "md",
+        "dockerfile",
+        "tf",
+        "hcl",
+        "sql",
+        "graphql",
+        "proto",
+        "sh",
+        "bash",
+        "zsh",
+        "ps1",
+        "bat",
     ];
     static INDEXABLE_NAMES: &[&str] = &[
-        "Dockerfile", "Makefile", "Cargo.toml", "package.json", "tsconfig.json",
-        "docker-compose.yml", "docker-compose.yaml", ".env", ".env.example",
+        "Dockerfile",
+        "Makefile",
+        "Cargo.toml",
+        "package.json",
+        "tsconfig.json",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        ".env",
+        ".env.example",
     ];
 
     let ext_lower = ext.to_lowercase();

@@ -1,23 +1,40 @@
-use anyhow::Result;
-use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
 use super::ContentParser;
+use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
+use anyhow::Result;
 
 pub struct TerraformParser;
 
 impl ContentParser for TerraformParser {
-    fn name(&self) -> &str { "terraform" }
-    fn extensions(&self) -> &[&str] { &["tf", "tfvars"] }
+    fn name(&self) -> &str {
+        "terraform"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["tf", "tfvars"]
+    }
 
-    fn parse(&self, file_path: &str, source: &str, repo: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+    fn parse(
+        &self,
+        file_path: &str,
+        source: &str,
+        repo: &str,
+    ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
         let mut entities = Vec::new();
         let mut relations = Vec::new();
 
         let file_qname = format!("{}:{}", repo, file_path);
         entities.push(CodeEntity {
-            kind: EntityKind::File, name: file_path.to_string(),
-            qualified_name: file_qname.clone(), file_path: file_path.to_string(),
-            repo: repo.to_string(), start_line: 0, end_line: source.lines().count() as u32,
-            start_col: 0, end_col: 0, signature: None, body: None, body_hash: None,
+            kind: EntityKind::File,
+            name: file_path.to_string(),
+            qualified_name: file_qname.clone(),
+            file_path: file_path.to_string(),
+            repo: repo.to_string(),
+            start_line: 0,
+            end_line: source.lines().count() as u32,
+            start_col: 0,
+            end_col: 0,
+            signature: None,
+            body: None,
+            body_hash: None,
             language: "terraform".to_string(),
         });
 
@@ -33,13 +50,20 @@ impl ContentParser for TerraformParser {
                         kind: EntityKind::InfraResource,
                         name: format!("{}.{}", rtype, rname),
                         qualified_name: qname.clone(),
-                        file_path: file_path.to_string(), repo: repo.to_string(),
-                        start_line: line_num, end_line: line_num, start_col: 0, end_col: 0,
+                        file_path: file_path.to_string(),
+                        repo: repo.to_string(),
+                        start_line: line_num,
+                        end_line: line_num,
+                        start_col: 0,
+                        end_col: 0,
                         signature: Some(format!("resource \"{}\" \"{}\"", rtype, rname)),
-                        body: None, body_hash: None, language: "terraform".to_string(),
+                        body: None,
+                        body_hash: None,
+                        language: "terraform".to_string(),
                     });
                     relations.push(CodeRelation {
-                        kind: RelationKind::Contains, from_entity: file_qname.clone(),
+                        kind: RelationKind::Contains,
+                        from_entity: file_qname.clone(),
                         to_entity: qname,
                         from_table: "file".to_string(),
                         to_table: "infra".to_string(),
@@ -52,15 +76,23 @@ impl ContentParser for TerraformParser {
                 if let Some(name) = extract_tf_name(trimmed, "variable") {
                     let qname = format!("{}:var:{}", file_qname, name);
                     entities.push(CodeEntity {
-                        kind: EntityKind::InfraVariable, name: name.clone(),
-                        qualified_name: qname.clone(), file_path: file_path.to_string(),
-                        repo: repo.to_string(), start_line: line_num, end_line: line_num,
-                        start_col: 0, end_col: 0,
+                        kind: EntityKind::InfraVariable,
+                        name: name.clone(),
+                        qualified_name: qname.clone(),
+                        file_path: file_path.to_string(),
+                        repo: repo.to_string(),
+                        start_line: line_num,
+                        end_line: line_num,
+                        start_col: 0,
+                        end_col: 0,
                         signature: Some(format!("variable \"{}\"", name)),
-                        body: None, body_hash: None, language: "terraform".to_string(),
+                        body: None,
+                        body_hash: None,
+                        language: "terraform".to_string(),
                     });
                     relations.push(CodeRelation {
-                        kind: RelationKind::Contains, from_entity: file_qname.clone(),
+                        kind: RelationKind::Contains,
+                        from_entity: file_qname.clone(),
                         to_entity: qname,
                         from_table: "file".to_string(),
                         to_table: "infra".to_string(),
@@ -73,15 +105,23 @@ impl ContentParser for TerraformParser {
                 if let Some(name) = extract_tf_name(trimmed, "provider") {
                     let qname = format!("{}:provider:{}", file_qname, name);
                     entities.push(CodeEntity {
-                        kind: EntityKind::InfraProvider, name: name.clone(),
-                        qualified_name: qname.clone(), file_path: file_path.to_string(),
-                        repo: repo.to_string(), start_line: line_num, end_line: line_num,
-                        start_col: 0, end_col: 0,
+                        kind: EntityKind::InfraProvider,
+                        name: name.clone(),
+                        qualified_name: qname.clone(),
+                        file_path: file_path.to_string(),
+                        repo: repo.to_string(),
+                        start_line: line_num,
+                        end_line: line_num,
+                        start_col: 0,
+                        end_col: 0,
                         signature: Some(format!("provider \"{}\"", name)),
-                        body: None, body_hash: None, language: "terraform".to_string(),
+                        body: None,
+                        body_hash: None,
+                        language: "terraform".to_string(),
                     });
                     relations.push(CodeRelation {
-                        kind: RelationKind::Contains, from_entity: file_qname.clone(),
+                        kind: RelationKind::Contains,
+                        from_entity: file_qname.clone(),
                         to_entity: qname,
                         from_table: "file".to_string(),
                         to_table: "infra".to_string(),
@@ -94,15 +134,23 @@ impl ContentParser for TerraformParser {
                 if let Some(name) = extract_tf_name(trimmed, "module") {
                     let qname = format!("{}:module:{}", file_qname, name);
                     entities.push(CodeEntity {
-                        kind: EntityKind::InfraResource, name: format!("module.{}", name),
-                        qualified_name: qname.clone(), file_path: file_path.to_string(),
-                        repo: repo.to_string(), start_line: line_num, end_line: line_num,
-                        start_col: 0, end_col: 0,
+                        kind: EntityKind::InfraResource,
+                        name: format!("module.{}", name),
+                        qualified_name: qname.clone(),
+                        file_path: file_path.to_string(),
+                        repo: repo.to_string(),
+                        start_line: line_num,
+                        end_line: line_num,
+                        start_col: 0,
+                        end_col: 0,
                         signature: Some(format!("module \"{}\"", name)),
-                        body: None, body_hash: None, language: "terraform".to_string(),
+                        body: None,
+                        body_hash: None,
+                        language: "terraform".to_string(),
                     });
                     relations.push(CodeRelation {
-                        kind: RelationKind::Contains, from_entity: file_qname.clone(),
+                        kind: RelationKind::Contains,
+                        from_entity: file_qname.clone(),
                         to_entity: qname,
                         from_table: "file".to_string(),
                         to_table: "infra".to_string(),

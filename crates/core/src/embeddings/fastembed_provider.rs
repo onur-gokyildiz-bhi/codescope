@@ -34,9 +34,8 @@ impl FastEmbedProvider {
 
         let model_name = format!("{:?}", model);
 
-        let text_embedding = TextEmbedding::try_new(
-            InitOptions::new(model).with_show_download_progress(true),
-        )?;
+        let text_embedding =
+            TextEmbedding::try_new(InitOptions::new(model).with_show_download_progress(true))?;
 
         Ok(Self {
             model: Mutex::new(text_embedding),
@@ -56,7 +55,10 @@ impl FastEmbedProvider {
             "all-minilm-l12" => EmbeddingModel::AllMiniLML12V2,
             "nomic" | "nomic-embed-text" | "nomic-v1.5" => EmbeddingModel::NomicEmbedTextV15,
             _ => {
-                tracing::warn!("Unknown model '{}', falling back to bge-small-en-v1.5", name);
+                tracing::warn!(
+                    "Unknown model '{}', falling back to bge-small-en-v1.5",
+                    name
+                );
                 EmbeddingModel::BGESmallENV15
             }
         };
@@ -68,7 +70,10 @@ impl FastEmbedProvider {
 impl EmbeddingProvider for FastEmbedProvider {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let text = text.to_string();
-        let mut model = self.model.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         let embeddings = model.embed(vec![text], None)?;
         embeddings
             .into_iter()
@@ -77,8 +82,11 @@ impl EmbeddingProvider for FastEmbedProvider {
     }
 
     async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        let mut model = self.model.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        let embeddings = model.embed(texts.to_vec(), None)?;
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let embeddings = model.embed(texts, None)?;
         Ok(embeddings)
     }
 

@@ -12,7 +12,11 @@ fn test_language_registry_has_19_languages() {
     let parser = CodeParser::new();
     let langs = parser.supported_languages();
     // 19 tree-sitter languages + 9 content parsers
-    assert!(langs.len() >= 19, "Expected at least 19 languages, got {}", langs.len());
+    assert!(
+        langs.len() >= 19,
+        "Expected at least 19 languages, got {}",
+        langs.len()
+    );
 }
 
 #[test]
@@ -72,9 +76,14 @@ fn test_parse_rust_function() {
 
     let (entities, _relations) = parser.parse_file(file.path(), "test-repo").unwrap();
 
-    assert!(entities.iter().any(|e| e.kind == EntityKind::File), "Should have File entity");
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Function && e.name == "hello"),
+        entities.iter().any(|e| e.kind == EntityKind::File),
+        "Should have File entity"
+    );
+    assert!(
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Function && e.name == "hello"),
         "Should have function 'hello'"
     );
 }
@@ -87,7 +96,9 @@ fn test_parse_rust_struct() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Struct && e.name == "MyStruct"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Struct && e.name == "MyStruct"),
         "Should have struct 'MyStruct'"
     );
 }
@@ -100,7 +111,9 @@ fn test_parse_rust_enum() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Enum && e.name == "Color"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Enum && e.name == "Color"),
         "Should have enum 'Color'"
     );
 }
@@ -125,8 +138,15 @@ fn test_parse_rust_contains_relations() {
     write!(file, "fn foo() {{}}\nfn bar() {{}}\n").unwrap();
 
     let (_entities, relations) = parser.parse_file(file.path(), "test-repo").unwrap();
-    let contains = relations.iter().filter(|r| r.kind == RelationKind::Contains).count();
-    assert!(contains >= 2, "Should have at least 2 Contains relations, got {}", contains);
+    let contains = relations
+        .iter()
+        .filter(|r| r.kind == RelationKind::Contains)
+        .count();
+    assert!(
+        contains >= 2,
+        "Should have at least 2 Contains relations, got {}",
+        contains
+    );
 }
 
 // =====================================================
@@ -137,11 +157,17 @@ fn test_parse_rust_contains_relations() {
 fn test_parse_typescript_function() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".ts").unwrap();
-    write!(file, "function greet(name: string): string {{\n  return `Hello ${{name}}`;\n}}\n").unwrap();
+    write!(
+        file,
+        "function greet(name: string): string {{\n  return `Hello ${{name}}`;\n}}\n"
+    )
+    .unwrap();
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Function && e.name == "greet"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Function && e.name == "greet"),
         "Should have function 'greet'"
     );
 }
@@ -150,11 +176,17 @@ fn test_parse_typescript_function() {
 fn test_parse_typescript_class() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".ts").unwrap();
-    write!(file, "class UserService {{\n  getUser() {{ return null; }}\n}}\n").unwrap();
+    write!(
+        file,
+        "class UserService {{\n  getUser() {{ return null; }}\n}}\n"
+    )
+    .unwrap();
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Class && e.name == "UserService"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Class && e.name == "UserService"),
         "Should have class 'UserService'"
     );
 }
@@ -171,7 +203,9 @@ fn test_parse_python_function() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Function && e.name == "calculate"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Function && e.name == "calculate"),
         "Should have function 'calculate'"
     );
 }
@@ -184,7 +218,9 @@ fn test_parse_python_class() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::Class && e.name == "Animal"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::Class && e.name == "Animal"),
         "Should have class 'Animal'"
     );
 }
@@ -197,12 +233,21 @@ fn test_parse_python_class() {
 fn test_parse_json_config() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".json").unwrap();
-    write!(file, r#"{{"database": {{"host": "localhost", "port": 5432}}}}"#).unwrap();
+    write!(
+        file,
+        r#"{{"database": {{"host": "localhost", "port": 5432}}}}"#
+    )
+    .unwrap();
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
-    assert!(entities.iter().any(|e| e.kind == EntityKind::File), "Should have File entity");
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
+        entities.iter().any(|e| e.kind == EntityKind::File),
+        "Should have File entity"
+    );
+    assert!(
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
         "Should have config entities"
     );
 }
@@ -211,7 +256,11 @@ fn test_parse_json_config() {
 fn test_parse_markdown() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".md").unwrap();
-    write!(file, "# Title\n\nSome text.\n\n## Section\n\n```rust\nfn main() {{}}\n```\n").unwrap();
+    write!(
+        file,
+        "# Title\n\nSome text.\n\n## Section\n\n```rust\nfn main() {{}}\n```\n"
+    )
+    .unwrap();
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
@@ -246,11 +295,17 @@ fn test_parse_dockerfile() {
 fn test_parse_sql() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".sql").unwrap();
-    write!(file, "CREATE TABLE users (\n  id INT PRIMARY KEY,\n  name VARCHAR(100)\n);\n").unwrap();
+    write!(
+        file,
+        "CREATE TABLE users (\n  id INT PRIMARY KEY,\n  name VARCHAR(100)\n);\n"
+    )
+    .unwrap();
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::DbTable && e.name == "users"),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::DbTable && e.name == "users"),
         "Should have DbTable 'users'"
     );
 }
@@ -263,7 +318,9 @@ fn test_parse_yaml() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
         "Should have config entities"
     );
 }
@@ -276,7 +333,9 @@ fn test_parse_toml() {
 
     let (entities, _) = parser.parse_file(file.path(), "test-repo").unwrap();
     assert!(
-        entities.iter().any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
+        entities
+            .iter()
+            .any(|e| e.kind == EntityKind::ConfigKey || e.kind == EntityKind::ConfigSection),
         "Should have config entities"
     );
 }
@@ -289,19 +348,37 @@ fn test_parse_toml() {
 fn test_relations_have_correct_tables() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".rs").unwrap();
-    write!(file, "fn caller() {{\n    callee();\n}}\nfn callee() {{}}\n").unwrap();
+    write!(
+        file,
+        "fn caller() {{\n    callee();\n}}\nfn callee() {{}}\n"
+    )
+    .unwrap();
 
     let (_entities, relations) = parser.parse_file(file.path(), "test-repo").unwrap();
 
     for rel in &relations {
-        assert!(!rel.from_table.is_empty(), "from_table should not be empty for {:?}", rel.kind);
-        assert!(!rel.to_table.is_empty(), "to_table should not be empty for {:?}", rel.kind);
+        assert!(
+            !rel.from_table.is_empty(),
+            "from_table should not be empty for {:?}",
+            rel.kind
+        );
+        assert!(
+            !rel.to_table.is_empty(),
+            "to_table should not be empty for {:?}",
+            rel.kind
+        );
     }
 
     // Contains relations should have "file" as from_table
-    let contains = relations.iter().filter(|r| r.kind == RelationKind::Contains).collect::<Vec<_>>();
+    let contains = relations
+        .iter()
+        .filter(|r| r.kind == RelationKind::Contains)
+        .collect::<Vec<_>>();
     for rel in &contains {
-        assert_eq!(rel.from_table, "file", "Contains should have from_table='file'");
+        assert_eq!(
+            rel.from_table, "file",
+            "Contains should have from_table='file'"
+        );
     }
 }
 
@@ -339,7 +416,10 @@ fn test_content_hash_consistency() {
     let hash3 = hash_content("fn main() { changed }");
 
     assert_eq!(hash1, hash2, "Same content should produce same hash");
-    assert_ne!(hash1, hash3, "Different content should produce different hash");
+    assert_ne!(
+        hash1, hash3,
+        "Different content should produce different hash"
+    );
 }
 
 // =====================================================
@@ -370,26 +450,60 @@ fn test_conversation_parser_basic() {
         "file:schema.rs:graph_rag::schema".to_string(),
     ];
 
-    let (entities, relations, result) = parse_conversation(&jsonl_path, "test-repo", &known_entities).unwrap();
+    let (entities, relations, result) =
+        parse_conversation(&jsonl_path, "test-repo", &known_entities).unwrap();
 
     // Should have session + classified segments
     assert!(result.sessions_indexed == 1, "Should index 1 session");
-    assert!(!entities.is_empty(), "Should produce entities, got {}", entities.len());
-    assert!(result.problems >= 1, "Should find at least 1 problem, got {}", result.problems);
-    assert!(result.solutions >= 1, "Should find at least 1 solution, got {}", result.solutions);
-    assert!(result.decisions >= 1, "Should find at least 1 decision, got {}", result.decisions);
+    assert!(
+        !entities.is_empty(),
+        "Should produce entities, got {}",
+        entities.len()
+    );
+    assert!(
+        result.problems >= 1,
+        "Should find at least 1 problem, got {}",
+        result.problems
+    );
+    assert!(
+        result.solutions >= 1,
+        "Should find at least 1 solution, got {}",
+        result.solutions
+    );
+    assert!(
+        result.decisions >= 1,
+        "Should find at least 1 decision, got {}",
+        result.decisions
+    );
 
     // Session entity should exist
-    let session = entities.iter().find(|e| e.kind == EntityKind::ConversationSession);
-    assert!(session.is_some(), "Should have a ConversationSession entity");
+    let session = entities
+        .iter()
+        .find(|e| e.kind == EntityKind::ConversationSession);
+    assert!(
+        session.is_some(),
+        "Should have a ConversationSession entity"
+    );
 
     // Should have contains relations (session -> segments)
-    let contains_rels: Vec<_> = relations.iter().filter(|r| r.kind == RelationKind::Contains).collect();
-    assert!(!contains_rels.is_empty(), "Should have Contains relations from session to segments");
+    let contains_rels: Vec<_> = relations
+        .iter()
+        .filter(|r| r.kind == RelationKind::Contains)
+        .collect();
+    assert!(
+        !contains_rels.is_empty(),
+        "Should have Contains relations from session to segments"
+    );
 
     // Solution-to-problem linking
-    let solves_rels: Vec<_> = relations.iter().filter(|r| r.kind == RelationKind::SolvesFor).collect();
-    assert!(!solves_rels.is_empty(), "Should have SolvesFor relation linking solution to problem");
+    let solves_rels: Vec<_> = relations
+        .iter()
+        .filter(|r| r.kind == RelationKind::SolvesFor)
+        .collect();
+    assert!(
+        !solves_rels.is_empty(),
+        "Should have SolvesFor relation linking solution to problem"
+    );
 
     println!("Conversation indexing test results:");
     println!("  Entities: {}", entities.len());
@@ -417,11 +531,22 @@ fn test_conversation_parser_tool_errors() {
 
     let (entities, _relations, result) = parse_conversation(&jsonl_path, "test-repo", &[]).unwrap();
 
-    assert!(result.problems >= 1, "Tool errors should be detected as problems, got {}", result.problems);
-    assert!(result.solutions >= 1, "Should find the fix as a solution, got {}", result.solutions);
+    assert!(
+        result.problems >= 1,
+        "Tool errors should be detected as problems, got {}",
+        result.problems
+    );
+    assert!(
+        result.solutions >= 1,
+        "Should find the fix as a solution, got {}",
+        result.solutions
+    );
 
     // Verify entity types
-    let problems: Vec<_> = entities.iter().filter(|e| e.kind == EntityKind::Problem).collect();
+    let problems: Vec<_> = entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Problem)
+        .collect();
     assert!(!problems.is_empty(), "Should have Problem entities");
 }
 

@@ -24,6 +24,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -53,11 +55,9 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
-        continue-on-error: true
 
       - name: Run tests
         run: cargo test --workspace
-        continue-on-error: true
 
       - name: Build release binaries
         run: cargo build --release -p codescope -p codescope-mcp
@@ -71,4 +71,12 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
-        continue-on-error: true
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

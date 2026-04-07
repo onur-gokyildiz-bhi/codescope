@@ -1,8 +1,8 @@
 use anyhow::Result;
-use git2::{Repository, DiffDelta, DiffOptions};
+use git2::{DiffDelta, DiffOptions, Repository};
 use std::path::Path;
 
-pub use super::{CommitInfo, FileChange, ChangeType};
+pub use super::{ChangeType, CommitInfo, FileChange};
 
 /// Analyzes git history for temporal code evolution
 pub struct GitAnalyzer {
@@ -49,17 +49,12 @@ impl GitAnalyzer {
     /// Get file changes for a specific commit
     fn commit_diff(&self, commit: &git2::Commit) -> Result<Vec<FileChange>> {
         let tree = commit.tree()?;
-        let parent_tree = commit
-            .parent(0)
-            .ok()
-            .and_then(|p| p.tree().ok());
+        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
 
         let mut opts = DiffOptions::new();
-        let diff = self.repo.diff_tree_to_tree(
-            parent_tree.as_ref(),
-            Some(&tree),
-            Some(&mut opts),
-        )?;
+        let diff =
+            self.repo
+                .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
 
         let mut changes = Vec::new();
 
@@ -101,12 +96,15 @@ impl GitAnalyzer {
         let commits = self.recent_commits(500)?;
 
         // Intern file paths to avoid repeated String allocations in O(n²) loop
-        let mut path_intern: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        let mut path_intern: std::collections::HashMap<&str, u32> =
+            std::collections::HashMap::new();
         let mut path_list: Vec<&str> = Vec::new();
         for commit in &commits {
             for f in &commit.files_changed {
                 let next_id = path_list.len() as u32;
-                if let std::collections::hash_map::Entry::Vacant(e) = path_intern.entry(f.path.as_str()) {
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    path_intern.entry(f.path.as_str())
+                {
                     e.insert(next_id);
                     path_list.push(f.path.as_str());
                 }
@@ -114,9 +112,12 @@ impl GitAnalyzer {
         }
 
         // Count coupling using interned IDs (u32 pairs, not String pairs)
-        let mut coupling: std::collections::HashMap<(u32, u32), usize> = std::collections::HashMap::new();
+        let mut coupling: std::collections::HashMap<(u32, u32), usize> =
+            std::collections::HashMap::new();
         for commit in &commits {
-            let file_ids: Vec<u32> = commit.files_changed.iter()
+            let file_ids: Vec<u32> = commit
+                .files_changed
+                .iter()
                 .filter_map(|f| path_intern.get(f.path.as_str()).copied())
                 .collect();
 
@@ -136,9 +137,16 @@ impl GitAnalyzer {
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         pairs.truncate(limit);
 
-        Ok(pairs.into_iter().map(|((a, b), count)| {
-            (path_list[a as usize].to_string(), path_list[b as usize].to_string(), count)
-        }).collect())
+        Ok(pairs
+            .into_iter()
+            .map(|((a, b), count)| {
+                (
+                    path_list[a as usize].to_string(),
+                    path_list[b as usize].to_string(),
+                    count,
+                )
+            })
+            .collect())
     }
 
     /// Get file churn (most frequently changed files)
@@ -161,7 +169,9 @@ impl GitAnalyzer {
     }
 
     /// Get contributor map (who knows what)
-    pub fn contributor_map(&self) -> Result<std::collections::HashMap<String, Vec<(String, usize)>>> {
+    pub fn contributor_map(
+        &self,
+    ) -> Result<std::collections::HashMap<String, Vec<(String, usize)>>> {
         let commits = self.recent_commits(1000)?;
         let mut map: std::collections::HashMap<String, std::collections::HashMap<String, usize>> =
             std::collections::HashMap::with_capacity(50);

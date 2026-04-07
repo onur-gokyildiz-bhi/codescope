@@ -1,7 +1,7 @@
 use anyhow::Result;
-use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
-use tracing::{info, warn, debug};
+use surrealdb::Surreal;
+use tracing::{debug, info, warn};
 
 use super::provider::EmbeddingProvider;
 
@@ -16,7 +16,7 @@ use super::provider::EmbeddingProvider;
 /// 384-dim f32 (1536 bytes) → 48 bytes (32x smaller)
 #[inline]
 pub fn binary_quantize(embedding: &[f32]) -> Vec<u8> {
-    let num_bytes = (embedding.len() + 7) / 8;
+    let num_bytes = embedding.len().div_ceil(8);
     let mut packed = vec![0u8; num_bytes];
     for (i, &val) in embedding.iter().enumerate() {
         if val > 0.0 {
@@ -48,7 +48,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         norm_b += b[i] * b[i];
     }
     let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom < 1e-10 { 0.0 } else { dot / denom }
+    if denom < 1e-10 {
+        0.0
+    } else {
+        dot / denom
+    }
 }
 
 // =====================================================================
@@ -82,7 +86,10 @@ impl EmbeddingPipeline {
 
         if functions.is_empty() {
             info!("All functions already have embeddings");
-            return Ok(EmbedResult { embedded: 0, binary_quantized: 0 });
+            return Ok(EmbedResult {
+                embedded: 0,
+                binary_quantized: 0,
+            });
         }
 
         info!("Embedding {} functions...", functions.len());
@@ -103,10 +110,11 @@ impl EmbeddingPipeline {
             let id_str = func.id.to_string();
             let result = self
                 .db
-                .query(
-                    "UPDATE $id SET embedding = $embedding, binary_embedding = $bq",
-                )
-                .bind(("id", surrealdb::sql::Thing::from(("function".to_string(), id_str.clone()))))
+                .query("UPDATE $id SET embedding = $embedding, binary_embedding = $bq")
+                .bind((
+                    "id",
+                    surrealdb::sql::Thing::from(("function".to_string(), id_str.clone())),
+                ))
                 .bind(("embedding", embedding))
                 .bind(("bq", bq_as_ints))
                 .await;
@@ -123,15 +131,24 @@ impl EmbeddingPipeline {
         }
 
         let f32_bytes = count * dims * 4;
-        let bq_bytes = bq_count * ((dims + 7) / 8);
+        let bq_bytes = bq_count * dims.div_ceil(8);
         info!(
             "Embedded {} functions ({} dims). Storage: f32={} KB, BQ={} KB ({}x smaller)",
-            count, dims,
-            f32_bytes / 1024, bq_bytes / 1024,
-            if bq_bytes > 0 { f32_bytes / bq_bytes } else { 0 }
+            count,
+            dims,
+            f32_bytes / 1024,
+            bq_bytes / 1024,
+            if bq_bytes > 0 {
+                f32_bytes / bq_bytes
+            } else {
+                0
+            }
         );
 
-        Ok(EmbedResult { embedded: count, binary_quantized: bq_count })
+        Ok(EmbedResult {
+            embedded: count,
+            binary_quantized: bq_count,
+        })
     }
 
     /// Backfill binary embeddings for functions that have f32 but no BQ.
@@ -162,7 +179,10 @@ impl EmbeddingPipeline {
             let _ = self
                 .db
                 .query("UPDATE $id SET binary_embedding = $bq")
-                .bind(("id", surrealdb::sql::Thing::from(("function".to_string(), id_str))))
+                .bind((
+                    "id",
+                    surrealdb::sql::Thing::from(("function".to_string(), id_str)),
+                ))
                 .bind(("bq", bq_as_ints))
                 .await;
             count += 1;
@@ -194,13 +214,16 @@ impl EmbeddingPipeline {
             .await?
             .take(0)?;
 
-        let has_bq = bq_count.first()
+        let has_bq = bq_count
+            .first()
             .and_then(|v| v.get("total"))
             .and_then(|v| v.as_u64())
-            .unwrap_or(0) > 0;
+            .unwrap_or(0)
+            > 0;
 
         if has_bq {
-            self.two_stage_search(&query_embedding, &query_bq, limit).await
+            self.two_stage_search(&query_embedding, &query_bq, limit)
+                .await
         } else {
             // Fallback: direct cosine search (pre-BQ data)
             debug!("No binary embeddings found, falling back to cosine-only search");
@@ -246,18 +269,21 @@ impl EmbeddingPipeline {
 
         debug!(
             "BQ pre-filter: {} candidates → top {} for reranking (Hamming range: {}-{})",
-            candidates.len(), scored.len(),
+            candidates.len(),
+            scored.len(),
             scored.first().map(|s| s.1).unwrap_or(0),
             scored.last().map(|s| s.1).unwrap_or(0),
         );
 
         // Stage 2: Load full f32 embeddings ONLY for top-K candidates
-        let candidate_ids: Vec<String> = scored.iter()
+        let candidate_ids: Vec<String> = scored
+            .iter()
             .map(|&(i, _)| candidates[i].id.to_string())
             .collect();
 
         // Build batch query for candidate embeddings
-        let id_list = candidate_ids.iter()
+        let id_list = candidate_ids
+            .iter()
             .map(|id| format!("function:{}", id))
             .collect::<Vec<_>>()
             .join(", ");
@@ -265,7 +291,8 @@ impl EmbeddingPipeline {
         let full_embeddings: Vec<FullEmbeddingRecord> = self
             .db
             .query(format!(
-                "SELECT id, embedding FROM `function` WHERE id IN [{}]", id_list
+                "SELECT id, embedding FROM `function` WHERE id IN [{}]",
+                id_list
             ))
             .await?
             .take(0)?;
@@ -277,15 +304,17 @@ impl EmbeddingPipeline {
             .collect();
 
         // Compute cosine similarity for reranking
-        let mut results: Vec<SemanticSearchResult> = scored.iter()
-            .filter_map(|&(i, hamming)| {
+        let mut results: Vec<SemanticSearchResult> = scored
+            .iter()
+            .map(|&(i, hamming)| {
                 let c = &candidates[i];
                 let id_str = c.id.to_string();
-                let cosine = embed_map.get(&id_str)
+                let cosine = embed_map
+                    .get(&id_str)
                     .map(|emb| cosine_similarity(query_embedding, emb))
                     .unwrap_or(0.0);
 
-                Some(SemanticSearchResult {
+                SemanticSearchResult {
                     name: c.name.clone(),
                     qualified_name: c.qualified_name.clone(),
                     signature: c.signature.clone(),
@@ -294,12 +323,16 @@ impl EmbeddingPipeline {
                     end_line: c.end_line,
                     score: Some(cosine as f64),
                     hamming_distance: Some(hamming),
-                })
+                }
             })
             .collect();
 
         // Sort by cosine similarity (descending = more similar)
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
 
         Ok(results)
@@ -324,16 +357,19 @@ impl EmbeddingPipeline {
             .await?
             .take(0)?;
 
-        Ok(results.into_iter().map(|r| SemanticSearchResult {
-            name: r.name,
-            qualified_name: r.qualified_name,
-            signature: r.signature,
-            file_path: r.file_path,
-            start_line: r.start_line,
-            end_line: r.end_line,
-            score: r.score,
-            hamming_distance: None,
-        }).collect())
+        Ok(results
+            .into_iter()
+            .map(|r| SemanticSearchResult {
+                name: r.name,
+                qualified_name: r.qualified_name,
+                signature: r.signature,
+                file_path: r.file_path,
+                start_line: r.start_line,
+                end_line: r.end_line,
+                score: r.score,
+                hamming_distance: None,
+            })
+            .collect())
     }
 
     /// Get embedding statistics
@@ -349,7 +385,8 @@ impl EmbeddingPipeline {
             .take(0)?;
 
         // Parse results
-        let total_funcs = result.first()
+        let total_funcs = result
+            .first()
             .and_then(|v| v.get("total"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;

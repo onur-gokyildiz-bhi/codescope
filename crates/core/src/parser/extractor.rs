@@ -19,7 +19,11 @@ impl EntityExtractor {
         }
     }
 
-    pub fn extract(&self, tree: &Tree, source: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+    pub fn extract(
+        &self,
+        tree: &Tree,
+        source: &str,
+    ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
         let mut entities = Vec::new();
         let mut relations = Vec::new();
 
@@ -69,7 +73,9 @@ impl EntityExtractor {
         parent_qualified_name: Option<&str>,
         depth: usize,
     ) -> Result<()> {
-        if depth > 100 { return Ok(()); }
+        if depth > 100 {
+            return Ok(());
+        }
 
         let kind_str = node.kind();
 
@@ -90,7 +96,11 @@ impl EntityExtractor {
                         kind: RelationKind::Contains,
                         from_entity: parent_qualified_name.unwrap_or(&file_qname).to_string(),
                         to_entity: qname.clone(),
-                        from_table: if parent_qualified_name.is_some() { "class".to_string() } else { "file".to_string() },
+                        from_table: if parent_qualified_name.is_some() {
+                            "class".to_string()
+                        } else {
+                            "file".to_string()
+                        },
                         to_table: "function".to_string(),
                         metadata: None,
                     });
@@ -103,7 +113,14 @@ impl EntityExtractor {
                     // Continue walking children for nested items
                     for i in 0..node.child_count() {
                         if let Some(child) = node.child(i) {
-                            self.walk_node_depth(child, source, entities, relations, Some(&qname), depth + 1)?;
+                            self.walk_node_depth(
+                                child,
+                                source,
+                                entities,
+                                relations,
+                                Some(&qname),
+                                depth + 1,
+                            )?;
                         }
                     }
                     return Ok(());
@@ -139,7 +156,14 @@ impl EntityExtractor {
                     // Walk children with class as parent
                     for i in 0..node.child_count() {
                         if let Some(child) = node.child(i) {
-                            self.walk_node_depth(child, source, entities, relations, Some(&qname), depth + 1)?;
+                            self.walk_node_depth(
+                                child,
+                                source,
+                                entities,
+                                relations,
+                                Some(&qname),
+                                depth + 1,
+                            )?;
                         }
                     }
                     return Ok(());
@@ -171,7 +195,14 @@ impl EntityExtractor {
         // Recurse into children
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                self.walk_node_depth(child, source, entities, relations, parent_qualified_name, depth + 1)?;
+                self.walk_node_depth(
+                    child,
+                    source,
+                    entities,
+                    relations,
+                    parent_qualified_name,
+                    depth + 1,
+                )?;
             }
         }
 
@@ -184,7 +215,8 @@ impl EntityExtractor {
         source: &str,
         parent: Option<&str>,
     ) -> Result<Option<CodeEntity>> {
-        let name = self.find_child_text(node, "name", source)
+        let name = self
+            .find_child_text(node, "name", source)
             .or_else(|| self.find_child_text(node, "identifier", source));
 
         let name = match name {
@@ -227,7 +259,8 @@ impl EntityExtractor {
     }
 
     fn extract_class(&self, node: Node, source: &str) -> Result<Option<CodeEntity>> {
-        let name = self.find_child_text(node, "name", source)
+        let name = self
+            .find_child_text(node, "name", source)
             .or_else(|| self.find_child_text(node, "identifier", source));
 
         let name = match name {
@@ -338,12 +371,8 @@ impl EntityExtractor {
         }
 
         // Detect HTTP client calls (reqwest, fetch, axios, requests, http)
-        if kind == "call_expression"
-            || kind == "method_invocation"
-            || kind == "call"
-        {
-            if let Some((http_method, url_pattern, raw_text)) =
-                self.extract_http_call(node, source)
+        if kind == "call_expression" || kind == "method_invocation" || kind == "call" {
+            if let Some((http_method, url_pattern, raw_text)) = self.extract_http_call(node, source)
             {
                 let call_qname = format!(
                     "{}:{}:http:{}:{}:L{}",
@@ -385,7 +414,13 @@ impl EntityExtractor {
 
         if cursor.goto_first_child() {
             loop {
-                self.walk_for_calls_with_entities(cursor, source, caller_qname, relations, entities);
+                self.walk_for_calls_with_entities(
+                    cursor,
+                    source,
+                    caller_qname,
+                    relations,
+                    entities,
+                );
                 if !cursor.goto_next_sibling() {
                     break;
                 }
@@ -477,9 +512,18 @@ impl EntityExtractor {
         // Known HTTP client patterns: "receiver.method" or "function"
         let http_methods = ["get", "post", "put", "delete", "patch", "head", "options"];
         let http_clients = [
-            "reqwest", "client", "http_client", "httpclient",
-            "axios", "fetch", "requests", "http", "net",
-            "ureq", "hyper", "surf",
+            "reqwest",
+            "client",
+            "http_client",
+            "httpclient",
+            "axios",
+            "fetch",
+            "requests",
+            "http",
+            "net",
+            "ureq",
+            "hyper",
+            "surf",
         ];
 
         let method = if callee_lower == "fetch" {
@@ -487,10 +531,10 @@ impl EntityExtractor {
             "GET".to_string()
         } else {
             // Check for receiver.method pattern (reqwest::get, axios.post, requests.get)
-            let parts: Vec<&str> = callee_lower.rsplitn(2, |c| c == '.' || c == ':').collect();
+            let parts: Vec<&str> = callee_lower.rsplitn(2, ['.', ':']).collect();
             if parts.len() == 2 {
                 let method_part = parts[0];
-                let receiver_part = parts[1].rsplit(|c| c == '.' || c == ':').next().unwrap_or(parts[1]);
+                let receiver_part = parts[1].rsplit(['.', ':']).next().unwrap_or(parts[1]);
                 if http_methods.contains(&method_part)
                     && http_clients.iter().any(|c| receiver_part.contains(c))
                 {
@@ -534,20 +578,22 @@ impl EntityExtractor {
     /// Extract the first string literal argument from a call expression.
     fn extract_first_string_arg(&self, node: Node, source: &str) -> Option<String> {
         // Look for arguments node
-        let args_node = node.child_by_field_name("arguments")
-            .or_else(|| {
-                // Fallback: find parenthesized child
-                (0..node.child_count())
-                    .filter_map(|i| node.child(i))
-                    .find(|c| c.kind() == "arguments" || c.kind() == "argument_list")
-            })?;
+        let args_node = node.child_by_field_name("arguments").or_else(|| {
+            // Fallback: find parenthesized child
+            (0..node.child_count())
+                .filter_map(|i| node.child(i))
+                .find(|c| c.kind() == "arguments" || c.kind() == "argument_list")
+        })?;
 
         // Find first string literal in arguments
         for i in 0..args_node.child_count() {
             if let Some(child) = args_node.child(i) {
                 let kind = child.kind();
-                if kind == "string" || kind == "string_literal" || kind == "interpreted_string_literal"
-                    || kind == "template_string" || kind == "raw_string_literal"
+                if kind == "string"
+                    || kind == "string_literal"
+                    || kind == "interpreted_string_literal"
+                    || kind == "template_string"
+                    || kind == "raw_string_literal"
                 {
                     let text = child.utf8_text(source.as_bytes()).ok()?.trim().to_string();
                     // Remove quotes
@@ -582,13 +628,10 @@ fn extract_url_path(url: &str) -> String {
 
 /// Sanitize URL for use in SurrealDB record IDs
 fn sanitize_url(url: &str) -> String {
-    url.replace(
-        ['/', '{', '}', ':', '.', '?', '&', '=', '#', ' '],
-        "_",
-    )
-    .replace("__", "_")
-    .trim_matches('_')
-    .to_string()
+    url.replace(['/', '{', '}', ':', '.', '?', '&', '=', '#', ' '], "_")
+        .replace("__", "_")
+        .trim_matches('_')
+        .to_string()
 }
 
 fn hash_content(content: &str) -> String {

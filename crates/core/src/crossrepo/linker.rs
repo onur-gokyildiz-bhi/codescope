@@ -1,7 +1,7 @@
 use anyhow::Result;
-use surrealdb::Surreal;
-use surrealdb::engine::local::Db;
 use serde::Deserialize;
+use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 
 /// Links entities across multiple repositories
 pub struct CrossRepoLinker {
@@ -23,7 +23,8 @@ impl CrossRepoLinker {
 
     /// Attempt to resolve cross-repo import references
     pub async fn link_repos(&self) -> Result<usize> {
-        let imports: Vec<ImportRecord> = self.db
+        let imports: Vec<ImportRecord> = self
+            .db
             .query("SELECT body, repo, file_path FROM import_decl".to_string())
             .await?
             .take(0)?;
@@ -68,7 +69,9 @@ fn extract_module_from_import(import_text: &str) -> String {
     // TS/JS: import ... from 'path'
     if let Some(idx) = text.find("from ") {
         let rest = &text[idx + 5..];
-        let path = rest.trim().trim_matches(|c| c == '\'' || c == '"' || c == ';');
+        let path = rest
+            .trim()
+            .trim_matches(|c| c == '\'' || c == '"' || c == ';');
         return path.trim_start_matches("./").to_string();
     }
 

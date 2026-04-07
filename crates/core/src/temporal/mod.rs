@@ -1,11 +1,11 @@
-pub mod git;
 pub mod evolution;
+pub mod git;
 pub mod graph_sync;
 
 use serde::{Deserialize, Serialize};
 
 pub use git::GitAnalyzer;
-pub use graph_sync::{TemporalGraphSync, HotspotEntry};
+pub use graph_sync::{HotspotEntry, TemporalGraphSync};
 
 /// Git commit info — shared data types (git2-independent)
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
-use anyhow::Result;
-use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
 use super::ContentParser;
+use crate::{CodeEntity, CodeRelation, EntityKind, RelationKind};
+use anyhow::Result;
 
 pub struct MarkdownParser;
 
@@ -12,19 +12,36 @@ struct Frontmatter {
 }
 
 impl ContentParser for MarkdownParser {
-    fn name(&self) -> &str { "markdown" }
-    fn extensions(&self) -> &[&str] { &["md", "mdx"] }
+    fn name(&self) -> &str {
+        "markdown"
+    }
+    fn extensions(&self) -> &[&str] {
+        &["md", "mdx"]
+    }
 
-    fn parse(&self, file_path: &str, source: &str, repo: &str) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
+    fn parse(
+        &self,
+        file_path: &str,
+        source: &str,
+        repo: &str,
+    ) -> Result<(Vec<CodeEntity>, Vec<CodeRelation>)> {
         let mut entities = Vec::new();
         let mut relations = Vec::new();
 
         let file_qname = format!("{}:{}", repo, file_path);
         entities.push(CodeEntity {
-            kind: EntityKind::File, name: file_path.to_string(),
-            qualified_name: file_qname.clone(), file_path: file_path.to_string(),
-            repo: repo.to_string(), start_line: 0, end_line: source.lines().count() as u32,
-            start_col: 0, end_col: 0, signature: None, body: None, body_hash: None,
+            kind: EntityKind::File,
+            name: file_path.to_string(),
+            qualified_name: file_qname.clone(),
+            file_path: file_path.to_string(),
+            repo: repo.to_string(),
+            start_line: 0,
+            end_line: source.lines().count() as u32,
+            start_col: 0,
+            end_col: 0,
+            signature: None,
+            body: None,
+            body_hash: None,
             language: "markdown".to_string(),
         });
 
@@ -53,9 +70,10 @@ impl ContentParser for MarkdownParser {
                 repo: repo.to_string(),
                 start_line: 1,
                 end_line: source.lines().count() as u32,
-                start_col: 0, end_col: 0,
-                signature: fm.created.clone(),  // created date in signature field
-                body: fm.description.clone(),   // description in body field
+                start_col: 0,
+                end_col: 0,
+                signature: fm.created.clone(), // created date in signature field
+                body: fm.description.clone(),  // description in body field
                 body_hash: None,
                 language: "skill".to_string(),
             });
@@ -97,7 +115,9 @@ impl ContentParser for MarkdownParser {
                     continue;
                 }
             }
-            if in_frontmatter { continue; }
+            if in_frontmatter {
+                continue;
+            }
 
             // Code blocks
             if line.starts_with("```") {
@@ -107,16 +127,26 @@ impl ContentParser for MarkdownParser {
                         kind: EntityKind::DocCodeBlock,
                         name: format!("code({})", code_block_lang),
                         qualified_name: qname.clone(),
-                        file_path: file_path.to_string(), repo: repo.to_string(),
-                        start_line: code_block_start, end_line: line_num,
-                        start_col: 0, end_col: 0,
+                        file_path: file_path.to_string(),
+                        repo: repo.to_string(),
+                        start_line: code_block_start,
+                        end_line: line_num,
+                        start_col: 0,
+                        end_col: 0,
                         signature: Some(code_block_lang.clone()),
-                        body: None, body_hash: None, language: "markdown".to_string(),
+                        body: None,
+                        body_hash: None,
+                        language: "markdown".to_string(),
                     });
                     relations.push(CodeRelation {
-                        kind: RelationKind::Contains, from_entity: current_section.clone(),
+                        kind: RelationKind::Contains,
+                        from_entity: current_section.clone(),
                         to_entity: qname,
-                        from_table: if current_section == file_qname { "file".to_string() } else { "doc".to_string() },
+                        from_table: if current_section == file_qname {
+                            "file".to_string()
+                        } else {
+                            "doc".to_string()
+                        },
                         to_table: "doc".to_string(),
                         metadata: None,
                     });
@@ -129,27 +159,37 @@ impl ContentParser for MarkdownParser {
                 continue;
             }
 
-            if in_code_block { continue; }
+            if in_code_block {
+                continue;
+            }
 
             // Headings
             if line.starts_with('#') {
                 let level = line.chars().take_while(|c| *c == '#').count();
                 let title = line[level..].trim().to_string();
-                if title.is_empty() { continue; }
+                if title.is_empty() {
+                    continue;
+                }
 
                 let qname = format!("{}:h{}:{}", file_qname, level, title.replace(' ', "_"));
                 entities.push(CodeEntity {
                     kind: EntityKind::DocSection,
                     name: title.clone(),
                     qualified_name: qname.clone(),
-                    file_path: file_path.to_string(), repo: repo.to_string(),
-                    start_line: line_num, end_line: line_num,
-                    start_col: 0, end_col: 0,
+                    file_path: file_path.to_string(),
+                    repo: repo.to_string(),
+                    start_line: line_num,
+                    end_line: line_num,
+                    start_col: 0,
+                    end_col: 0,
                     signature: Some(format!("h{}", level)),
-                    body: None, body_hash: None, language: "markdown".to_string(),
+                    body: None,
+                    body_hash: None,
+                    language: "markdown".to_string(),
                 });
                 relations.push(CodeRelation {
-                    kind: RelationKind::Contains, from_entity: file_qname.clone(),
+                    kind: RelationKind::Contains,
+                    from_entity: file_qname.clone(),
                     to_entity: qname.clone(),
                     from_table: "file".to_string(),
                     to_table: "doc".to_string(),
@@ -173,29 +213,47 @@ impl ContentParser for MarkdownParser {
                     if let Some(end) = rest.iter().position(|&b| b == b')') {
                         let url = std::str::from_utf8(&rest[..end]).unwrap_or("");
                         if !text.is_empty() && !url.is_empty() {
-                            let qname = format!("{}:link:{}:{}", file_qname, line_num, text.replace(' ', "_"));
+                            let qname = format!(
+                                "{}:link:{}:{}",
+                                file_qname,
+                                line_num,
+                                text.replace(' ', "_")
+                            );
                             entities.push(CodeEntity {
                                 kind: EntityKind::DocLink,
                                 name: text.to_string(),
                                 qualified_name: qname.clone(),
-                                file_path: file_path.to_string(), repo: repo.to_string(),
-                                start_line: line_num, end_line: line_num,
-                                start_col: 0, end_col: 0,
+                                file_path: file_path.to_string(),
+                                repo: repo.to_string(),
+                                start_line: line_num,
+                                end_line: line_num,
+                                start_col: 0,
+                                end_col: 0,
                                 signature: Some(url.to_string()),
-                                body: None, body_hash: None, language: "markdown".to_string(),
+                                body: None,
+                                body_hash: None,
+                                language: "markdown".to_string(),
                             });
                             relations.push(CodeRelation {
                                 kind: RelationKind::References,
                                 from_entity: current_section.clone(),
                                 to_entity: qname,
-                                from_table: if current_section == file_qname { "file".to_string() } else { "doc".to_string() },
+                                from_table: if current_section == file_qname {
+                                    "file".to_string()
+                                } else {
+                                    "doc".to_string()
+                                },
                                 to_table: "doc".to_string(),
                                 metadata: None,
                             });
                         }
                         search = &rest[end + 1..];
-                    } else { break; }
-                } else { break; }
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
 
             // Wikilinks: [[target]] or [[target|display text]]
@@ -226,7 +284,9 @@ impl ContentParser for MarkdownParser {
                                 }
                             }
                             wl_search = &rest[end + 2..];
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
@@ -248,21 +308,33 @@ fn parse_frontmatter(source: &str) -> (Option<Frontmatter>, usize) {
     let after_first = &trimmed[3..].trim_start_matches(['\r', '\n']);
     if let Some(end) = after_first.find("\n---") {
         let yaml_text = &after_first[..end];
-        let body_start = source[..source.len() - after_first.len() + end + 4].lines().count();
+        let body_start = source[..source.len() - after_first.len() + end + 4]
+            .lines()
+            .count();
 
         // Parse YAML with serde_yaml
         if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(yaml_text) {
-            let description = value.get("description")
+            let description = value
+                .get("description")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let node_type = value.get("type")
+            let node_type = value
+                .get("type")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let created = value.get("created")
+            let created = value
+                .get("created")
                 .and_then(|v| v.as_str().or_else(|| v.as_str()))
                 .map(|s| s.to_string());
 
-            return (Some(Frontmatter { description, node_type, created }), body_start);
+            return (
+                Some(Frontmatter {
+                    description,
+                    node_type,
+                    created,
+                }),
+                body_start,
+            );
         }
     }
 
@@ -270,5 +342,7 @@ fn parse_frontmatter(source: &str) -> (Option<Frontmatter>, usize) {
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }

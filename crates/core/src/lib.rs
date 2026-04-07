@@ -1,9 +1,15 @@
-pub mod parser;
-pub mod graph;
-pub mod embeddings;
-pub mod temporal;
-pub mod crossrepo;
+//! Codescope Core — code intelligence engine.
+//!
+//! Parses source code with tree-sitter, builds a knowledge graph in SurrealDB,
+//! and provides semantic search via FastEmbed. Supports 35+ languages plus
+//! config files (JSON/YAML/TOML), docs (Markdown), SQL, Terraform, and more.
+
 pub mod conversation;
+pub mod crossrepo;
+pub mod embeddings;
+pub mod graph;
+pub mod parser;
+pub mod temporal;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +31,7 @@ pub struct CodeEntity {
     pub language: String,
 }
 
+/// Classification of extracted entities across all supported content types.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {
@@ -91,13 +98,19 @@ pub enum EntityKind {
 }
 
 impl EntityKind {
+    /// Returns the SurrealDB table name for this entity kind.
     pub fn table_name(&self) -> &str {
         match self {
             // Code
             Self::File => "file",
             Self::Module => "module",
             Self::Function | Self::Method => "function",
-            Self::Class | Self::Struct | Self::Interface | Self::Trait | Self::Enum | Self::TypeAlias => "class",
+            Self::Class
+            | Self::Struct
+            | Self::Interface
+            | Self::Trait
+            | Self::Enum
+            | Self::TypeAlias => "class",
             Self::Variable | Self::Constant => "variable",
             Self::Import => "import_decl",
 
@@ -120,8 +133,11 @@ impl EntityKind {
             Self::DbTable | Self::DbColumn | Self::DbIndex | Self::DbView => "db_entity",
 
             // Infrastructure
-            Self::InfraResource | Self::InfraVariable | Self::InfraProvider
-            | Self::DockerStage | Self::DockerInstruction => "infra",
+            Self::InfraResource
+            | Self::InfraVariable
+            | Self::InfraProvider
+            | Self::DockerStage
+            | Self::DockerInstruction => "infra",
 
             // Package
             Self::Package | Self::Dependency | Self::Script => "package",
@@ -147,6 +163,7 @@ pub struct CodeRelation {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// Classification of edges in the knowledge graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {

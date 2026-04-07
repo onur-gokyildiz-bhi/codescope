@@ -60,13 +60,41 @@ fn score_sentence(sentence: &str) -> f32 {
 
     // Technical content indicators (+high)
     let tech_patterns = [
-        "error:", "failed:", "warning:", "panic:", "exception:",
-        "bug", "crash", "fix", "patch", "workaround",
-        "function", "struct", "class", "impl", "trait",
-        "api", "endpoint", "route", "handler", "middleware",
-        "database", "query", "schema", "migration", "index",
-        "deploy", "release", "version", "build", "compile",
-        "config", "setting", "env", "port", "path",
+        "error:",
+        "failed:",
+        "warning:",
+        "panic:",
+        "exception:",
+        "bug",
+        "crash",
+        "fix",
+        "patch",
+        "workaround",
+        "function",
+        "struct",
+        "class",
+        "impl",
+        "trait",
+        "api",
+        "endpoint",
+        "route",
+        "handler",
+        "middleware",
+        "database",
+        "query",
+        "schema",
+        "migration",
+        "index",
+        "deploy",
+        "release",
+        "version",
+        "build",
+        "compile",
+        "config",
+        "setting",
+        "env",
+        "port",
+        "path",
     ];
     for p in &tech_patterns {
         if lower.contains(p) {
@@ -76,9 +104,19 @@ fn score_sentence(sentence: &str) -> f32 {
 
     // Decision signals (+very high)
     let decision_patterns = [
-        "decided", "decision", "chose", "choosing", "selected",
-        "will use", "switched to", "migrated", "karar",
-        "should", "must", "instead of", "rather than",
+        "decided",
+        "decision",
+        "chose",
+        "choosing",
+        "selected",
+        "will use",
+        "switched to",
+        "migrated",
+        "karar",
+        "should",
+        "must",
+        "instead of",
+        "rather than",
     ];
     for p in &decision_patterns {
         if lower.contains(p) {
@@ -87,15 +125,22 @@ fn score_sentence(sentence: &str) -> f32 {
     }
 
     // Code references (+high)
-    if sentence.contains('`') || sentence.contains("()") || sentence.contains("::")
-        || sentence.contains("->") || sentence.contains("fn ") || sentence.contains("def ")
+    if sentence.contains('`')
+        || sentence.contains("()")
+        || sentence.contains("::")
+        || sentence.contains("->")
+        || sentence.contains("fn ")
+        || sentence.contains("def ")
     {
         score += 0.4;
     }
 
     // File paths (+medium)
-    if sentence.contains('/') && (sentence.contains(".rs") || sentence.contains(".ts")
-        || sentence.contains(".py") || sentence.contains(".js"))
+    if sentence.contains('/')
+        && (sentence.contains(".rs")
+            || sentence.contains(".ts")
+            || sentence.contains(".py")
+            || sentence.contains(".js"))
     {
         score += 0.3;
     }
@@ -128,15 +173,31 @@ fn remove_filler(sentence: &str) -> String {
     let mut result = sentence.to_string();
 
     let fillers = [
-        "I think ", "I believe ", "I suppose ", "I guess ",
-        "Let me ", "Let's see ", "Let me check ",
-        "Okay so ", "Okay, ", "Ok, ", "Alright, ", "So, ",
-        "Well, ", "Actually, ", "Basically, ",
-        "In other words, ", "To be honest, ",
-        "As you can see, ", "As mentioned, ",
-        "Please note that ", "Note that ",
-        "It seems like ", "It looks like ",
-        "I'm going to ", "I'll go ahead and ",
+        "I think ",
+        "I believe ",
+        "I suppose ",
+        "I guess ",
+        "Let me ",
+        "Let's see ",
+        "Let me check ",
+        "Okay so ",
+        "Okay, ",
+        "Ok, ",
+        "Alright, ",
+        "So, ",
+        "Well, ",
+        "Actually, ",
+        "Basically, ",
+        "In other words, ",
+        "To be honest, ",
+        "As you can see, ",
+        "As mentioned, ",
+        "Please note that ",
+        "Note that ",
+        "It seems like ",
+        "It looks like ",
+        "I'm going to ",
+        "I'll go ahead and ",
     ];
 
     for filler in &fillers {
@@ -151,11 +212,25 @@ fn remove_filler(sentence: &str) -> String {
 /// Count filler words in text.
 fn count_fillers(text: &str) -> usize {
     let fillers = [
-        "basically", "actually", "literally", "obviously",
-        "essentially", "honestly", "frankly",
-        "i think", "i believe", "i guess", "i suppose",
-        "let me", "let's see", "okay", "alright",
-        "well", "so", "you know", "kind of",
+        "basically",
+        "actually",
+        "literally",
+        "obviously",
+        "essentially",
+        "honestly",
+        "frankly",
+        "i think",
+        "i believe",
+        "i guess",
+        "i suppose",
+        "let me",
+        "let's see",
+        "okay",
+        "alright",
+        "well",
+        "so",
+        "you know",
+        "kind of",
     ];
     fillers.iter().filter(|f| text.contains(**f)).count()
 }
@@ -187,7 +262,8 @@ fn split_sentences(text: &str) -> Vec<String> {
 /// Returns merged body text that synthesizes information from all segments.
 pub fn merge_topic_segments(bodies: &[&str], max_chars: usize) -> String {
     if bodies.len() <= 1 {
-        return bodies.first()
+        return bodies
+            .first()
             .map(|b| compress_segment(b, max_chars))
             .unwrap_or_default();
     }
@@ -227,7 +303,11 @@ mod tests {
         let compressed = compress_segment(text, 200);
         assert!(compressed.len() <= 200);
         // Should prioritize decision and error sentences
-        assert!(compressed.contains("decided") || compressed.contains("error") || compressed.contains("reqwest"));
+        assert!(
+            compressed.contains("decided")
+                || compressed.contains("error")
+                || compressed.contains("reqwest")
+        );
     }
 
     #[test]

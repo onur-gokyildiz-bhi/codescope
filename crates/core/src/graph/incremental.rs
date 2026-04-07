@@ -1,8 +1,8 @@
 use anyhow::Result;
 use sha2::{Digest, Sha256};
-use surrealdb::Surreal;
-use surrealdb::engine::local::Db;
 use std::path::Path;
+use surrealdb::engine::local::Db;
+use surrealdb::Surreal;
 use tracing::{debug, info};
 
 /// Handles incremental indexing — only re-parse files that changed
@@ -22,9 +22,7 @@ impl IncrementalIndexer {
 
         let existing: Vec<FileHashRecord> = self
             .db
-            .query(
-                "SELECT hash FROM file WHERE path = $path LIMIT 1".to_string(),
-            )
+            .query("SELECT hash FROM file WHERE path = $path LIMIT 1".to_string())
             .bind(("path", path))
             .await?
             .take(0)?;
@@ -36,11 +34,7 @@ impl IncrementalIndexer {
     }
 
     /// Remove entities from files that no longer exist on disk
-    pub async fn cleanup_deleted_files(
-        &self,
-        base_path: &Path,
-        repo_name: &str,
-    ) -> Result<usize> {
+    pub async fn cleanup_deleted_files(&self, base_path: &Path, repo_name: &str) -> Result<usize> {
         let repo = repo_name.to_string();
 
         let indexed_files: Vec<FilePathRecord> = self
@@ -58,7 +52,8 @@ impl IncrementalIndexer {
                 let path = record.path.clone();
 
                 // Delete from ALL tables (including content parser tables)
-                let _ = self.db
+                let _ = self
+                    .db
                     .query(
                         "DELETE FROM `function` WHERE file_path = $path AND repo = $repo; \
                          DELETE FROM class WHERE file_path = $path AND repo = $repo; \
