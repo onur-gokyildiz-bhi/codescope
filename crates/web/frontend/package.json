@@ -1,0 +1,20 @@
+{
+  "name": "codescope-web",
+  "version": "0.5.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.0",
+    "3d-force-graph": "^1.73.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.10.0",
+    "typescript": "^5.7.0"
+  }
+}

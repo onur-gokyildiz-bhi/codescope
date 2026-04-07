@@ -125,6 +125,7 @@ pub async fn run_web(
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/assets/{*path}", get(serve_asset))
         .route("/api/stats", get(api_stats))
         .route("/api/search", get(api_search))
         .route("/api/graph", get(api_graph))
@@ -148,7 +149,34 @@ pub async fn run_web(
 }
 
 async fn index_page() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
+    Html(include_str!("../frontend/dist/index.html"))
+}
+
+async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
+    // Serve JS/CSS from embedded frontend build
+    let content_type = if path.ends_with(".js") {
+        "application/javascript"
+    } else if path.ends_with(".css") {
+        "text/css"
+    } else {
+        "application/octet-stream"
+    };
+
+    // Try to find the file in the build output
+    let assets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("frontend")
+        .join("dist")
+        .join("assets");
+    let file_path = assets_dir.join(&path);
+
+    match std::fs::read(&file_path) {
+        Ok(bytes) => (
+            [(axum::http::header::CONTENT_TYPE, content_type)],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[derive(Deserialize)]
