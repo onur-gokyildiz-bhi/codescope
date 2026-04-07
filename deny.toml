@@ -3,6 +3,9 @@ vulnerability = "deny"
 unmaintained = "warn"
 yanked = "warn"
 notice = "warn"
+# paste 1.0.15: RUSTSEC-2024-0436 — transitive dep via fastembed→tokenizers.
+# No fix available upstream. Low risk: proc-macro, compile-time only.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 unlicensed = "deny"

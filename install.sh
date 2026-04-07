@@ -20,7 +20,8 @@ case "$OS" in
     Linux)
         case "$ARCH" in
             x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
-            *) echo "  Error: Unsupported architecture: $ARCH (only x86_64 supported)"; exit 1 ;;
+            aarch64|arm64) TARGET="aarch64-unknown-linux-gnu" ;;
+            *) echo "  Error: Unsupported architecture: $ARCH"; exit 1 ;;
         esac
         ;;
     Darwin)
