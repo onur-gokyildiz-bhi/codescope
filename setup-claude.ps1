@@ -55,7 +55,7 @@ if (Test-Path $claudeJson) {
 
 # 3. Install skills
 Write-Host "  [2/4] Installing skills..." -ForegroundColor Yellow
-$skills = @("codescope", "cs-search", "cs-index", "cs-stats", "cs-ask", "cs-impact", "cs-callers", "cs-file", "cs-query")
+$skills = @("codescope", "cs-search", "cs-index", "cs-stats", "cs-ask", "cs-impact", "cs-callers", "cs-file", "cs-query", "cs-update")
 
 foreach ($skill in $skills) {
     $skillDir = "$SKILLS_DIR\$skill"
@@ -92,6 +92,11 @@ Write-Host "    /cs-impact <func>   - Impact analysis"
 Write-Host "    /cs-callers <func>  - Who calls this function?"
 Write-Host "    /cs-file <path>     - All entities in a file"
 Write-Host "    /cs-query <surql>   - Raw SurrealQL query"
+Write-Host "    /cs-update          - Check & install updates"
+Write-Host ""
+Write-Host "  Auto update check (optional):" -ForegroundColor Yellow
+Write-Host "    Add to your project's .claude/settings.json:"
+Write-Host '    {"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"pwsh -File check-update.ps1","timeout":10}]}]}}'
 Write-Host ""
 Write-Host "  Start Claude Code in any project:" -ForegroundColor Cyan
 Write-Host "    cd C:\path\to\project; claude"

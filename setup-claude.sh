@@ -58,7 +58,7 @@ fi
 
 # 3. Install skills
 echo "  [2/4] Installing skills..."
-SKILLS=("codescope" "cs-search" "cs-index" "cs-stats" "cs-ask" "cs-impact" "cs-callers" "cs-file" "cs-query")
+SKILLS=("codescope" "cs-search" "cs-index" "cs-stats" "cs-ask" "cs-impact" "cs-callers" "cs-file" "cs-query" "cs-update")
 
 for skill in "${SKILLS[@]}"; do
     mkdir -p "$SKILLS_DIR/$skill"
@@ -104,6 +104,11 @@ echo "    /cs-impact <func>   — Impact analysis"
 echo "    /cs-callers <func>  — Who calls this function?"
 echo "    /cs-file <path>     — All entities in a file"
 echo "    /cs-query <surql>   — Raw SurrealQL query"
+echo "    /cs-update          — Check & install updates"
+echo ""
+echo "  Auto update check (optional):"
+echo '    Add to .claude/settings.json:'
+echo '    {"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"bash ~/.codescope/check-update.sh","timeout":10}]}]}}'
 echo ""
 echo "  Start Claude Code in any project:"
 echo "    cd /path/to/project && claude"
