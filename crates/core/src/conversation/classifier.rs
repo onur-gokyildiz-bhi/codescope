@@ -13,6 +13,7 @@ pub struct ClassifiedSegment {
     pub line_number: u32,
     pub confidence: f32,
     pub timestamp: Option<String>,
+    pub rationale: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +126,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     line_number: turn.line_number,
                     confidence: 0.9,
                     timestamp: turn.timestamp.clone(),
+                    rationale: None,
                 });
                 recent_has_problem = true;
                 continue;
@@ -147,6 +149,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                 line_number: turn.line_number,
                 confidence: problem_score,
                 timestamp: turn.timestamp.clone(),
+                rationale: None,
             });
             recent_has_problem = true;
             continue;
@@ -169,6 +172,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     line_number: turn.line_number,
                     confidence: boosted.min(1.0),
                     timestamp: turn.timestamp.clone(),
+                    rationale: None,
                 });
                 recent_has_problem = false;
                 continue;
@@ -180,6 +184,9 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
             let decision_score = score_patterns(&lower, DECISION_SIGNALS);
             if decision_score >= 0.6 {
                 let name = extract_segment_name(&turn.text, &lower, DECISION_SIGNALS);
+                // Extract rationale from the same text or the next turn
+                let next_text = turns.get(i + 1).map(|t| t.text.as_str()).unwrap_or("");
+                let rationale = extract_rationale(&turn.text, next_text);
                 segments.push(ClassifiedSegment {
                     kind: SegmentKind::Decision,
                     name,
@@ -187,6 +194,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                     line_number: turn.line_number,
                     confidence: decision_score,
                     timestamp: turn.timestamp.clone(),
+                    rationale,
                 });
                 continue;
             }
@@ -213,6 +221,7 @@ pub fn classify_segments(turns: &[ConversationTurn]) -> Vec<ClassifiedSegment> {
                         line_number: turn.line_number,
                         confidence: 0.5,
                         timestamp: turn.timestamp.clone(),
+                        rationale: None,
                     });
                 }
             }
@@ -356,6 +365,40 @@ fn next_char_boundary(s: &str, pos: usize) -> usize {
         i += 1;
     }
     i
+}
+
+/// Extract rationale from a decision's text or the following sentence.
+/// Looks for causal phrases like "because", "since", "due to", "the reason", "this is because".
+fn extract_rationale(text: &str, next_text: &str) -> Option<String> {
+    let causal_patterns = [
+        "because ",
+        "since ",
+        "due to ",
+        "the reason ",
+        "this is because ",
+    ];
+
+    // Search in the current text first, then the next turn
+    for source in &[text, next_text] {
+        let lower = source.to_lowercase();
+        for pattern in &causal_patterns {
+            if let Some(pos) = lower.find(pattern) {
+                // Extract from the pattern to the end of the sentence
+                let start = pos;
+                let rest = &source[start..];
+                let end = rest.find(['.', '\n', '!']).unwrap_or(rest.len().min(200));
+                let rationale = rest[..end].trim();
+                if rationale.len() > 10 {
+                    return Some(if rationale.len() > 200 {
+                        safe_truncate(rationale, 200)
+                    } else {
+                        rationale.to_string()
+                    });
+                }
+            }
+        }
+    }
+    None
 }
 
 fn dedup_segments(segments: &mut Vec<ClassifiedSegment>) {

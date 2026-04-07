@@ -120,9 +120,9 @@ pub fn find_claude_project_dir(codebase_path: &Path, repo_name: &str) -> std::pa
 pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> String {
     let mut sections = Vec::new();
 
-    // Recent decisions (last 10)
+    // Recent decisions (last 15), ordered by tier (critical first) then timestamp
     let decisions: Vec<serde_json::Value> = db
-        .query("SELECT name, body, timestamp FROM decision WHERE repo = $repo ORDER BY timestamp DESC LIMIT 10")
+        .query("SELECT name, body, timestamp, tier FROM decision WHERE repo = $repo ORDER BY tier ASC, timestamp DESC LIMIT 15")
         .bind(("repo", repo.to_string()))
         .await
         .ok()
@@ -135,7 +135,9 @@ pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> Strin
             let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let ts = d.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
             let date = if ts.len() >= 10 { &ts[..10] } else { ts };
-            s.push_str(&format!("- {}: {}\n", date, name));
+            let tier = d.get("tier").and_then(|v| v.as_u64()).unwrap_or(2);
+            let prefix = if tier == 0 { "[PINNED] " } else { "" };
+            s.push_str(&format!("- {}: {}{}\n", date, prefix, name));
         }
         sections.push(s);
     }

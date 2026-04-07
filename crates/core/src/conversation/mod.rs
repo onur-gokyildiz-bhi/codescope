@@ -97,6 +97,26 @@ pub fn parse_conversation(
             }
         };
 
+        // Append rationale to body for Decision entities
+        let body_text = {
+            let compressed = compressor::compress_segment(&seg.body, 500);
+            if matches!(seg.kind, classifier::SegmentKind::Decision) {
+                if let Some(rationale) = &seg.rationale {
+                    format!("{}\n\nRationale: {}", compressed, rationale)
+                } else {
+                    compressed
+                }
+            } else {
+                compressed
+            }
+        };
+
+        // Link to code entities found in the text
+        let refs = linker.find_references(&seg.body);
+
+        // Derive scope from the first linked code entity's file_path
+        let scope = refs.first().map(|r| derive_scope_from_path(&r.name));
+
         entities.push(CodeEntity {
             kind: kind.clone(),
             name: seg.name.clone(),
@@ -107,9 +127,9 @@ pub fn parse_conversation(
             end_line: seg.line_number,
             start_col: 0,
             end_col: 0,
-            signature: None,
-            body: Some(compressor::compress_segment(&seg.body, 500)),
-            body_hash: None,
+            signature: seg.timestamp.clone(),
+            body: Some(body_text),
+            body_hash: scope, // Repurpose body_hash to carry scope to the builder
             language: "conversation".to_string(),
         });
 
@@ -123,8 +143,6 @@ pub fn parse_conversation(
             metadata: None,
         });
 
-        // Link to code entities found in the text
-        let refs = linker.find_references(&seg.body);
         for code_ref in &refs {
             let rel_kind = match seg.kind {
                 classifier::SegmentKind::Decision => RelationKind::DecidedAbout,
@@ -290,6 +308,45 @@ pub fn generate_skill_notes(
 
     files.push(("index.md".to_string(), index));
     files
+}
+
+/// Derive a module scope from a file path.
+/// e.g. "crates/core/src/graph/builder.rs" -> "core::graph"
+/// e.g. "src/main.rs" -> "root"
+fn derive_scope_from_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let parts: Vec<&str> = normalized.split('/').collect();
+
+    // Find the "src" directory and take crate name + module path
+    if let Some(src_idx) = parts.iter().position(|&p| p == "src") {
+        // Module path = directories after src/, excluding the file itself
+        let module_parts: Vec<&str> = parts[src_idx + 1..]
+            .iter()
+            .copied()
+            .filter(|p| !p.contains('.')) // exclude the file
+            .collect();
+
+        // Crate name = directory before src/ (if it exists and isn't the root)
+        let crate_name = if src_idx > 0 { parts[src_idx - 1] } else { "" };
+
+        if module_parts.is_empty() && crate_name.is_empty() {
+            return "root".to_string();
+        }
+
+        let mut scope_parts = Vec::new();
+        if !crate_name.is_empty() {
+            scope_parts.push(crate_name);
+        }
+        scope_parts.extend(module_parts);
+
+        if scope_parts.is_empty() {
+            "root".to_string()
+        } else {
+            scope_parts.join("::")
+        }
+    } else {
+        "root".to_string()
+    }
 }
 
 fn slug_from_name(name: &str) -> String {

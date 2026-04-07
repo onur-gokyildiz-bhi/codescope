@@ -497,7 +497,28 @@ fn build_entity_set(entity: &CodeEntity) -> String {
             surql_str(&format!("{:?}", entity.kind)), // node_type from kind
             surql_opt_str(&entity.signature), // created date in signature field
         ),
-        // All other entities: config, doc, api, db_entity, infra, package, conversation
+        // Conversation entities with timestamp and scope
+        EntityKind::Decision
+        | EntityKind::Problem
+        | EntityKind::Solution
+        | EntityKind::ConversationTopic => format!(
+            "SET name = {}, qualified_name = {}, kind = {}, \
+             file_path = {}, repo = {}, language = {}, \
+             start_line = {}, end_line = {}, body = {}, \
+             timestamp = {}, scope = {}",
+            surql_str(&entity.name),
+            surql_str(&entity.qualified_name),
+            surql_str(&format!("{:?}", entity.kind)),
+            surql_str(&entity.file_path),
+            surql_str(&entity.repo),
+            surql_str(&entity.language),
+            entity.start_line,
+            entity.end_line,
+            surql_opt_str(&entity.body),
+            surql_opt_str(&entity.signature), // timestamp stored in signature field
+            surql_opt_str(&entity.body_hash), // scope carried via body_hash
+        ),
+        // All other entities: config, doc, api, db_entity, infra, package
         _ => format!(
             "SET name = {}, qualified_name = {}, kind = {}, \
              file_path = {}, repo = {}, language = {}, \

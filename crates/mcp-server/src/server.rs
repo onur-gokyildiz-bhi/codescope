@@ -3433,22 +3433,34 @@ impl GraphRagServer {
         let limit = params.limit.unwrap_or(20) as i64;
         let safe = params.query.replace('\'', "");
 
-        // SurrealDB doesn't support UNION — run separate queries and merge
-        let q = "SELECT name, body, kind, timestamp FROM conv_topic \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
-                 SELECT name, body, 'decision' AS kind, timestamp FROM decision \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
-                 SELECT name, body, 'problem' AS kind, timestamp FROM problem \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
-                 SELECT name, body, 'solution' AS kind, timestamp FROM solution \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim";
+        // Build optional scope filter clause
+        let scope_clause = if params.scope.is_some() {
+            " AND scope ~ $scope"
+        } else {
+            ""
+        };
 
+        // SurrealDB doesn't support UNION — run separate queries and merge
+        let q = format!(
+            "SELECT name, body, kind, timestamp FROM conv_topic \
+             WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+             SELECT name, body, 'decision' AS kind, timestamp FROM decision \
+             WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+             SELECT name, body, 'problem' AS kind, timestamp FROM problem \
+             WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+             SELECT name, body, 'solution' AS kind, timestamp FROM solution \
+             WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim",
+            scope = scope_clause,
+        );
+
+        let scope_val = params.scope.unwrap_or_default();
         match ctx
             .db
-            .query(q)
+            .query(&q)
             .bind(("repo", ctx.repo_name.clone()))
             .bind(("search", safe))
             .bind(("lim", limit))
+            .bind(("scope", scope_val))
             .await
         {
             Ok(mut r) => {
@@ -3494,6 +3506,59 @@ impl GraphRagServer {
                 output
             }
             Err(e) => format!("Error searching memory: {}", e),
+        }
+    }
+
+    /// Pin or adjust the tier of a decision/problem/solution memory
+    #[tool(
+        description = "Pin or adjust the priority tier of a decision, problem, or solution. \
+        Tier 0 = critical (always shown, marked [PINNED]), 1 = important, 2 = contextual (default). \
+        Matches by partial name across decision, problem, and solution tables."
+    )]
+    async fn memory_pin(&self, #[tool(aggr)] params: MemoryPinParams) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        let tier = params.tier.min(2) as i64;
+
+        let q = "UPDATE decision SET tier = $tier WHERE name ~ $name AND repo = $repo; \
+                 UPDATE problem SET tier = $tier WHERE name ~ $name AND repo = $repo; \
+                 UPDATE solution SET tier = $tier WHERE name ~ $name AND repo = $repo;";
+
+        match ctx
+            .db
+            .query(q)
+            .bind(("tier", tier))
+            .bind(("name", params.name.clone()))
+            .bind(("repo", ctx.repo_name.clone()))
+            .await
+        {
+            Ok(mut r) => {
+                let mut total = 0usize;
+                for i in 0..3u32 {
+                    let updated: Vec<serde_json::Value> = r.take(i as usize).unwrap_or_default();
+                    total += updated.len();
+                }
+                if total == 0 {
+                    format!(
+                        "No matching memories found for '{}'. Try a broader name.",
+                        params.name
+                    )
+                } else {
+                    let tier_label = match params.tier {
+                        0 => "critical (always shown)",
+                        1 => "important",
+                        _ => "contextual",
+                    };
+                    format!(
+                        "Updated {} record(s) matching '{}' to tier {} ({}).",
+                        total, params.name, params.tier, tier_label
+                    )
+                }
+            }
+            Err(e) => format!("Error pinning memory: {}", e),
         }
     }
 

@@ -221,6 +221,8 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS timestamp ON conv_topic TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS topic_qname ON conv_topic FIELDS qualified_name UNIQUE;
 
+        DEFINE FIELD IF NOT EXISTS scope ON conv_topic TYPE option<string>;
+
         DEFINE TABLE IF NOT EXISTS decision SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS name ON decision TYPE string;
         DEFINE FIELD IF NOT EXISTS qualified_name ON decision TYPE string;
@@ -235,6 +237,10 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS dec_qname ON decision FIELDS qualified_name UNIQUE;
         DEFINE INDEX IF NOT EXISTS dec_repo ON decision FIELDS repo;
 
+        DEFINE FIELD IF NOT EXISTS tier ON decision TYPE option<int> DEFAULT 2;
+        DEFINE FIELD IF NOT EXISTS rationale ON decision TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS scope ON decision TYPE option<string>;
+
         DEFINE TABLE IF NOT EXISTS problem SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS name ON problem TYPE string;
         DEFINE FIELD IF NOT EXISTS qualified_name ON problem TYPE string;
@@ -248,6 +254,9 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS timestamp ON problem TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS prob_qname ON problem FIELDS qualified_name UNIQUE;
 
+        DEFINE FIELD IF NOT EXISTS tier ON problem TYPE option<int> DEFAULT 2;
+        DEFINE FIELD IF NOT EXISTS scope ON problem TYPE option<string>;
+
         DEFINE TABLE IF NOT EXISTS solution SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS name ON solution TYPE string;
         DEFINE FIELD IF NOT EXISTS qualified_name ON solution TYPE string;
@@ -260,6 +269,9 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS kind ON solution TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS timestamp ON solution TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS sol_qname ON solution FIELDS qualified_name UNIQUE;
+
+        DEFINE FIELD IF NOT EXISTS tier ON solution TYPE option<int> DEFAULT 2;
+        DEFINE FIELD IF NOT EXISTS scope ON solution TYPE option<string>;
 
         -- === EDGE TABLES (TYPE RELATION required for RELATE statements) ===
 

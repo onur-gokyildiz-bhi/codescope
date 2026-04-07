@@ -7,6 +7,8 @@ pub struct SearchParams {
     pub query: String,
     /// Maximum number of results (default: 20)
     pub limit: Option<usize>,
+    /// Optional scope filter (e.g. "core::graph") to narrow memory search to a specific module
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -277,4 +279,12 @@ pub struct CustomLintParams {
     pub rule: String,
     /// Human-readable description of what this rule checks
     pub description: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MemoryPinParams {
+    /// The decision/memory name to find (partial match)
+    pub name: String,
+    /// Tier level: 0 = critical (always show), 1 = important, 2 = contextual (default)
+    pub tier: u32,
 }
