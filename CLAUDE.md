@@ -31,3 +31,12 @@ When codescope MCP is available, ALWAYS prefer these tools over Read/Grep:
 | Read file to understand it | `explore(entity_name)`           | ~75%          |
 
 **Rule**: Only use `Read` AFTER codescope pinpoints the exact function/line you need.
+
+## Memory (lightweight — don't overthink it)
+
+Use `capture_insight` only for **significant** moments, not every micro-decision:
+- Architecture decisions that affect multiple files → `kind: "decision"`
+- Bugs that took >5 minutes to find → `kind: "problem"` (so next time it's instant)
+- User corrections ("no, do it this way") → `kind: "correction"`
+
+Skip: variable renames, formatting choices, obvious fixes. Less is more.

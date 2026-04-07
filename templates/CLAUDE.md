@@ -31,3 +31,14 @@ This project uses Codescope for code intelligence. A knowledge graph of the code
 | Custom SurrealQL | `raw_query` |
 | What breaks if I change X? | `impact_analysis` |
 | Natural language question | `ask` |
+| Open a file with full context | `context_bundle` |
+| Search past decisions | `memory_search` |
+
+## Memory (lightweight — don't overthink it)
+
+Use `capture_insight` only for **significant** moments:
+- Architecture decisions that affect multiple files → `kind: "decision"`
+- Bugs that took >5 minutes to find → `kind: "problem"`
+- User corrections ("no, do it this way") → `kind: "correction"`
+
+Skip: variable renames, formatting choices, obvious fixes. Less is more.
