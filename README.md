@@ -13,7 +13,7 @@ AI coding assistants burn thousands of tokens reading entire files to answer sim
 | "What's the largest function?" | 454K tokens | 289 tokens | **99.9%** |
 | "Impact if I change Y?" | 142K tokens | 278 tokens | **99.8%** |
 
-*Benchmarked on ripgrep, axum, and tokio. See [BENCHMARKS.md](BENCHMARKS.md) for full results.*
+*Benchmarked on 7 projects across 5 languages (Rust, Python, Go, TypeScript, JavaScript). See [BENCHMARKS.md](BENCHMARKS.md) for full results.*
 
 ---
 

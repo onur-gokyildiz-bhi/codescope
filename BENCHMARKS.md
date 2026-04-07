@@ -33,25 +33,67 @@ The core value proposition: instead of reading entire source files to understand
 | Find largest functions | 1,400,000 tokens | 288 tokens | **~100%** |
 | Impact analysis (callers + callees) | 142,400 tokens | 278 tokens | **99.8%** |
 
+### FastAPI — Python (2,713 files, 15.9 MB)
+
+| Scenario | Traditional | Codescope | Saving |
+|----------|------------|-----------|--------|
+| Find function + understand context | 381,000 tokens | 260 tokens | **99.9%** |
+| List all structs in project | 4,000,000 tokens | 1,700 tokens | **~100%** |
+| Find largest functions | 4,000,000 tokens | 327 tokens | **~100%** |
+| Impact analysis (callers + callees) | 431,300 tokens | 377 tokens | **99.9%** |
+
+### Gin — Go (108 files, 858 KB)
+
+| Scenario | Traditional | Codescope | Saving |
+|----------|------------|-----------|--------|
+| Find function + understand context | 82,200 tokens | 466 tokens | **99.4%** |
+| List all structs in project | 214,500 tokens | 0 tokens | **100%** |
+| Find largest functions | 214,500 tokens | 300 tokens | **99.9%** |
+| Impact analysis (callers + callees) | 107,600 tokens | 50 tokens | **~100%** |
+
+### Zod — TypeScript (465 files, 3.6 MB)
+
+| Scenario | Traditional | Codescope | Saving |
+|----------|------------|-----------|--------|
+| Find function + understand context | 254,900 tokens | 50 tokens | **~100%** |
+| List all structs in project | 900,500 tokens | 1,600 tokens | **99.8%** |
+| Find largest functions | 900,500 tokens | 335 tokens | **~100%** |
+| Impact analysis (callers + callees) | 325,600 tokens | 50 tokens | **~100%** |
+
+### Express.js — JavaScript (158 files, 711 KB)
+
+| Scenario | Traditional | Codescope | Saving |
+|----------|------------|-----------|--------|
+| Find function + understand context | 59,400 tokens | 50 tokens | **99.9%** |
+| List all structs in project | 177,700 tokens | 0 tokens | **100%** |
+| Find largest functions | 177,700 tokens | 302 tokens | **99.8%** |
+| Impact analysis (callers + callees) | 76,100 tokens | 50 tokens | **99.9%** |
+
+---
+
 ## Indexing Performance
 
-| Repository | Files | Entities | Relations | Time | Speed |
-|-----------|-------|----------|-----------|------|-------|
-| ripgrep | 101 | 3,594 | 15,551 | 9.6s | 10.6 files/s |
-| axum | 296 | 4,231 | 14,143 | 10.7s | 27.6 files/s |
-| tokio | 769 | 12,628 | 43,755 | 33.3s | 23.1 files/s |
+| Repository | Language | Files | Entities | Relations | Time | Speed |
+|-----------|----------|-------|----------|-----------|------|-------|
+| ripgrep | Rust | 101 | 3,594 | 15,551 | 9.6s | 10.6 files/s |
+| axum | Rust | 296 | 4,231 | 14,143 | 10.7s | 27.6 files/s |
+| tokio | Rust | 769 | 12,628 | 43,755 | 33.3s | 23.1 files/s |
+| express | JavaScript | 158 | 450 | 634 | 2.3s | 67.9 files/s |
+| gin | Go | 108 | 2,397 | 11,323 | 4.9s | 21.9 files/s |
+| zod | TypeScript | 465 | 21,165 | 23,181 | 83.6s | 5.6 files/s |
+| fastapi | Python | 2,713 | 50,150 | 59,737 | 95.8s | 28.3 files/s |
 
 ## Query Performance
 
 Average query response times across all repositories:
 
-| Query Type | ripgrep | axum | tokio |
-|-----------|---------|------|-------|
-| search_functions | 36.0ms | 47.3ms | 19.3ms |
-| all_structs | 4.0ms | 4.7ms | 6.2ms |
-| largest_functions | 122.7ms | 114.7ms | 463.5ms |
-| graph_traversal (callers) | 3.0ms | 40.5ms | 15.5ms |
-| count_all | 0.6ms | 1.1ms | 2.0ms |
+| Query Type | ripgrep | axum | tokio | fastapi | gin | zod |
+|-----------|---------|------|-------|---------|-----|-----|
+| search_functions | 36.0ms | 47.3ms | 19.3ms | 61.9ms | 14.6ms | 15.5ms |
+| all_structs | 4.0ms | 4.7ms | 6.2ms | 3.5ms | 0.2ms | 3.6ms |
+| largest_functions | 122.7ms | 114.7ms | 463.5ms | 70.0ms | 12.6ms | 10.8ms |
+| graph_traversal (callers) | 3.0ms | 40.5ms | 15.5ms | 2.5ms | 0.3ms | 0.2ms |
+| count_all | 0.6ms | 1.1ms | 2.0ms | 2.8ms | 0.3ms | 1.0ms |
 
 ## Semantic Search with Binary Quantization
 
@@ -137,13 +179,13 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 2. **Sub-millisecond graph queries** - 0.6-4ms vs Sourcegraph's ~100ms per shard.
 3. **32x memory-efficient semantic search** - Binary Quantization not available in any competitor.
 4. **99%+ token savings** - No competitor publishes this metric. Graph-based retrieval returns only what's needed.
-5. **36 MCP tools** - Richest tool set for AI agents (Greptile: API only, Bloop: 0 MCP, gstack: skills only).
+5. **45 MCP tools** - Richest tool set for AI agents (Greptile: API only, Bloop: 0 MCP, gstack: skills only).
 
 ### Areas for Improvement
 
-1. **Language count** - Aider supports 130+, GitHub 600+, Codescope currently 20+.
-2. **Large-scale testing** - GitHub handles 45M repos; Codescope not yet tested at that scale.
-3. **Indexing throughput** - 23 files/s is good for local use but behind Sourcegraph's optimized pipeline.
+1. **Language count** - Aider supports 130+, GitHub 600+, Codescope currently 35.
+2. **Large-scale testing** - GitHub handles 45M repos; Codescope tested up to 2,713 files / 50K entities.
+3. **Indexing throughput** - 5-68 files/s depending on language; behind Sourcegraph's optimized pipeline.
 
 ## Methodology
 
@@ -151,6 +193,7 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 - **Codescope approach**: Measured as the actual JSON response size from the graph query (~4 bytes/token).
 - **Indexing**: Full parse of all supported source files using tree-sitter, stored in SurrealDB embedded (SurrealKV).
 - **Queries**: Cold-start (no caching), measured with `std::time::Instant`.
+- **Projects tested**: ripgrep, axum, tokio (Rust), FastAPI (Python), Gin (Go), Zod (TypeScript), Express (JavaScript).
 - **Competitor data**: Sourced from official documentation, blog posts, and published benchmarks (April 2026).
 
 ## Reproduce
