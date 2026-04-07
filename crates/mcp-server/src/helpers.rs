@@ -220,7 +220,12 @@ pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &P
     }
 
     let context_path = dirs::home_dir()
-        .map(|h| h.join(".codescope").join("projects").join(repo).join("CONTEXT.md"))
+        .map(|h| {
+            h.join(".codescope")
+                .join("projects")
+                .join(repo)
+                .join("CONTEXT.md")
+        })
         .unwrap_or_else(|| codebase_path.join(".claude").join("CONTEXT.md"));
     if let Some(parent) = context_path.parent() {
         let _ = std::fs::create_dir_all(parent);
