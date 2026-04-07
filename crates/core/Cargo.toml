@@ -80,4 +80,5 @@ toml = "0.8"
 tokio = { workspace = true, features = ["test-util"] }
 surrealdb = { workspace = true, features = ["kv-mem"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"

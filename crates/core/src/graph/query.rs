@@ -1,8 +1,12 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use serde::Deserialize;
 use surrealdb::engine::local::Db;
 use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
+
+const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// High-level graph query interface
 pub struct GraphQuery {
@@ -25,6 +29,14 @@ impl GraphQuery {
         Self { db }
     }
 
+    /// Lightweight DB health check with a short timeout.
+    pub async fn health_check(&self) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(5), self.db.query("RETURN true"))
+            .await
+            .map_err(|_| anyhow::anyhow!("DB health check timed out"))??;
+        Ok(())
+    }
+
     /// Find a function by name (exact match)
     pub async fn find_function(&self, name: &str) -> Result<Vec<SearchResult>> {
         let name = name.to_string();
@@ -40,12 +52,15 @@ impl GraphQuery {
     /// Search functions by name pattern
     pub async fn search_functions(&self, pattern: &str) -> Result<Vec<SearchResult>> {
         let pattern = pattern.to_lowercase(); // Lowercase once in Rust, not per-row in DB
-        let results: Vec<SearchResult> = self
-            .db
-            .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE string::contains(string::lowercase(name), $pattern)")
-            .bind(("pattern", pattern))
-            .await?
-            .take(0)?;
+        let results: Vec<SearchResult> = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            self.db
+                .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE string::contains(string::lowercase(name), $pattern)")
+                .bind(("pattern", pattern)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .take(0)?;
         Ok(results)
     }
 
@@ -53,34 +68,40 @@ impl GraphQuery {
     pub async fn find_callers(&self, function_name: &str) -> Result<Vec<SearchResult>> {
         let name = function_name.to_string();
         // Use direct edge traversal — much faster than subquery on large graphs
-        let results: Vec<SearchResult> = self
-            .db
-            .query(
-                "SELECT in.qualified_name AS qualified_name, in.name AS name, \
-                 in.file_path AS file_path, in.start_line AS start_line, \
-                 in.end_line AS end_line, in.language AS language, in.signature AS signature \
-                 FROM calls WHERE out.name = $name AND in.name != NONE",
-            )
-            .bind(("name", name))
-            .await?
-            .take(0)?;
+        let results: Vec<SearchResult> = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            self.db
+                .query(
+                    "SELECT in.qualified_name AS qualified_name, in.name AS name, \
+                     in.file_path AS file_path, in.start_line AS start_line, \
+                     in.end_line AS end_line, in.language AS language, in.signature AS signature \
+                     FROM calls WHERE out.name = $name AND in.name != NONE",
+                )
+                .bind(("name", name)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .take(0)?;
         Ok(results)
     }
 
     /// Find all functions called by a function
     pub async fn find_callees(&self, function_name: &str) -> Result<Vec<SearchResult>> {
         let name = function_name.to_string();
-        let results: Vec<SearchResult> = self
-            .db
-            .query(
-                "SELECT out.qualified_name AS qualified_name, out.name AS name, \
-                 out.file_path AS file_path, out.start_line AS start_line, \
-                 out.end_line AS end_line, out.language AS language, out.signature AS signature \
-                 FROM calls WHERE in.name = $name AND out.name != NONE",
-            )
-            .bind(("name", name))
-            .await?
-            .take(0)?;
+        let results: Vec<SearchResult> = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            self.db
+                .query(
+                    "SELECT out.qualified_name AS qualified_name, out.name AS name, \
+                     out.file_path AS file_path, out.start_line AS start_line, \
+                     out.end_line AS end_line, out.language AS language, out.signature AS signature \
+                     FROM calls WHERE in.name = $name AND out.name != NONE",
+                )
+                .bind(("name", name)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .take(0)?;
         Ok(results)
     }
 
@@ -164,25 +185,28 @@ impl GraphQuery {
         let n = name.to_string();
 
         // Multi-statement: find entity + get neighborhood in one round-trip
-        let mut response = self
-            .db
-            .query(
-                "SELECT name, qualified_name, file_path, signature, start_line, end_line, \
-                    'function' AS entity_type FROM `function` WHERE name = $name; \
-             SELECT name, qualified_name, file_path, kind, start_line, end_line, \
-                    'class' AS entity_type FROM class WHERE name = $name; \
-             SELECT name, qualified_name, file_path, kind, \
-                    'config' AS entity_type FROM config WHERE name = $name; \
-             SELECT name, qualified_name, file_path, kind, \
-                    'doc' AS entity_type FROM doc WHERE name = $name; \
-             SELECT name, qualified_name, file_path, kind, \
-                    'package' AS entity_type FROM package WHERE name = $name; \
-             SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name; \
-             SELECT name, qualified_name, file_path, description, node_type, \
-                    'skill' AS entity_type FROM skill WHERE name = $name;",
-            )
-            .bind(("name", n.clone()))
-            .await?;
+        let mut response = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            self.db
+                .query(
+                    "SELECT name, qualified_name, file_path, signature, start_line, end_line, \
+                        'function' AS entity_type FROM `function` WHERE name = $name; \
+                 SELECT name, qualified_name, file_path, kind, start_line, end_line, \
+                        'class' AS entity_type FROM class WHERE name = $name; \
+                 SELECT name, qualified_name, file_path, kind, \
+                        'config' AS entity_type FROM config WHERE name = $name; \
+                 SELECT name, qualified_name, file_path, kind, \
+                        'doc' AS entity_type FROM doc WHERE name = $name; \
+                 SELECT name, qualified_name, file_path, kind, \
+                        'package' AS entity_type FROM package WHERE name = $name; \
+                 SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name; \
+                 SELECT name, qualified_name, file_path, description, node_type, \
+                        'skill' AS entity_type FROM skill WHERE name = $name;",
+                )
+                .bind(("name", n.clone())),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let classes: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -775,31 +799,34 @@ impl GraphQuery {
     /// Find unused symbols — functions/classes with zero callers/importers.
     /// Filters out entry points (main, test_, handler, new, init).
     pub async fn find_unused_symbols(&self, min_lines: u32) -> Result<Vec<serde_json::Value>> {
-        let results: Vec<serde_json::Value> = self
-            .db
-            .query(
-                "SELECT name, file_path, start_line, end_line, signature, kind, \
-                    math::max(end_line - start_line, 0) AS line_count \
-             FROM `function` WHERE \
-                 name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
-                 AND name != 'main' \
-                 AND string::starts_with(name, 'test_') = false \
-                 AND string::starts_with(name, 'Test') = false \
-                 AND name != 'new' AND name != 'init' AND name != 'setup' \
-                 AND name != 'default' AND name != 'from' AND name != 'into' \
-                 AND name != 'drop' AND name != 'clone' AND name != 'fmt' \
-                 AND name != 'serialize' AND name != 'deserialize' \
-                 AND string::starts_with(name, 'Execute') = false \
-                 AND string::starts_with(name, 'override') = false \
-                 AND kind NOT IN ['override', 'virtual'] \
-                 AND end_line > start_line \
-                 AND math::max(end_line - start_line, 0) >= $min_lines \
-             ORDER BY end_line - start_line DESC \
-             LIMIT 50",
-            )
-            .bind(("min_lines", min_lines))
-            .await?
-            .take(0)?;
+        let results: Vec<serde_json::Value> = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            self.db
+                .query(
+                    "SELECT name, file_path, start_line, end_line, signature, kind, \
+                        math::max(end_line - start_line, 0) AS line_count \
+                 FROM `function` WHERE \
+                     name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
+                     AND name != 'main' \
+                     AND string::starts_with(name, 'test_') = false \
+                     AND string::starts_with(name, 'Test') = false \
+                     AND name != 'new' AND name != 'init' AND name != 'setup' \
+                     AND name != 'default' AND name != 'from' AND name != 'into' \
+                     AND name != 'drop' AND name != 'clone' AND name != 'fmt' \
+                     AND name != 'serialize' AND name != 'deserialize' \
+                     AND string::starts_with(name, 'Execute') = false \
+                     AND string::starts_with(name, 'override') = false \
+                     AND kind NOT IN ['override', 'virtual'] \
+                     AND end_line > start_line \
+                     AND math::max(end_line - start_line, 0) >= $min_lines \
+                 ORDER BY end_line - start_line DESC \
+                 LIMIT 50",
+                )
+                .bind(("min_lines", min_lines)),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .take(0)?;
 
         Ok(results)
     }

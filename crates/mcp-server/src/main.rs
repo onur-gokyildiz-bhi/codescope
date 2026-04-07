@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -117,14 +118,54 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Daemon mode — HTTP server, multi-project
-/// TODO: Migrate from old SSE transport to streamable HTTP transport (rmcp 1.3)
-async fn run_daemon(_bind: &str, _port: u16) -> Result<()> {
-    anyhow::bail!(
-        "Daemon mode is temporarily unavailable after rmcp upgrade to 1.3. \
-         The SSE transport was replaced by streamable HTTP transport. \
-         Use stdio mode instead: codescope-mcp <path> --auto-index"
+/// Daemon mode — Streamable HTTP server, multi-project
+async fn run_daemon(bind: &str, port: u16) -> Result<()> {
+    use rmcp::transport::streamable_http_server::{
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    };
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
+    let state = Arc::new(codescope_mcp::daemon::DaemonState::new());
+
+    // Write PID file
+    let pid_path = pid_file_path(port);
+    if let Some(parent) = pid_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&pid_path, std::process::id().to_string())?;
+
+    let ct = CancellationToken::new();
+
+    let service = StreamableHttpService::new(
+        {
+            let state = state.clone();
+            move || {
+                Ok(codescope_mcp::server::GraphRagServer::new_daemon(
+                    state.clone(),
+                ))
+            }
+        },
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token()),
     );
+
+    let router = axum::Router::new().nest_service("/mcp", service);
+
+    tracing::info!("Codescope daemon starting on {}", addr);
+    eprintln!("Codescope daemon listening on http://{}/mcp", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            tokio::signal::ctrl_c().await.ok();
+            ct.cancel();
+        })
+        .await?;
+
+    let _ = std::fs::remove_file(&pid_path);
+    Ok(())
 }
 
 fn pid_file_path(port: u16) -> PathBuf {
@@ -256,7 +297,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
 /// Check daemon status
 async fn check_status(port: u16) -> Result<()> {
-    let url = format!("http://127.0.0.1:{}/sse", port);
+    let url = format!("http://127.0.0.1:{}/mcp", port);
     match reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(2))

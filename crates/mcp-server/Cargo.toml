@@ -34,3 +34,5 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
+tokio-util = "0.7"
+axum = { workspace = true }

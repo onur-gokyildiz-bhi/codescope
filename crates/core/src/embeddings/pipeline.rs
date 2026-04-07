@@ -136,9 +136,17 @@ impl EmbeddingPipeline {
                 .await;
 
             match result {
-                Ok(_) => {
-                    count += 1;
-                    bq_count += 1;
+                Ok(mut response) => {
+                    let updated: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                    if !updated.is_empty() {
+                        count += 1;
+                        bq_count += 1;
+                    } else {
+                        warn!(
+                            "Embedding UPDATE returned Ok but 0 rows affected for {}",
+                            func.name
+                        );
+                    }
                 }
                 Err(e) => {
                     warn!("Failed to store embedding for {}: {}", func.name, e);
@@ -197,7 +205,17 @@ impl EmbeddingPipeline {
                 crate::graph::builder::sanitize_id(&id_str)
             );
             match self.db.query(&bq_query).bind(("bq", bq_as_ints)).await {
-                Ok(_) => count += 1,
+                Ok(mut response) => {
+                    let updated: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+                    if !updated.is_empty() {
+                        count += 1;
+                    } else {
+                        warn!(
+                            "BQ backfill UPDATE returned Ok but 0 rows affected for {:?}",
+                            func.id
+                        );
+                    }
+                }
                 Err(e) => warn!("BQ backfill failed for {:?}: {}", func.id, e),
             }
         }
@@ -290,22 +308,21 @@ impl EmbeddingPipeline {
         );
 
         // Stage 2: Load full f32 embeddings ONLY for top-K candidates
-        let candidate_ids: Vec<String> = scored
+        // Use backtick-quoted record IDs to avoid SurrealQL parsing issues with string interpolation
+        let id_list = scored
             .iter()
-            .map(|&(i, _)| record_id_string(&candidates[i].id))
-            .collect();
+            .map(|&(i, _)| {
+                let id = &candidates[i].id;
+                format!("`function`:`{}`", record_id_key_string(&id.key))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT id, embedding FROM `function` WHERE id IN [{}]",
+            id_list
+        );
 
-        // Build batch query for candidate embeddings
-        let id_list = candidate_ids.join(", ");
-
-        let full_embeddings: Vec<FullEmbeddingRecord> = self
-            .db
-            .query(format!(
-                "SELECT id, embedding FROM `function` WHERE id IN [{}]",
-                id_list
-            ))
-            .await?
-            .take(0)?;
+        let full_embeddings: Vec<FullEmbeddingRecord> = self.db.query(&query).await?.take(0)?;
 
         // Build a map of id → f32 embedding
         let embed_map: std::collections::HashMap<String, &Vec<f32>> = full_embeddings

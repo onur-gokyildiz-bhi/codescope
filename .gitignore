@@ -19,3 +19,4 @@ next.js/
 fastapi/
 zod/
 express/
+.fastembed_cache/

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
@@ -9,6 +11,8 @@ use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
 /// 200 entities per round-trip balances throughput vs memory.
 const BATCH_SIZE: usize = 200;
 
+const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Builds the code knowledge graph in SurrealDB
 pub struct GraphBuilder {
     db: Surreal<Db>,
@@ -17,6 +21,14 @@ pub struct GraphBuilder {
 impl GraphBuilder {
     pub fn new(db: Surreal<Db>) -> Self {
         Self { db }
+    }
+
+    /// Execute a query with a timeout to prevent hangs.
+    async fn timed_query(&self, query: &str) -> Result<surrealdb::IndexedResults> {
+        tokio::time::timeout(QUERY_TIMEOUT, self.db.query(query))
+            .await
+            .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))?
+            .map_err(Into::into)
     }
 
     /// Insert entities in batches using multi-statement UPSERT SET.
@@ -41,7 +53,7 @@ impl GraphBuilder {
                 query.push_str(&format!("UPSERT {}:{} {};\n", table, id, set_clause));
             }
 
-            match self.db.query(&query).await {
+            match self.timed_query(&query).await {
                 Ok(_response) => {
                     // Batch query succeeded — all UPSERT statements executed.
                     // Note: response.take() can fail with serde deserialization errors
@@ -103,7 +115,7 @@ impl GraphBuilder {
                 ));
             }
 
-            match self.db.query(&query).await {
+            match self.timed_query(&query).await {
                 Ok(_response) => {
                     // Batch RELATE succeeded — count all relations in chunk.
                     total += chunk.len();

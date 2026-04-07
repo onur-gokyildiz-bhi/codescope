@@ -314,7 +314,22 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                 }
             }
 
-            // Phase 6: Periodic conversation re-indexing (every 5 minutes)
+            // Phase 6: Periodic DB health check
+            {
+                let health_db = index_db.clone();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        let gq = codescope_core::graph::query::GraphQuery::new(health_db.clone());
+                        if let Err(e) = gq.health_check().await {
+                            tracing::error!("DB health check failed: {}", e);
+                        }
+                    }
+                });
+            }
+
+            // Phase 7: Periodic conversation re-indexing (every 5 minutes)
             let conv_db = index_db.clone();
             let conv_repo = index_repo.clone();
             let conv_path = index_path.clone();

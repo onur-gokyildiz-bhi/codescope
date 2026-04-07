@@ -174,3 +174,99 @@ async fn concurrent_inserts_dont_corrupt() {
     }
     assert_eq!(total, 50, "All 50 entities should be inserted");
 }
+
+#[tokio::test]
+async fn test_all_entity_tables_exist() {
+    let db = setup_db().await;
+    let tables = [
+        "file",
+        "`function`",
+        "class",
+        "module",
+        "variable",
+        "import_decl",
+        "config",
+        "doc",
+        "api",
+        "db_entity",
+        "infra",
+        "package",
+        "skill",
+        "http_call",
+        "conversation",
+        "conv_topic",
+        "decision",
+        "problem",
+        "solution",
+    ];
+    for table in tables {
+        let query = format!("SELECT count() AS cnt FROM {} GROUP ALL", table);
+        let result: Vec<serde_json::Value> = db
+            .query(&query)
+            .await
+            .unwrap_or_else(|e| panic!("Table {} should exist: {}", table, e))
+            .take(0)
+            .unwrap_or_default();
+        // Table exists if query doesn't error (count may be 0)
+        assert!(
+            result.len() <= 1,
+            "Table {} query should return 0 or 1 row",
+            table
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_all_edge_tables_exist() {
+    let db = setup_db().await;
+    let edges = [
+        "contains",
+        "calls",
+        "imports",
+        "inherits",
+        "implements",
+        "uses",
+        "modified_in",
+        "depends_on",
+        "configures",
+        "defines_endpoint",
+        "has_field",
+        "references",
+        "depends_on_package",
+        "runs_script",
+        "discussed_in",
+        "decided_about",
+        "solves_for",
+        "co_discusses",
+        "links_to",
+        "calls_endpoint",
+    ];
+    for edge in edges {
+        let query = format!("SELECT count() AS cnt FROM {} GROUP ALL", edge);
+        db.query(&query)
+            .await
+            .unwrap_or_else(|e| panic!("Edge table {} should exist: {}", edge, e));
+    }
+}
+
+#[tokio::test]
+async fn test_schema_idempotent_with_data() {
+    let db = setup_db().await;
+    let builder = GraphBuilder::new(db.clone());
+
+    // Insert some data
+    let entities = vec![make_entity(EntityKind::Function, "test_fn", "src/main.rs")];
+    builder.insert_entities(&entities).await.unwrap();
+
+    // Re-run schema init — should NOT destroy data
+    init_schema(&db).await.unwrap();
+
+    // Data should still be there
+    let result: Vec<NameRow> = db
+        .query("SELECT name FROM `function` WHERE name = 'test_fn'")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert_eq!(result.len(), 1, "Data should survive schema re-init");
+}
