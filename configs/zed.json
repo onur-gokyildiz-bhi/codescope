@@ -2,8 +2,8 @@
   "context_servers": {
     "codescope": {
       "command": {
-        "path": "codescope",
-        "args": ["mcp", ".", "--auto-index"]
+        "path": "codescope-mcp",
+        "args": [".", "--auto-index"]
       },
       "settings": {}
     }

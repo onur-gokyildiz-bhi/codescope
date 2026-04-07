@@ -99,7 +99,7 @@ Write-Host "    cd your-project"
 Write-Host "    codescope init"
 Write-Host ""
 Write-Host "  That's it! Open the project in Claude Code and" -ForegroundColor Green
-Write-Host "  Codescope starts automatically with 36 MCP tools." -ForegroundColor Green
+Write-Host "  Codescope starts automatically with 45 MCP tools." -ForegroundColor Green
 Write-Host ""
 Write-Host "  NOTE: Restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
 Write-Host ""
