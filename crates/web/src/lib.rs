@@ -170,11 +170,7 @@ async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> 
     let file_path = assets_dir.join(&path);
 
     match std::fs::read(&file_path) {
-        Ok(bytes) => (
-            [(axum::http::header::CONTENT_TYPE, content_type)],
-            bytes,
-        )
-            .into_response(),
+        Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response(),
         Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
 }

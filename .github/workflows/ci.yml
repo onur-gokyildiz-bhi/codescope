@@ -40,6 +40,17 @@ jobs:
           echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd crates/web/frontend
+          npm ci
+          npm run build
+
       - name: Cache cargo registry & build
         uses: actions/cache@v4
         with:

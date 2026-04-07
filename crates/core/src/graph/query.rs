@@ -804,7 +804,7 @@ impl GraphQuery {
             self.db
                 .query(
                     "SELECT name, file_path, start_line, end_line, signature, kind, \
-                        math::max(end_line - start_line, 0) AS line_count \
+                        (end_line - start_line) AS line_count \
                  FROM `function` WHERE \
                      name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
                      AND name != 'main' \
@@ -818,8 +818,8 @@ impl GraphQuery {
                      AND string::starts_with(name, 'override') = false \
                      AND kind NOT IN ['override', 'virtual'] \
                      AND end_line > start_line \
-                     AND math::max(end_line - start_line, 0) >= $min_lines \
-                 ORDER BY end_line - start_line DESC \
+                     AND (end_line - start_line) >= $min_lines \
+                 ORDER BY line_count DESC \
                  LIMIT 50",
                 )
                 .bind(("min_lines", min_lines)),
@@ -919,10 +919,12 @@ impl GraphQuery {
         let results: Vec<serde_json::Value> = self
             .db
             .query(
-                "SELECT body_hash, count() AS cnt, array::group(name) AS names, \
-                 array::group(file_path) AS files \
-                 FROM `function` WHERE body_hash != NONE AND repo = $repo \
-                 GROUP BY body_hash HAVING cnt > 1 \
+                "SELECT * FROM (\
+                     SELECT body_hash, count() AS cnt, array::group(name) AS names, \
+                     array::group(file_path) AS files \
+                     FROM `function` WHERE body_hash != NONE AND repo = $repo \
+                     GROUP BY body_hash \
+                 ) WHERE cnt > 1 \
                  ORDER BY cnt DESC LIMIT 20",
             )
             .bind(("repo", repo.to_string()))
