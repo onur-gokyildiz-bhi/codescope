@@ -242,6 +242,84 @@ impl LanguageRegistry {
                 language: tree_sitter_graphql::LANGUAGE.into(),
                 extensions: vec!["graphql".into(), "gql".into()],
             },
+            // D
+            LanguageConfig {
+                name: "d".into(),
+                language: tree_sitter_d::LANGUAGE.into(),
+                extensions: vec!["d".into()],
+            },
+            // Solidity
+            LanguageConfig {
+                name: "solidity".into(),
+                language: tree_sitter_solidity::LANGUAGE.into(),
+                extensions: vec!["sol".into()],
+            },
+            // GDScript (Godot)
+            LanguageConfig {
+                name: "gdscript".into(),
+                language: tree_sitter_gdscript::LANGUAGE.into(),
+                extensions: vec!["gd".into()],
+            },
+            // Elm
+            LanguageConfig {
+                name: "elm".into(),
+                language: tree_sitter_elm::LANGUAGE.into(),
+                extensions: vec!["elm".into()],
+            },
+            // Groovy
+            LanguageConfig {
+                name: "groovy".into(),
+                language: tree_sitter_groovy::LANGUAGE.into(),
+                extensions: vec!["groovy".into()],
+            },
+            // Pascal / Delphi
+            LanguageConfig {
+                name: "pascal".into(),
+                language: tree_sitter_pascal::LANGUAGE.into(),
+                extensions: vec!["pas".into(), "pp".into(), "dpr".into(), "lpr".into()],
+            },
+            // Ada
+            LanguageConfig {
+                name: "ada".into(),
+                language: tree_sitter_ada::LANGUAGE.into(),
+                extensions: vec!["adb".into(), "ads".into()],
+            },
+            // Common Lisp
+            LanguageConfig {
+                name: "commonlisp".into(),
+                language: tree_sitter_commonlisp::LANGUAGE_COMMONLISP.into(),
+                extensions: vec!["lisp".into(), "cl".into(), "lsp".into()],
+            },
+            // Scheme
+            LanguageConfig {
+                name: "scheme".into(),
+                language: tree_sitter_scheme::LANGUAGE.into(),
+                extensions: vec!["scm".into(), "ss".into()],
+            },
+            // Racket
+            LanguageConfig {
+                name: "racket".into(),
+                language: tree_sitter_racket::LANGUAGE.into(),
+                extensions: vec!["rkt".into()],
+            },
+            // XML
+            LanguageConfig {
+                name: "xml".into(),
+                language: tree_sitter_xml::LANGUAGE_XML.into(),
+                extensions: vec![
+                    "xml".into(),
+                    "xsl".into(),
+                    "xslt".into(),
+                    "svg".into(),
+                    "xhtml".into(),
+                ],
+            },
+            // Protobuf
+            LanguageConfig {
+                name: "proto".into(),
+                language: tree_sitter_proto::LANGUAGE.into(),
+                extensions: vec!["proto".into()],
+            },
         ];
 
         Self { languages }

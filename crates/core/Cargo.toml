@@ -58,6 +58,20 @@ tree-sitter-fortran = "0.5.1"
 tree-sitter-glsl = "0.2"
 tree-sitter-graphql = "0.1"
 
+# Additional languages
+tree-sitter-d = "0.8"
+tree-sitter-solidity = "1.2"
+tree-sitter-gdscript = "6.1"
+tree-sitter-elm = "5.9"
+tree-sitter-groovy = "0.1"
+tree-sitter-pascal = "0.10"
+tree-sitter-ada = "0.1"
+tree-sitter-commonlisp = "0.4"
+tree-sitter-scheme = "0.24"
+tree-sitter-racket = "0.24"
+tree-sitter-xml = "0.7"
+tree-sitter-proto = "0.4"
+
 # Config parsing
 serde_yaml = "0.9"
 toml = "0.8"
