@@ -871,6 +871,39 @@ impl GraphQuery {
         Ok(serde_json::Value::Object(result))
     }
 
+    /// Detect circular dependencies: files that import each other.
+    pub async fn detect_circular_deps(&self, repo: &str) -> Result<Vec<serde_json::Value>> {
+        let results: Vec<serde_json::Value> = self
+            .db
+            .query(
+                "SELECT in.name AS file_a, out.name AS file_b \
+                 FROM imports WHERE in.repo = $repo AND out.repo = $repo \
+                 AND out.name IN (SELECT VALUE in.name FROM imports WHERE out.name = in.name) \
+                 LIMIT 20",
+            )
+            .bind(("repo", repo.to_string()))
+            .await?
+            .take(0)?;
+        Ok(results)
+    }
+
+    /// Find functions with duplicate body hashes (copy-pasted code).
+    pub async fn find_duplicate_functions(&self, repo: &str) -> Result<Vec<serde_json::Value>> {
+        let results: Vec<serde_json::Value> = self
+            .db
+            .query(
+                "SELECT body_hash, count() AS cnt, array::group(name) AS names, \
+                 array::group(file_path) AS files \
+                 FROM `function` WHERE body_hash != NONE AND repo = $repo \
+                 GROUP BY body_hash HAVING cnt > 1 \
+                 ORDER BY cnt DESC LIMIT 20",
+            )
+            .bind(("repo", repo.to_string()))
+            .await?
+            .take(0)?;
+        Ok(results)
+    }
+
     /// Find all incoming references to an entity — Obsidian-like backlinks.
     /// "What calls/imports/contains/depends on this?"
     pub async fn backlinks(&self, name: &str) -> Result<serde_json::Value> {

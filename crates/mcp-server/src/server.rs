@@ -2942,6 +2942,44 @@ impl GraphRagServer {
             }
         }
 
+        // 5. Circular dependencies
+        let gq = GraphQuery::new(ctx.db.clone());
+        let cycles = gq
+            .detect_circular_deps(&ctx.repo_name)
+            .await
+            .unwrap_or_default();
+        if !cycles.is_empty() {
+            output.push_str(&format!("\n### Circular Dependencies ({})\n", cycles.len()));
+            for c in &cycles {
+                let a = c.get("file_a").and_then(|v| v.as_str()).unwrap_or("?");
+                let b = c.get("file_b").and_then(|v| v.as_str()).unwrap_or("?");
+                output.push_str(&format!("- {} <-> {}\n", a, b));
+            }
+        }
+
+        // 6. Duplicate code
+        let dupes = gq
+            .find_duplicate_functions(&ctx.repo_name)
+            .await
+            .unwrap_or_default();
+        if !dupes.is_empty() {
+            output.push_str(&format!("\n### Duplicate Functions ({})\n", dupes.len()));
+            for d in &dupes {
+                let names = d
+                    .get("names")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                let cnt = d.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!("- {} identical copies: {}\n", cnt, names));
+            }
+        }
+
         output
     }
 
@@ -3583,6 +3621,93 @@ impl GraphRagServer {
             }
             Err(e) => format!("Error pinning memory: {}", e),
         }
+    }
+
+    // ===== API Changelog =====
+
+    /// Show recently indexed entities grouped by file
+    #[tool(
+        description = "Show recently changed, added, or modified functions and classes since last index. \
+        Useful before code review or after re-indexing."
+    )]
+    async fn api_changelog(&self, Parameters(_params): Parameters<ApiChangelogParams>) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        let mut output = "## API Changelog\n\n".to_string();
+
+        // List all entities sorted by file, with line counts
+        let q = "SELECT name, file_path, start_line, end_line, signature \
+                 FROM `function` WHERE repo = $repo \
+                 ORDER BY file_path, start_line LIMIT 200";
+        match ctx.db.query(q).bind(("repo", ctx.repo_name.clone())).await {
+            Ok(mut r) => {
+                let functions: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                if functions.is_empty() {
+                    output.push_str("No functions found in the index.\n");
+                    return output;
+                }
+
+                let mut current_file = String::new();
+                for f in &functions {
+                    let fp = f.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    if fp != current_file {
+                        current_file = fp.to_string();
+                        output.push_str(&format!("\n### {}\n", fp));
+                    }
+                    let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let start = f.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let end = f.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let lines = end.saturating_sub(start);
+                    let sig = f.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                    if sig.is_empty() {
+                        output.push_str(&format!(
+                            "- **{}** (L{}-{}, {} lines)\n",
+                            name, start, end, lines
+                        ));
+                    } else {
+                        output.push_str(&format!(
+                            "- **{}** (L{}-{}, {} lines) `{}`\n",
+                            name, start, end, lines, sig
+                        ));
+                    }
+                }
+
+                // Also list classes
+                let cq = "SELECT name, file_path, start_line, end_line \
+                          FROM class WHERE repo = $repo \
+                          ORDER BY file_path, start_line LIMIT 100";
+                if let Ok(mut cr) = ctx.db.query(cq).bind(("repo", ctx.repo_name.clone())).await {
+                    let classes: Vec<serde_json::Value> = cr.take(0).unwrap_or_default();
+                    if !classes.is_empty() {
+                        output.push_str("\n## Classes\n");
+                        let mut current_file2 = String::new();
+                        for c in &classes {
+                            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                            if fp != current_file2 {
+                                current_file2 = fp.to_string();
+                                output.push_str(&format!("\n### {}\n", fp));
+                            }
+                            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                            let start = c.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let end = c.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let lines = end.saturating_sub(start);
+                            output.push_str(&format!(
+                                "- **{}** (L{}-{}, {} lines)\n",
+                                name, start, end, lines
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                output.push_str(&format!("Error querying changelog: {}\n", e));
+            }
+        }
+
+        output
     }
 
     // ===== Graph Analytics =====

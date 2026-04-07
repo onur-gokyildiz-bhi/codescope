@@ -282,6 +282,12 @@ pub struct CustomLintParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ApiChangelogParams {
+    /// Number of hours to look back (default: 24)
+    pub hours: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MemoryPinParams {
     /// The decision/memory name to find (partial match)
     pub name: String,

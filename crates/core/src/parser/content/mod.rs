@@ -1,9 +1,11 @@
 pub mod dockerfile_parser;
+pub mod env_parser;
 pub mod gradle_parser;
 pub mod json_parser;
 pub mod markdown_parser;
 pub mod openapi_parser;
 pub mod package_parser;
+pub mod proto_parser;
 pub mod sql_parser;
 pub mod terraform_parser;
 pub mod toml_parser;
@@ -48,6 +50,8 @@ impl ContentParserRegistry {
             Box::new(openapi_parser::OpenApiParser),
             Box::new(package_parser::PackageParser),
             Box::new(gradle_parser::GradleParser),
+            Box::new(proto_parser::ProtoParser),
+            Box::new(env_parser::EnvParser),
         ];
         Self { parsers }
     }
@@ -82,6 +86,14 @@ impl ContentParserRegistry {
                 .parsers
                 .iter()
                 .find(|p| p.name() == "gradle")
+                .map(|p| p.as_ref());
+        }
+        // .env files: .env, .env.local, .env.production, etc.
+        if lower.starts_with(".env") {
+            return self
+                .parsers
+                .iter()
+                .find(|p| p.name() == "env")
                 .map(|p| p.as_ref());
         }
         None

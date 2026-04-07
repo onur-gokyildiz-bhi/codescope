@@ -427,6 +427,49 @@ fn test_content_hash_consistency() {
 // =====================================================
 
 #[test]
+fn test_parse_dart_function() {
+    let parser = CodeParser::new();
+    let source = r#"
+class MyWidget extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Container();
+  }
+
+  String get title => 'Hello';
+
+  void _handleTap() {
+    print('tapped');
+  }
+}
+
+void main() {
+  runApp(MyWidget());
+}
+"#;
+    let (entities, _relations) = parser
+        .parse_source(std::path::Path::new("lib/main.dart"), source, "test")
+        .unwrap();
+    let functions: Vec<_> = entities
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                codescope_core::EntityKind::Function | codescope_core::EntityKind::Method
+            )
+        })
+        .collect();
+    let classes: Vec<_> = entities
+        .iter()
+        .filter(|e| matches!(e.kind, codescope_core::EntityKind::Class))
+        .collect();
+    assert!(
+        !functions.is_empty(),
+        "Should extract Dart functions/methods, got 0"
+    );
+    assert!(!classes.is_empty(), "Should extract Dart classes, got 0");
+}
+
+#[test]
 fn test_conversation_parser_basic() {
     use codescope_core::conversation::parse_conversation;
     use std::io::Write;

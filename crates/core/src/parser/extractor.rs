@@ -86,7 +86,15 @@ impl EntityExtractor {
             | "method_definition"
             | "method_declaration"
             | "function_item"
-            | "func_literal" => {
+            | "func_literal"
+            | "function_signature"
+            | "method_signature"
+            | "getter_signature"
+            | "setter_signature"
+            | "constructor_signature"
+            | "constant_constructor_signature"
+            | "factory_constructor_signature"
+            | "operator_signature" => {
                 if let Some(entity) = self.extract_function(node, source, parent_qualified_name)? {
                     let qname = entity.qualified_name.clone();
 
@@ -134,7 +142,11 @@ impl EntityExtractor {
             | "interface_declaration"
             | "trait_item"
             | "enum_item"
-            | "type_declaration" => {
+            | "type_declaration"
+            | "enum_declaration"
+            | "extension_declaration"
+            | "mixin_declaration"
+            | "type_alias" => {
                 if let Some(entity) = self.extract_class(node, source)? {
                     let qname = entity.qualified_name.clone();
 
