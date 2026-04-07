@@ -1696,16 +1696,34 @@ impl GraphRagServer {
         // Sanitize user input for safe SurrealQL interpolation
         let sanitize = |s: &str| -> String { s.replace(['\'', '\\', ';'], "").replace("--", "") };
 
-        // Pattern matching for common questions — all parameterized where possible
-        let (surql, binds): (String, Vec<(&str, String)>) = if question.contains("how many")
-            && question.contains("file")
+        // Pattern matching for common questions (English + Turkish)
+        let (surql, binds): (String, Vec<(&str, String)>) = if (question.contains("how many")
+            || question.contains("kac")
+            || question.contains("kaç"))
+            && (question.contains("file") || question.contains("dosya"))
         {
             ("SELECT count() FROM file GROUP ALL".into(), vec![])
-        } else if question.contains("how many") && question.contains("function") {
+        } else if (question.contains("how many")
+            || question.contains("kac")
+            || question.contains("kaç"))
+            && (question.contains("function")
+                || question.contains("fonksiyon")
+                || question.contains("metod"))
+        {
             ("SELECT count() FROM `function` GROUP ALL".into(), vec![])
-        } else if question.contains("how many") && question.contains("class") {
+        } else if (question.contains("how many")
+            || question.contains("kac")
+            || question.contains("kaç"))
+            && (question.contains("class")
+                || question.contains("sinif")
+                || question.contains("sınıf"))
+        {
             ("SELECT count() FROM class GROUP ALL".into(), vec![])
-        } else if question.contains("all function") || question.contains("list function") {
+        } else if question.contains("all function")
+            || question.contains("list function")
+            || question.contains("fonksiyonlari")
+            || question.contains("fonksiyonları")
+        {
             (
                 "SELECT name, file_path, start_line FROM `function` ORDER BY name LIMIT 50".into(),
                 vec![],
@@ -1746,15 +1764,15 @@ impl GraphRagServer {
             || question.contains(".py")
         {
             let path = sanitize(&extract_path_from_question(&question));
-            ("SELECT name, qualified_name, start_line, end_line FROM `function` WHERE file_path CONTAINS $path \
-                  UNION \
-                  SELECT name, qualified_name, start_line, end_line FROM class WHERE file_path CONTAINS $path".into(),
+            ("SELECT name, qualified_name, start_line, end_line, 'function' AS type FROM `function` WHERE file_path CONTAINS $path LIMIT 50".into(),
                  vec![("path", path)])
         } else if question.contains("largest")
             || question.contains("biggest")
             || question.contains("longest")
+            || question.contains("en buyuk")
+            || question.contains("en büyük")
         {
-            ("SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".into(), vec![])
+            ("SELECT name, file_path, start_line, end_line, math::max(end_line - start_line, 0) AS size FROM `function` ORDER BY end_line - start_line DESC LIMIT 10".into(), vec![])
         } else if question.contains("import") {
             (
                 "SELECT name, file_path FROM import_decl ORDER BY file_path LIMIT 50".into(),
@@ -1767,7 +1785,10 @@ impl GraphRagServer {
                     w.len() > 3
                         && ![
                             "what", "where", "which", "find", "show", "list", "does", "that",
-                            "this", "from", "with",
+                            "this", "from", "with", "have", "many",
+                            // Turkish stopwords
+                            "nedir", "nerede", "hangi", "bul", "goster", "göster", "listele",
+                            "projede", "dosya", "tane", "olan", "ile", "icin", "için", "bana",
                         ]
                         .contains(w)
                 })
@@ -2676,13 +2697,14 @@ impl GraphRagServer {
         let min_lines = params.min_lines.unwrap_or(3);
         let limit = params.limit.unwrap_or(50);
 
-        // Find functions with zero incoming calls, excluding entry points
+        // Find functions with zero incoming calls, excluding entry points and overrides
         let query = format!(
-            "SELECT name, file_path, start_line, end_line, \
-                    (end_line - start_line) AS size \
+            "SELECT name, file_path, start_line, end_line, signature, \
+                    math::max(end_line - start_line, 0) AS size \
              FROM `function` \
              WHERE count(<-calls) = 0 \
-               AND (end_line - start_line) >= {} \
+               AND end_line > start_line \
+               AND math::max(end_line - start_line, 0) >= {} \
                AND name != 'main' \
                AND !(name ~ '^test') \
                AND !(name ~ '_test$') \
@@ -2695,7 +2717,15 @@ impl GraphRagServer {
                AND !(name ~ '^fmt$') \
                AND !(name ~ '^serialize$') \
                AND !(name ~ '^deserialize$') \
-             ORDER BY size DESC \
+               AND !(signature ~ 'override') \
+               AND !(signature ~ 'virtual') \
+               AND !(signature ~ 'abstract') \
+               AND !(signature ~ '@Override') \
+               AND !(name ~ '^Execute') \
+               AND !(name ~ '^On[A-Z]') \
+               AND !(name ~ '^Handle[A-Z]') \
+               AND !(name ~ 'Async$') \
+             ORDER BY end_line - start_line DESC \
              LIMIT {}",
             min_lines, limit
         );
@@ -3195,18 +3225,15 @@ impl GraphRagServer {
         let limit = params.limit.unwrap_or(20) as i64;
         let safe = params.query.replace('\'', "");
 
-        let q = "SELECT name, body, kind, timestamp, 'memory' AS source FROM conv_topic \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
-                 UNION \
-                 SELECT name, body, 'decision' AS kind, timestamp, 'conversation' AS source FROM decision \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
-                 UNION \
-                 SELECT name, body, 'problem' AS kind, timestamp, 'conversation' AS source FROM problem \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
-                 UNION \
-                 SELECT name, body, 'solution' AS kind, timestamp, 'conversation' AS source FROM solution \
-                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) \
-                 ORDER BY timestamp DESC LIMIT $lim";
+        // SurrealDB doesn't support UNION — run separate queries and merge
+        let q = "SELECT name, body, kind, timestamp FROM conv_topic \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
+                 SELECT name, body, 'decision' AS kind, timestamp FROM decision \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
+                 SELECT name, body, 'problem' AS kind, timestamp FROM problem \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim; \
+                 SELECT name, body, 'solution' AS kind, timestamp FROM solution \
+                 WHERE repo = $repo AND (name ~ $search OR body ~ $search) LIMIT $lim";
 
         match ctx
             .db
@@ -3217,7 +3244,18 @@ impl GraphRagServer {
             .await
         {
             Ok(mut r) => {
-                let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                let mut results: Vec<serde_json::Value> = Vec::new();
+                for i in 0..4u32 {
+                    let batch: Vec<serde_json::Value> = r.take(i as usize).unwrap_or_default();
+                    results.extend(batch);
+                }
+                // Sort by timestamp descending, truncate to limit
+                results.sort_by(|a, b| {
+                    let ta = a.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+                    let tb = b.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+                    tb.cmp(ta)
+                });
+                results.truncate(limit as usize);
                 if results.is_empty() {
                     return format!("No memories found for '{}'", params.query);
                 }

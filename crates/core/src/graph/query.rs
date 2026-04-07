@@ -758,8 +758,8 @@ impl GraphQuery {
         let results: Vec<serde_json::Value> = self
             .db
             .query(
-                "SELECT name, file_path, start_line, end_line, signature, \
-                    (end_line - start_line) AS line_count \
+                "SELECT name, file_path, start_line, end_line, signature, kind, \
+                    math::max(end_line - start_line, 0) AS line_count \
              FROM `function` WHERE \
                  name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
                  AND name != 'main' \
@@ -769,8 +769,12 @@ impl GraphQuery {
                  AND name != 'default' AND name != 'from' AND name != 'into' \
                  AND name != 'drop' AND name != 'clone' AND name != 'fmt' \
                  AND name != 'serialize' AND name != 'deserialize' \
-                 AND (end_line - start_line) >= $min_lines \
-             ORDER BY (end_line - start_line) DESC \
+                 AND string::starts_with(name, 'Execute') = false \
+                 AND string::starts_with(name, 'override') = false \
+                 AND kind NOT IN ['override', 'virtual'] \
+                 AND end_line > start_line \
+                 AND math::max(end_line - start_line, 0) >= $min_lines \
+             ORDER BY end_line - start_line DESC \
              LIMIT 50",
             )
             .bind(("min_lines", min_lines))

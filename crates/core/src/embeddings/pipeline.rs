@@ -108,13 +108,13 @@ impl EmbeddingPipeline {
             let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
 
             let id_str = func.id.to_string();
+            let update_query = format!(
+                "UPDATE `function`:`{}` SET embedding = $embedding, binary_embedding = $bq",
+                crate::graph::builder::sanitize_id(&id_str)
+            );
             let result = self
                 .db
-                .query("UPDATE $id SET embedding = $embedding, binary_embedding = $bq")
-                .bind((
-                    "id",
-                    surrealdb::sql::Thing::from(("function".to_string(), id_str.clone())),
-                ))
+                .query(&update_query)
                 .bind(("embedding", embedding))
                 .bind(("bq", bq_as_ints))
                 .await;
@@ -176,16 +176,11 @@ impl EmbeddingPipeline {
             let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
 
             let id_str = func.id.to_string();
-            match self
-                .db
-                .query("UPDATE $id SET binary_embedding = $bq")
-                .bind((
-                    "id",
-                    surrealdb::sql::Thing::from(("function".to_string(), id_str)),
-                ))
-                .bind(("bq", bq_as_ints))
-                .await
-            {
+            let bq_query = format!(
+                "UPDATE `function`:`{}` SET binary_embedding = $bq",
+                crate::graph::builder::sanitize_id(&id_str)
+            );
+            match self.db.query(&bq_query).bind(("bq", bq_as_ints)).await {
                 Ok(_) => count += 1,
                 Err(e) => warn!("BQ backfill failed for {}: {}", func.id, e),
             }

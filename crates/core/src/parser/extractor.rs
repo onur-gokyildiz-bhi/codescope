@@ -510,12 +510,36 @@ impl EntityExtractor {
         let callee_lower = callee_text.to_lowercase();
 
         // Known HTTP client patterns: "receiver.method" or "function"
-        let http_methods = ["get", "post", "put", "delete", "patch", "head", "options"];
+        let http_methods = [
+            "get",
+            "post",
+            "put",
+            "delete",
+            "patch",
+            "head",
+            "options",
+            // C# HttpClient async methods
+            "getasync",
+            "postasync",
+            "putasync",
+            "deleteasync",
+            "patchasync",
+            "sendasync",
+            "getstringasync",
+            "getbytearrayasync",
+            "getstreamasync",
+            // RestSharp
+            "executeasync",
+            "executegettaskasync",
+            "executeposttaskasync",
+        ];
         let http_clients = [
             "reqwest",
             "client",
             "http_client",
             "httpclient",
+            "_httpclient",
+            "_client",
             "axios",
             "fetch",
             "requests",
@@ -524,13 +548,15 @@ impl EntityExtractor {
             "ureq",
             "hyper",
             "surf",
+            // C# / .NET
+            "restclient",
+            "flurlclient",
+            "webclient",
         ];
 
         let method = if callee_lower == "fetch" {
-            // fetch("url") — default GET
             "GET".to_string()
         } else {
-            // Check for receiver.method pattern (reqwest::get, axios.post, requests.get)
             let parts: Vec<&str> = callee_lower.rsplitn(2, ['.', ':']).collect();
             if parts.len() == 2 {
                 let method_part = parts[0];
@@ -538,7 +564,31 @@ impl EntityExtractor {
                 if http_methods.contains(&method_part)
                     && http_clients.iter().any(|c| receiver_part.contains(c))
                 {
-                    method_part.to_uppercase()
+                    // Map C# async methods to HTTP methods
+                    if method_part.starts_with("get")
+                        || method_part == "getstringasync"
+                        || method_part == "getbytearrayasync"
+                        || method_part == "getstreamasync"
+                    {
+                        "GET".to_string()
+                    } else if method_part.starts_with("post")
+                        || method_part == "executeposttaskasync"
+                    {
+                        "POST".to_string()
+                    } else if method_part.starts_with("put") {
+                        "PUT".to_string()
+                    } else if method_part.starts_with("delete") {
+                        "DELETE".to_string()
+                    } else if method_part.starts_with("patch") {
+                        "PATCH".to_string()
+                    } else if method_part == "sendasync"
+                        || method_part == "executeasync"
+                        || method_part == "executegettaskasync"
+                    {
+                        "UNKNOWN".to_string()
+                    } else {
+                        method_part.to_uppercase()
+                    }
                 } else {
                     return None;
                 }
