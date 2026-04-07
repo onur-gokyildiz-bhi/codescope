@@ -9,7 +9,7 @@ cargo run -p codescope -- index <path> --repo <name>
 cargo run -p codescope -- search <pattern>
 cargo run -p codescope -- query "SELECT * FROM \`function\` LIMIT 10"
 cargo run -p codescope -- mcp <path> --auto-index
-cargo run -p codescope -- web <path> --port 9091 --auto-index
+cargo run -p codescope -- web <path> --port 9876 --auto-index
 cargo run -p codescope-bench -- <path> --json
 ```
 

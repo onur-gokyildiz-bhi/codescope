@@ -20,7 +20,7 @@ struct Args {
     repo: Option<String>,
 
     /// Port to listen on
-    #[arg(long, default_value = "8080")]
+    #[arg(long, default_value = "9876")]
     port: u16,
 
     /// Auto-index the codebase on startup

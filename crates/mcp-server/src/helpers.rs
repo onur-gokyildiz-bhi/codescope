@@ -209,8 +209,8 @@ pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> Strin
     }
 }
 
-/// Generate CONTEXT.md in the project's .claude directory.
-/// Claude reads this automatically at session start.
+/// Generate CONTEXT.md in ~/.codescope/projects/{repo}/ to avoid project bloat.
+/// Falls back to {project}/.claude/CONTEXT.md if home dir is unavailable.
 pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &Path) {
     let summary = build_context_summary(db, repo).await;
     let insights = build_post_index_insights(db, repo).await;
@@ -219,7 +219,9 @@ pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &P
         return;
     }
 
-    let context_path = codebase_path.join(".claude").join("CONTEXT.md");
+    let context_path = dirs::home_dir()
+        .map(|h| h.join(".codescope").join("projects").join(repo).join("CONTEXT.md"))
+        .unwrap_or_else(|| codebase_path.join(".claude").join("CONTEXT.md"));
     if let Some(parent) = context_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

@@ -370,16 +370,16 @@ Claude will also **automatically use Codescope tools** when you ask code structu
 
 ```bash
 # Start daemon (background, multi-project)
-codescope mcp serve --port 3333
+codescope mcp serve --port 9877
 
 # Start as background process
-codescope mcp start --port 3333
+codescope mcp start --port 9877
 
 # Check status
-codescope mcp status --port 3333
+codescope mcp status --port 9877
 
 # Stop daemon
-codescope mcp stop --port 3333
+codescope mcp stop --port 9877
 ```
 
 ### Available MCP Tools (45 tools)
@@ -753,7 +753,7 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed per-scenario results.
 Launch the interactive 3D knowledge graph visualization:
 
 ```bash
-codescope web /path/to/project --auto-index --port 9091
+codescope web /path/to/project --auto-index --port 9876
 ```
 
 ![Codescope 3D Web UI](assets/demo.gif)

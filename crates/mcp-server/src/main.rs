@@ -49,7 +49,7 @@ enum Command {
     /// Run as SSE daemon (single process, multi-project)
     Serve {
         /// Port to listen on
-        #[arg(long, default_value = "3333")]
+        #[arg(long, default_value = "9877")]
         port: u16,
 
         /// Bind address
@@ -59,19 +59,19 @@ enum Command {
 
     /// Start daemon in background
     Start {
-        #[arg(long, default_value = "3333")]
+        #[arg(long, default_value = "9877")]
         port: u16,
     },
 
     /// Stop running daemon
     Stop {
-        #[arg(long, default_value = "3333")]
+        #[arg(long, default_value = "9877")]
         port: u16,
     },
 
     /// Check daemon status
     Status {
-        #[arg(long, default_value = "3333")]
+        #[arg(long, default_value = "9877")]
         port: u16,
     },
 }

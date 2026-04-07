@@ -150,7 +150,7 @@ enum Commands {
         path: PathBuf,
 
         /// Port to listen on
-        #[arg(long, default_value = "8080")]
+        #[arg(long, default_value = "9876")]
         port: u16,
 
         /// Auto-index on startup
