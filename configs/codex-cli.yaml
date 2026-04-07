@@ -2,7 +2,8 @@
 # Add to ~/.codex/config.yaml
 mcp_servers:
   codescope:
-    command: codescope-mcp
+    command: codescope
     args:
+      - "mcp"
       - "."
       - "--auto-index"

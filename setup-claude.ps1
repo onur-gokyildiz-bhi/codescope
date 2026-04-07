@@ -14,10 +14,10 @@ Write-Host "  Codescope - Claude Code Integration Setup" -ForegroundColor Cyan
 Write-Host "  ==========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. Check codescope-mcp is installed
-$mcpPath = Get-Command codescope-mcp -ErrorAction SilentlyContinue
+# 1. Check codescope is installed
+$mcpPath = Get-Command codescope -ErrorAction SilentlyContinue
 if (-not $mcpPath) {
-    Write-Host "  codescope-mcp not found. Installing..." -ForegroundColor Yellow
+    Write-Host "  codescope not found. Installing..." -ForegroundColor Yellow
     irm "$REPO_RAW/install.ps1" | iex
     Write-Host ""
 }
@@ -35,8 +35,8 @@ if (Test-Path $claudeJson) {
             $config | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
         }
         $config.mcpServers | Add-Member -NotePropertyName "codescope" -NotePropertyValue @{
-            command = "codescope-mcp"
-            args = @(".", "--auto-index")
+            command = "codescope"
+            args = @("mcp", ".", "--auto-index")
         } -Force
         $config | ConvertTo-Json -Depth 10 | Set-Content $claudeJson -Encoding UTF8
         Write-Host "         Added codescope to existing $claudeJson" -ForegroundColor Green
@@ -45,7 +45,7 @@ if (Test-Path $claudeJson) {
     @{
         mcpServers = @{
             codescope = @{
-                command = "codescope-mcp"
+                command = "codescope mcp"
                 args = @(".", "--auto-index")
             }
         }

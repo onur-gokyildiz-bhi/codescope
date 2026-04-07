@@ -15,9 +15,9 @@ echo "  Codescope — Claude Code Integration Setup"
 echo "  =========================================="
 echo ""
 
-# 1. Check codescope-mcp is installed
-if ! command -v codescope-mcp &> /dev/null; then
-    echo "  codescope-mcp not found. Installing..."
+# 1. Check codescope is installed
+if ! command -v codescope &> /dev/null; then
+    echo "  codescope not found. Installing..."
     curl -fsSL "$REPO_RAW/install.sh" | bash
     echo ""
 fi
@@ -34,12 +34,12 @@ if [ -f "$CLAUDE_JSON" ]; then
         # Merge into existing config using python/jq
         if command -v jq &> /dev/null; then
             TMP=$(mktemp)
-            jq '.mcpServers.codescope = {"command": "codescope-mcp", "args": [".", "--auto-index"]}' "$CLAUDE_JSON" > "$TMP"
+            jq '.mcpServers.codescope = {"command": "codescope", "args": ["mcp", ".", "--auto-index"]}' "$CLAUDE_JSON" > "$TMP"
             mv "$TMP" "$CLAUDE_JSON"
             echo "         Added codescope to existing $CLAUDE_JSON"
         else
             echo "         WARNING: jq not found, cannot merge. Add manually:"
-            echo '         "codescope": {"command": "codescope-mcp", "args": [".", "--auto-index"]}'
+            echo '         "codescope": {"command": "codescope", "args": ["mcp", ".", "--auto-index"]}'
         fi
     fi
 else
@@ -47,8 +47,8 @@ else
 {
   "mcpServers": {
     "codescope": {
-      "command": "codescope-mcp",
-      "args": [".", "--auto-index"]
+      "command": "codescope",
+      "args": ["mcp", ".", "--auto-index"]
     }
   }
 }
