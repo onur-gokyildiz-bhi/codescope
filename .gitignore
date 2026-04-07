@@ -13,3 +13,9 @@ benchmarks/results/
 assets/frames/
 assets/node_modules/
 assets/package*.json
+
+gin/
+next.js/
+fastapi/
+zod/
+express/
