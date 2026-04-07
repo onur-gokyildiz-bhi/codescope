@@ -3,6 +3,29 @@ use surrealdb::engine::local::Db;
 use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
+/// Derive a module scope from a file path for querying past decisions/problems.
+/// e.g. "crates/core/src/graph/builder.rs" -> "core::graph"
+/// e.g. "src/main.rs" -> "root"
+pub fn derive_scope_from_file_path(file_path: &str) -> String {
+    let normalized = file_path.replace('\\', "/");
+    let parts: Vec<&str> = normalized.split('/').collect();
+    if parts.len() >= 3 && (parts[0] == "crates" || parts[0] == "src" || parts[0] == "lib") {
+        // crates/core/src/graph/builder.rs -> core::graph
+        parts
+            .iter()
+            .skip(1) // skip "crates"
+            .take(parts.len().saturating_sub(3)) // skip filename and last dir
+            .filter(|p| **p != "src")
+            .copied()
+            .collect::<Vec<_>>()
+            .join("::")
+    } else if parts.len() >= 2 {
+        parts[..parts.len() - 1].join("::")
+    } else {
+        "root".to_string()
+    }
+}
+
 /// Load known entity names from the graph for conversation-to-code linking.
 /// Queries all 11 entity tables to maximize linking coverage.
 pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
@@ -203,6 +226,45 @@ pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> Strin
             "*{} conversation sessions indexed for this project.*",
             session_count
         ));
+    }
+
+    // Last session context
+    let last_sessions: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, timestamp FROM conversation WHERE repo = $repo ORDER BY timestamp DESC LIMIT 1",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if let Some(session) = last_sessions.first() {
+        let ts = session
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        sections.push(format!("\n## Last Session\nLast indexed: {}\n", ts));
+    }
+
+    // Open problems (no linked solution)
+    let open_problems: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, body FROM problem WHERE repo = $repo AND count(->solves_for) = 0 ORDER BY timestamp DESC LIMIT 5",
+        )
+        .bind(("repo", repo.to_string()))
+        .await
+        .ok()
+        .and_then(|mut r| r.take(0).ok())
+        .unwrap_or_default();
+
+    if !open_problems.is_empty() {
+        let mut s = "## Open Problems (Unresolved)\n".to_string();
+        for p in &open_problems {
+            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            s.push_str(&format!("- {}\n", name));
+        }
+        sections.push(s);
     }
 
     if sections.is_empty() {

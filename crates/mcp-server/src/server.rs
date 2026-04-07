@@ -11,8 +11,8 @@ use codescope_core::graph::query::GraphQuery;
 
 use crate::daemon::DaemonState;
 use crate::helpers::{
-    build_context_summary, check_conversation_hash, extract_path_from_question,
-    link_cross_session_topics, load_known_entities,
+    build_context_summary, check_conversation_hash, derive_scope_from_file_path,
+    extract_path_from_question, link_cross_session_topics, load_known_entities,
 };
 use crate::params::*;
 
@@ -2065,6 +2065,53 @@ impl GraphRagServer {
                     }
                 }
 
+                // Past decisions about this file
+                let file_scope = derive_scope_from_file_path(&params.file_path);
+                let file_decisions: Vec<serde_json::Value> = db
+                    .query(
+                        "SELECT name, body, timestamp, tier FROM decision \
+                         WHERE repo = $repo AND scope ~ $scope \
+                         ORDER BY tier ASC, timestamp DESC LIMIT 5",
+                    )
+                    .bind(("repo", ctx.repo_name.clone()))
+                    .bind(("scope", file_scope.clone()))
+                    .await
+                    .ok()
+                    .and_then(|mut r| r.take(0).ok())
+                    .unwrap_or_default();
+
+                if !file_decisions.is_empty() {
+                    output.push_str("\n### Past Decisions About This File\n");
+                    for d in &file_decisions {
+                        let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let tier = d.get("tier").and_then(|v| v.as_u64()).unwrap_or(2);
+                        let prefix = if tier == 0 { "[PINNED] " } else { "" };
+                        output.push_str(&format!("- {}{}\n", prefix, name));
+                    }
+                }
+
+                // Past problems about this file
+                let file_problems: Vec<serde_json::Value> = db
+                    .query(
+                        "SELECT name, timestamp FROM problem \
+                         WHERE repo = $repo AND scope ~ $scope \
+                         ORDER BY timestamp DESC LIMIT 5",
+                    )
+                    .bind(("repo", ctx.repo_name.clone()))
+                    .bind(("scope", file_scope))
+                    .await
+                    .ok()
+                    .and_then(|mut r| r.take(0).ok())
+                    .unwrap_or_default();
+
+                if !file_problems.is_empty() {
+                    output.push_str("\n### Known Issues With This File\n");
+                    for p in &file_problems {
+                        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        output.push_str(&format!("- {}\n", name));
+                    }
+                }
+
                 output
             }
             Err(e) => format!("Error getting context for '{}': {}", params.file_path, e),
@@ -4005,5 +4052,159 @@ impl GraphRagServer {
             classes.len(),
             file_count - 1
         )
+    }
+
+    // ===== Capture Insight (real-time memory write) =====
+
+    /// Record a decision, problem, solution, or learning insight in real-time
+    #[tool(
+        description = "Record an insight (decision, problem, solution, or learning) into the knowledge graph in real-time. \
+        Call this after making a decision, encountering a problem, finding a solution, or learning something. \
+        The insight is stored with timestamp, repo, and optional file/entity links."
+    )]
+    async fn capture_insight(
+        &self,
+        Parameters(params): Parameters<CaptureInsightParams>,
+    ) -> String {
+        let ctx = match self.ctx().await {
+            Ok(c) => c,
+            Err(e) => return e,
+        };
+
+        // Validate kind
+        let valid_kinds = ["decision", "problem", "solution", "learning"];
+        let kind = params.kind.to_lowercase();
+        if !valid_kinds.contains(&kind.as_str()) {
+            return format!(
+                "Invalid kind '{}'. Must be one of: {}",
+                params.kind,
+                valid_kinds.join(", ")
+            );
+        }
+
+        // Map kind to DB table
+        let table = match kind.as_str() {
+            "decision" => "decision",
+            "problem" => "problem",
+            "solution" => "solution",
+            "learning" => "conv_topic",
+            _ => unreachable!(),
+        };
+
+        // Derive scope from file_path if given
+        let scope = params.file_path.as_deref().map(derive_scope_from_file_path);
+
+        // Generate a unique qualified name
+        let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let slug = params
+            .summary
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+            .replace("__", "_")
+            .trim_matches('_')
+            .chars()
+            .take(60)
+            .collect::<String>();
+        let qname = format!("{}:insight:{}:{}", ctx.repo_name, kind, slug);
+
+        // Build the body from summary + detail
+        let body = if let Some(detail) = &params.detail {
+            format!("{}\n\n{}", params.summary, detail)
+        } else {
+            params.summary.clone()
+        };
+
+        // Escape single quotes for SurrealQL
+        let esc = |s: &str| s.replace('\'', "\\'");
+
+        // Create the insight record
+        let create_query = format!(
+            "CREATE {table} SET \
+             name = '{name}', \
+             qualified_name = '{qname}', \
+             kind = '{kind}', \
+             file_path = '{file_path}', \
+             repo = '{repo}', \
+             language = 'insight', \
+             start_line = 0, \
+             end_line = 0, \
+             body = '{body}', \
+             timestamp = '{ts}', \
+             scope = '{scope}';",
+            table = table,
+            name = esc(&params.summary),
+            qname = esc(&qname),
+            kind = esc(&kind),
+            file_path = esc(params.file_path.as_deref().unwrap_or("")),
+            repo = esc(&ctx.repo_name),
+            body = esc(&body),
+            ts = timestamp,
+            scope = esc(scope.as_deref().unwrap_or("root")),
+        );
+
+        if let Err(e) = ctx.db.query(&create_query).await {
+            return format!("Error storing insight: {}", e);
+        }
+
+        // If entity_name is given, create a relation to the code entity
+        if let Some(entity_name) = &params.entity_name {
+            let rel_kind = match kind.as_str() {
+                "decision" => "decided_about",
+                _ => "discussed_in",
+            };
+
+            // Try to find the code entity in function, class, or config tables
+            let find_query = format!(
+                "SELECT id FROM `function` WHERE name = '{}' AND repo = '{}' LIMIT 1; \
+                 SELECT id FROM class WHERE name = '{}' AND repo = '{}' LIMIT 1; \
+                 SELECT id FROM config WHERE name = '{}' AND repo = '{}' LIMIT 1;",
+                esc(entity_name),
+                esc(&ctx.repo_name),
+                esc(entity_name),
+                esc(&ctx.repo_name),
+                esc(entity_name),
+                esc(&ctx.repo_name),
+            );
+
+            if let Ok(mut resp) = ctx.db.query(&find_query).await {
+                let mut target_id = None;
+                for i in 0..3u32 {
+                    let results: Vec<serde_json::Value> = resp.take(i as usize).unwrap_or_default();
+                    if let Some(first) = results.first() {
+                        if let Some(id) = first.get("id") {
+                            target_id = Some(id.to_string());
+                            break;
+                        }
+                    }
+                }
+
+                if let Some(target) = target_id {
+                    // Find the insight we just created
+                    let relate_query = format!(
+                        "LET $insight = (SELECT id FROM {table} WHERE qualified_name = '{qname}' LIMIT 1); \
+                         IF $insight THEN \
+                             RELATE $insight[0].id->{rel}->{target} \
+                         END;",
+                        table = table,
+                        qname = esc(&qname),
+                        rel = rel_kind,
+                        target = target.trim_matches('"'),
+                    );
+                    let _ = ctx.db.query(&relate_query).await;
+                }
+            }
+        }
+
+        let mut confirmation = format!(
+            "Captured {} insight: \"{}\"\n- Repo: {}\n- Timestamp: {}",
+            kind, params.summary, ctx.repo_name, timestamp
+        );
+        if let Some(scope) = &scope {
+            confirmation.push_str(&format!("\n- Scope: {}", scope));
+        }
+        if let Some(entity) = &params.entity_name {
+            confirmation.push_str(&format!("\n- Linked to entity: {}", entity));
+        }
+        confirmation
     }
 }

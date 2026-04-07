@@ -302,3 +302,17 @@ pub struct MemoryPinParams {
     /// Tier level: 0 = critical (always show), 1 = important, 2 = contextual (default)
     pub tier: u32,
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CaptureInsightParams {
+    /// Type: "decision", "problem", "solution", "learning"
+    pub kind: String,
+    /// Short summary (1 line)
+    pub summary: String,
+    /// Full context/rationale
+    pub detail: Option<String>,
+    /// Related file path (optional)
+    pub file_path: Option<String>,
+    /// Related function/class name (optional)
+    pub entity_name: Option<String>,
+}
