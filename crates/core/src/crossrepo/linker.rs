@@ -2,8 +2,9 @@ use anyhow::Result;
 use serde::Deserialize;
 use surrealdb::engine::local::Db;
 use surrealdb::Surreal;
+use tracing::{debug, info};
 
-/// Links entities across multiple repositories
+/// Links entities across multiple repositories by resolving cross-repo imports.
 pub struct CrossRepoLinker {
     db: Surreal<Db>,
 }
@@ -12,8 +13,14 @@ pub struct CrossRepoLinker {
 struct ImportRecord {
     body: Option<String>,
     repo: String,
-    #[allow(dead_code)]
     file_path: String,
+    qualified_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileMatch {
+    qualified_name: String,
+    repo: String,
 }
 
 impl CrossRepoLinker {
@@ -21,39 +28,88 @@ impl CrossRepoLinker {
         Self { db }
     }
 
-    /// Attempt to resolve cross-repo import references
+    /// Resolve cross-repo import references and create `depends_on` relations.
+    ///
+    /// Scans all imports, extracts module names, then searches other repos
+    /// for matching files. Creates graph edges for each resolved cross-repo link.
     pub async fn link_repos(&self) -> Result<usize> {
         let imports: Vec<ImportRecord> = self
             .db
-            .query("SELECT body, repo, file_path FROM import_decl".to_string())
+            .query(
+                "SELECT body, repo, file_path, qualified_name \
+                 FROM import_decl WHERE body IS NOT NONE",
+            )
             .await?
             .take(0)?;
 
+        if imports.is_empty() {
+            return Ok(0);
+        }
+
         let mut links_created = 0;
 
-        for imp in imports {
-            if let Some(body) = &imp.body {
-                let module_name = extract_module_from_import(body);
-                let source_repo = imp.repo.clone();
+        for imp in &imports {
+            let body = match &imp.body {
+                Some(b) if !b.is_empty() => b,
+                _ => continue,
+            };
 
-                let matches: Vec<serde_json::Value> = self.db
-                    .query("SELECT qualified_name, repo FROM file WHERE path CONTAINS $module AND repo != $source_repo LIMIT 5".to_string())
-                    .bind(("module", module_name))
-                    .bind(("source_repo", source_repo))
-                    .await?
-                    .take(0)?;
+            let module_name = extract_module_from_import(body);
+            if module_name.is_empty() {
+                continue;
+            }
 
-                for _m in &matches {
-                    links_created += 1;
+            let matches: Vec<FileMatch> = self
+                .db
+                .query(
+                    "SELECT qualified_name, repo FROM file \
+                     WHERE path CONTAINS $module AND repo != $source_repo \
+                     LIMIT 5",
+                )
+                .bind(("module", module_name.clone()))
+                .bind(("source_repo", imp.repo.clone()))
+                .await?
+                .take(0)?;
+
+            for m in &matches {
+                let from_id = crate::graph::builder::sanitize_id(&imp.qualified_name);
+                let to_id = crate::graph::builder::sanitize_id(&m.qualified_name);
+
+                let query = format!(
+                    "RELATE import_decl:`{from_id}`->depends_on->file:`{to_id}` \
+                     SET source_repo = $src, target_repo = $tgt, kind = 'cross_repo'"
+                );
+
+                match self
+                    .db
+                    .query(&query)
+                    .bind(("src", imp.repo.clone()))
+                    .bind(("tgt", m.repo.clone()))
+                    .await
+                {
+                    Ok(_) => {
+                        links_created += 1;
+                        debug!(
+                            "Cross-repo link: {}:{} -> {}:{}",
+                            imp.repo, imp.file_path, m.repo, m.qualified_name
+                        );
+                    }
+                    Err(e) => {
+                        debug!("Failed to create cross-repo link: {e}");
+                    }
                 }
             }
+        }
+
+        if links_created > 0 {
+            info!("Created {} cross-repo links", links_created);
         }
 
         Ok(links_created)
     }
 }
 
-/// Extract the module/package name from an import statement
+/// Extract the module/package name from an import statement.
 fn extract_module_from_import(import_text: &str) -> String {
     let text = import_text.trim();
 
@@ -83,4 +139,41 @@ fn extract_module_from_import(import_text: &str) -> String {
     }
 
     text.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_python_import() {
+        assert_eq!(
+            extract_module_from_import("from foo.bar import baz"),
+            "foo/bar"
+        );
+    }
+
+    #[test]
+    fn extract_js_import() {
+        assert_eq!(
+            extract_module_from_import("import { X } from 'shared/utils'"),
+            "shared/utils"
+        );
+    }
+
+    #[test]
+    fn extract_rust_import() {
+        assert_eq!(
+            extract_module_from_import("use crate::graph::builder;"),
+            "crate/graph/builder"
+        );
+    }
+
+    #[test]
+    fn extract_relative_js_import() {
+        assert_eq!(
+            extract_module_from_import("import X from './helpers'"),
+            "helpers"
+        );
+    }
 }

@@ -490,7 +490,7 @@ fn escape_table(name: &str) -> String {
 /// Sanitize a string to be a valid SurrealDB record ID.
 /// Replaces all special characters with underscores, collapses doubles,
 /// and trims leading/trailing underscores.
-fn sanitize_id(s: &str) -> String {
+pub fn sanitize_id(s: &str) -> String {
     s.replace(
         [
             '/', '\\', ':', '.', ' ', '<', '>', '"', '\'', '(', ')', ',', ';', '{', '}', '[', ']',

@@ -502,7 +502,9 @@ async fn cmd_index(
             Ok((entities, relations)) => {
                 // Delete old entities for incremental re-index
                 if !clean {
-                    let _ = builder.delete_file_entities(&rel_path, repo_name).await;
+                    if let Err(e) = builder.delete_file_entities(&rel_path, repo_name).await {
+                        tracing::warn!("Delete entities failed: {e}");
+                    }
                 }
 
                 let ent_count = entities.len();
@@ -952,8 +954,12 @@ async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBu
             &std::fs::read_to_string(file_path).unwrap_or_default(),
             &repo_name,
         ) {
-            let _ = builder.insert_entities(&entities).await;
-            let _ = builder.insert_relations(&relations).await;
+            if let Err(e) = builder.insert_entities(&entities).await {
+                tracing::warn!("Entity insert failed: {e}");
+            }
+            if let Err(e) = builder.insert_relations(&relations).await {
+                tracing::warn!("Relation insert failed: {e}");
+            }
             entity_count += entities.len();
             relation_count += relations.len();
             file_count += 1;
@@ -968,7 +974,9 @@ async fn cmd_init(project_path: PathBuf, repo_name: &str, db_path: Option<PathBu
     }
 
     // Resolve call targets
-    let _ = builder.resolve_call_targets(&repo_name).await;
+    if let Err(e) = builder.resolve_call_targets(&repo_name).await {
+        tracing::warn!("Resolve call targets failed: {e}");
+    }
 
     let elapsed = start.elapsed();
     println!(

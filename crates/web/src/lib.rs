@@ -108,8 +108,12 @@ pub async fn run_web(
 
         let mut file_count = 0;
         for (entities, relations) in results {
-            let _ = builder.insert_entities(&entities).await;
-            let _ = builder.insert_relations(&relations).await;
+            if let Err(e) = builder.insert_entities(&entities).await {
+                tracing::warn!("Entity insert failed: {e}");
+            }
+            if let Err(e) = builder.insert_relations(&relations).await {
+                tracing::warn!("Relation insert failed: {e}");
+            }
             file_count += 1;
         }
         println!("Indexed {} files", file_count);

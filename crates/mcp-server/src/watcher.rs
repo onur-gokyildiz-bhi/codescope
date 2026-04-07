@@ -108,7 +108,9 @@ pub fn spawn_reindex_task(
                 }
 
                 // Delete old entities
-                let _ = builder.delete_file_entities(&rel_path, &repo_name).await;
+                if let Err(e) = builder.delete_file_entities(&rel_path, &repo_name).await {
+                    tracing::warn!("Delete entities failed: {e}");
+                }
 
                 match parser.parse_source(std::path::Path::new(&rel_path), &content, &repo_name) {
                     Ok((entities, relations)) => {
@@ -126,8 +128,12 @@ pub fn spawn_reindex_task(
 
             // Batch insert all parsed entities/relations at once
             if !all_entities.is_empty() {
-                let _ = builder.insert_entities(&all_entities).await;
-                let _ = builder.insert_relations(&all_relations).await;
+                if let Err(e) = builder.insert_entities(&all_entities).await {
+                    tracing::warn!("Entity insert failed: {e}");
+                }
+                if let Err(e) = builder.insert_relations(&all_relations).await {
+                    tracing::warn!("Relation insert failed: {e}");
+                }
             }
 
             if indexed > 0 {

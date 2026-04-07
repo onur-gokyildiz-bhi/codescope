@@ -143,8 +143,12 @@ async fn main() -> Result<()> {
         if let Ok((entities, relations)) = parser.parse_file(file_path, &repo_name) {
             entities_total += entities.len();
             relations_total += relations.len();
-            let _ = builder.insert_entities(&entities).await;
-            let _ = builder.insert_relations(&relations).await;
+            if let Err(e) = builder.insert_entities(&entities).await {
+                tracing::warn!("Entity insert failed: {e}");
+            }
+            if let Err(e) = builder.insert_relations(&relations).await {
+                tracing::warn!("Relation insert failed: {e}");
+            }
             files_indexed += 1;
         }
     }

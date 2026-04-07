@@ -176,7 +176,7 @@ impl EmbeddingPipeline {
             let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
 
             let id_str = func.id.to_string();
-            let _ = self
+            match self
                 .db
                 .query("UPDATE $id SET binary_embedding = $bq")
                 .bind((
@@ -184,8 +184,11 @@ impl EmbeddingPipeline {
                     surrealdb::sql::Thing::from(("function".to_string(), id_str)),
                 ))
                 .bind(("bq", bq_as_ints))
-                .await;
-            count += 1;
+                .await
+            {
+                Ok(_) => count += 1,
+                Err(e) => warn!("BQ backfill failed for {}: {}", func.id, e),
+            }
         }
 
         Ok(count)

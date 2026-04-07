@@ -2,7 +2,6 @@ pub mod daemon;
 pub mod helpers;
 pub mod params;
 pub mod server;
-pub mod tools;
 pub mod watcher;
 
 pub use server::GraphRagServer;
@@ -149,8 +148,12 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
             // Phase 2: Batch insert results (async DB operations)
             let mut file_count = 0;
             for (entities, relations) in results {
-                let _ = builder.insert_entities(&entities).await;
-                let _ = builder.insert_relations(&relations).await;
+                if let Err(e) = builder.insert_entities(&entities).await {
+                    tracing::warn!("Entity insert failed: {e}");
+                }
+                if let Err(e) = builder.insert_relations(&relations).await {
+                    tracing::warn!("Relation insert failed: {e}");
+                }
                 file_count += 1;
             }
 
@@ -182,8 +185,12 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                     &known_entities,
                 ) {
                     Ok((entities, relations, _)) => {
-                        let _ = builder.insert_entities(&entities).await;
-                        let _ = builder.insert_relations(&relations).await;
+                        if let Err(e) = builder.insert_entities(&entities).await {
+                            tracing::warn!("Entity insert failed: {e}");
+                        }
+                        if let Err(e) = builder.insert_relations(&relations).await {
+                            tracing::warn!("Relation insert failed: {e}");
+                        }
                         conv_count += 1;
                     }
                     Err(e) => {
@@ -207,8 +214,12 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                                     &known_entities,
                                 )
                             {
-                                let _ = builder.insert_entities(&ents).await;
-                                let _ = builder.insert_relations(&rels).await;
+                                if let Err(e) = builder.insert_entities(&ents).await {
+                                    tracing::warn!("Entity insert failed: {e}");
+                                }
+                                if let Err(e) = builder.insert_relations(&rels).await {
+                                    tracing::warn!("Relation insert failed: {e}");
+                                }
                                 mem_count += 1;
                             }
                         }
@@ -281,8 +292,12 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
                                 jsonl_path, &conv_repo, &known,
                             )
                         {
-                            let _ = builder.insert_entities(&entities).await;
-                            let _ = builder.insert_relations(&relations).await;
+                            if let Err(e) = builder.insert_entities(&entities).await {
+                                tracing::warn!("Entity insert failed: {e}");
+                            }
+                            if let Err(e) = builder.insert_relations(&relations).await {
+                                tracing::warn!("Relation insert failed: {e}");
+                            }
                             new_count += 1;
                         }
                     }

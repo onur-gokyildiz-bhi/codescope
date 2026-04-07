@@ -4,6 +4,7 @@
 //! and provides semantic search via FastEmbed. Supports 35+ languages plus
 //! config files (JSON/YAML/TOML), docs (Markdown), SQL, Terraform, and more.
 
+#[allow(dead_code)] // Exposes fields for MCP tools and external consumers
 pub mod conversation;
 pub mod crossrepo;
 pub mod embeddings;

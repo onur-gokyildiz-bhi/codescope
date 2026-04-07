@@ -225,8 +225,12 @@ impl GraphRagServer {
                 // Batch insert results
                 let mut file_count = 0;
                 for (entities, relations) in results {
-                    let _ = builder.insert_entities(&entities).await;
-                    let _ = builder.insert_relations(&relations).await;
+                    if let Err(e) = builder.insert_entities(&entities).await {
+                        tracing::warn!("Entity insert failed: {e}");
+                    }
+                    if let Err(e) = builder.insert_relations(&relations).await {
+                        tracing::warn!("Relation insert failed: {e}");
+                    }
                     file_count += 1;
                 }
 
@@ -537,8 +541,12 @@ impl GraphRagServer {
                 Ok((ents, rels)) => {
                     entities += ents.len();
                     relations += rels.len();
-                    let _ = builder.insert_entities(&ents).await;
-                    let _ = builder.insert_relations(&rels).await;
+                    if let Err(e) = builder.insert_entities(&ents).await {
+                        tracing::warn!("Entity insert failed: {e}");
+                    }
+                    if let Err(e) = builder.insert_relations(&rels).await {
+                        tracing::warn!("Relation insert failed: {e}");
+                    }
                     files_indexed += 1;
                 }
                 Err(e) => {
@@ -1000,8 +1008,12 @@ impl GraphRagServer {
                                 .filter(|r| matches!(r.kind, codescope_core::RelationKind::LinksTo))
                                 .count();
 
-                            let _ = builder.insert_entities(&entities).await;
-                            let _ = builder.insert_relations(&relations).await;
+                            if let Err(e) = builder.insert_entities(&entities).await {
+                                tracing::warn!("Entity insert failed: {e}");
+                            }
+                            if let Err(e) = builder.insert_relations(&relations).await {
+                                tracing::warn!("Relation insert failed: {e}");
+                            }
 
                             file_count += 1;
                             skill_count += skills;
@@ -2167,8 +2179,12 @@ impl GraphRagServer {
                 &known_entities,
             ) {
                 Ok((entities, relations, result)) => {
-                    let _ = builder.insert_entities(&entities).await;
-                    let _ = builder.insert_relations(&relations).await;
+                    if let Err(e) = builder.insert_entities(&entities).await {
+                        tracing::warn!("Entity insert failed: {e}");
+                    }
+                    if let Err(e) = builder.insert_relations(&relations).await {
+                        tracing::warn!("Relation insert failed: {e}");
+                    }
                     total_result.sessions_indexed += result.sessions_indexed;
                     total_result.decisions += result.decisions;
                     total_result.problems += result.problems;
@@ -2196,8 +2212,12 @@ impl GraphRagServer {
                             &known_entities,
                         ) {
                             Ok((entities, relations)) => {
-                                let _ = builder.insert_entities(&entities).await;
-                                let _ = builder.insert_relations(&relations).await;
+                                if let Err(e) = builder.insert_entities(&entities).await {
+                                    tracing::warn!("Entity insert failed: {e}");
+                                }
+                                if let Err(e) = builder.insert_relations(&relations).await {
+                                    tracing::warn!("Relation insert failed: {e}");
+                                }
                                 memory_count += 1;
                             }
                             Err(e) => {

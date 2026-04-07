@@ -8,3 +8,8 @@ Thumbs.db
 .env
 benchmarks/repos/
 benchmarks/results/
+
+# Demo recording artifacts
+assets/frames/
+assets/node_modules/
+assets/package*.json

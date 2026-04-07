@@ -503,60 +503,112 @@ impl GraphQuery {
     /// Traverse the type hierarchy for a class/struct/trait/interface.
     /// Shows parents (supertype chain), children (subtypes), interfaces, and implementors.
     pub async fn type_hierarchy(&self, name: &str, depth: usize) -> Result<serde_json::Value> {
-        let n = name.to_string();
-        let d = depth.min(5) as u32; // Cap at 5 levels
+        let max_depth = depth.min(5); // Cap at 5 levels
+        self.type_hierarchy_recursive(name, max_depth, 0).await
+    }
 
-        let mut response = self.db.query(
-            // Find the entity
+    /// Recursive type hierarchy traversal with visited tracking via depth limit.
+    fn type_hierarchy_recursive<'a>(
+        &'a self,
+        name: &'a str,
+        max_depth: usize,
+        current_depth: usize,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let n = name.to_string();
+
+            let mut response = self.db.query(
             "SELECT name, qualified_name, kind, file_path, start_line, end_line \
                 FROM class WHERE name = $name; \
-             // Parents (what does this extend?)
              SELECT ->inherits->class.name AS parent, ->inherits->class.kind AS parent_kind, \
                     ->inherits->class.file_path AS parent_file \
                 FROM class WHERE name = $name; \
-             // Children (what extends this?)
              SELECT <-inherits<-class.name AS child, <-inherits<-class.kind AS child_kind, \
                     <-inherits<-class.file_path AS child_file \
                 FROM class WHERE name = $name; \
-             // Interfaces implemented by this type
              SELECT ->implements->class.name AS iface, ->implements->class.kind AS iface_kind \
                 FROM class WHERE name = $name; \
-             // Types that implement this interface/trait
              SELECT <-implements<-class.name AS implementor, <-implements<-class.kind AS impl_kind, \
                     <-implements<-class.file_path AS impl_file \
                 FROM class WHERE name = $name;"
         ).bind(("name", n)).await?;
 
-        let entities: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-        let parents: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
-        let children: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
-        let interfaces: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
-        let implementors: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
+            let entities: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+            let parents: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
+            let children: Vec<serde_json::Value> = response.take(2).unwrap_or_default();
+            let interfaces: Vec<serde_json::Value> = response.take(3).unwrap_or_default();
+            let implementors: Vec<serde_json::Value> = response.take(4).unwrap_or_default();
 
-        let mut result = serde_json::Map::new();
-        result.insert("name".into(), serde_json::Value::String(name.to_string()));
-
-        if let Some(entity) = entities.into_iter().next() {
-            result.insert("entity".into(), entity);
-        }
-        if !parents.is_empty() {
-            result.insert("parents".into(), serde_json::Value::Array(parents));
-        }
-        if !children.is_empty() {
-            result.insert("children".into(), serde_json::Value::Array(children));
-        }
-        if !interfaces.is_empty() {
-            result.insert("implements".into(), serde_json::Value::Array(interfaces));
-        }
-        if !implementors.is_empty() {
+            let mut result = serde_json::Map::new();
+            result.insert("name".into(), serde_json::Value::String(name.to_string()));
             result.insert(
-                "implemented_by".into(),
-                serde_json::Value::Array(implementors),
+                "depth".into(),
+                serde_json::Value::Number(current_depth.into()),
             );
-        }
 
-        let _ = d; // depth reserved for recursive traversal in future
-        Ok(serde_json::Value::Object(result))
+            if let Some(entity) = entities.into_iter().next() {
+                result.insert("entity".into(), entity);
+            }
+
+            // Recursively expand parents up to max_depth
+            if !parents.is_empty() {
+                if current_depth + 1 < max_depth {
+                    let mut expanded = Vec::new();
+                    for p in &parents {
+                        if let Some(parent_name) = p.get("parent").and_then(|v| v.as_str()) {
+                            match self
+                                .type_hierarchy_recursive(parent_name, max_depth, current_depth + 1)
+                                .await
+                            {
+                                Ok(tree) => expanded.push(tree),
+                                Err(_) => expanded.push(p.clone()),
+                            }
+                        } else {
+                            expanded.push(p.clone());
+                        }
+                    }
+                    result.insert("parents".into(), serde_json::Value::Array(expanded));
+                } else {
+                    result.insert("parents".into(), serde_json::Value::Array(parents));
+                }
+            }
+
+            // Recursively expand children up to max_depth
+            if !children.is_empty() {
+                if current_depth + 1 < max_depth {
+                    let mut expanded = Vec::new();
+                    for c in &children {
+                        if let Some(child_name) = c.get("child").and_then(|v| v.as_str()) {
+                            match self
+                                .type_hierarchy_recursive(child_name, max_depth, current_depth + 1)
+                                .await
+                            {
+                                Ok(tree) => expanded.push(tree),
+                                Err(_) => expanded.push(c.clone()),
+                            }
+                        } else {
+                            expanded.push(c.clone());
+                        }
+                    }
+                    result.insert("children".into(), serde_json::Value::Array(expanded));
+                } else {
+                    result.insert("children".into(), serde_json::Value::Array(children));
+                }
+            }
+
+            if !interfaces.is_empty() {
+                result.insert("implements".into(), serde_json::Value::Array(interfaces));
+            }
+            if !implementors.is_empty() {
+                result.insert(
+                    "implemented_by".into(),
+                    serde_json::Value::Array(implementors),
+                );
+            }
+
+            Ok(serde_json::Value::Object(result))
+        }) // async move
     }
 
     // ===== Skill Graph Traversal =====
