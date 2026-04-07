@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 codescope-core = { path = "../core" }
+codescope-web = { path = "../web" }
 rmcp = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

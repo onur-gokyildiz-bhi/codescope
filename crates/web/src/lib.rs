@@ -12,8 +12,32 @@ use std::sync::Arc;
 
 use codescope_core::graph::query::GraphQuery;
 
-struct AppState {
+pub struct AppState {
     query: GraphQuery,
+}
+
+/// Build the web API router from an existing DB connection (no new DB open).
+/// This allows embedding the web UI inside the MCP server process.
+pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) -> Router {
+    let state = Arc::new(AppState {
+        query: GraphQuery::new(db),
+    });
+
+    Router::new()
+        .route("/", get(index_page))
+        .route("/assets/{*path}", get(serve_asset))
+        .route("/api/stats", get(api_stats))
+        .route("/api/search", get(api_search))
+        .route("/api/graph", get(api_graph))
+        .route("/api/query", get(api_raw_query))
+        .route("/api/conversations", get(api_conversations))
+        .route("/api/files", get(api_files))
+        .route("/api/file-content", get(api_file_content))
+        .route("/api/node-detail", get(api_node_detail))
+        .route("/api/hotspots", get(api_hotspots))
+        .route("/api/clusters", get(api_clusters))
+        .route("/api/skill-graph", get(api_skill_graph))
+        .with_state(state)
 }
 
 /// Run the web visualization server.

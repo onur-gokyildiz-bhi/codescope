@@ -386,6 +386,22 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
         });
     }
 
+    // Spawn embedded web UI on port 9876 (same DB, no lock conflict)
+    {
+        let web_db = db.clone();
+        tokio::spawn(async move {
+            let router = codescope_web::build_web_router(web_db);
+            let addr = "127.0.0.1:9876";
+            match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    tracing::info!("Web UI: http://localhost:9876");
+                    let _ = axum::serve(listener, router).await;
+                }
+                Err(e) => tracing::debug!("Web UI not started (port 9876 busy): {}", e),
+            }
+        });
+    }
+
     let service = mcp_server.serve(rmcp::transport::stdio()).await?;
     tracing::info!("MCP server running on stdio");
     service.waiting().await?;
