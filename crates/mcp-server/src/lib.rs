@@ -390,6 +390,10 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
     tracing::info!("MCP server running on stdio");
     service.waiting().await?;
 
+    // Graceful shutdown — give background tasks time to finish
+    tracing::info!("MCP session ended, shutting down...");
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     Ok(())
 }
 
