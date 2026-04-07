@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 use tracing::{debug, info};
 
@@ -9,7 +10,7 @@ pub struct CrossRepoLinker {
     db: Surreal<Db>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, SurrealValue)]
 struct ImportRecord {
     body: Option<String>,
     repo: String,
@@ -17,7 +18,7 @@ struct ImportRecord {
     qualified_name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, SurrealValue)]
 struct FileMatch {
     qualified_name: String,
     repo: String,

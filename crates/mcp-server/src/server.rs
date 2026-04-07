@@ -1,5 +1,7 @@
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::*;
-use rmcp::{tool, ServerHandler};
+use rmcp::{tool, tool_handler, tool_router, ServerHandler};
 use std::path::PathBuf;
 use std::sync::Arc;
 use surrealdb::engine::local::Db;
@@ -32,6 +34,7 @@ pub struct GraphRagServer {
     daemon: Option<Arc<DaemonState>>,
     /// Cached conversation context summary, injected into ServerInfo.instructions
     context_summary: Arc<tokio::sync::RwLock<String>>,
+    tool_router: ToolRouter<Self>,
 }
 
 impl GraphRagServer {
@@ -45,6 +48,7 @@ impl GraphRagServer {
             }))),
             daemon: None,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -54,6 +58,7 @@ impl GraphRagServer {
             project: Arc::new(tokio::sync::RwLock::new(None)),
             daemon: Some(state),
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
+            tool_router: Self::tool_router(),
         }
     }
 
@@ -86,7 +91,7 @@ impl GraphRagServer {
     }
 }
 
-#[tool(tool_box)]
+#[tool_handler]
 impl ServerHandler for GraphRagServer {
     fn get_info(&self) -> ServerInfo {
         let base_instructions = "\
@@ -124,24 +129,18 @@ TOOL CHEAT SHEET:\n\
             format!("{}\n\n{}", base_instructions, context)
         };
 
-        ServerInfo {
-            instructions: Some(instructions),
-            capabilities: ServerCapabilities {
-                tools: Some(ToolsCapability::default()),
-                ..Default::default()
-            },
-            ..ServerInfo::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(instructions)
     }
 }
 
-#[tool(tool_box)]
+#[tool_router]
 impl GraphRagServer {
     /// Initialize a project for this session (daemon mode). Opens the DB and optionally indexes the codebase.
     #[tool(
         description = "Initialize a project for this session. Required in daemon mode before using other tools. Pass the repo name and codebase path."
     )]
-    async fn init_project(&self, #[tool(aggr)] params: InitProjectParams) -> String {
+    async fn init_project(&self, Parameters(params): Parameters<InitProjectParams>) -> String {
         let daemon = match &self.daemon {
             Some(d) => d.clone(),
             None => {
@@ -273,7 +272,7 @@ impl GraphRagServer {
     #[tool(
         description = "Search for functions by name or pattern. Returns matching functions with file paths and line numbers."
     )]
-    async fn search_functions(&self, #[tool(aggr)] params: SearchParams) -> String {
+    async fn search_functions(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -313,7 +312,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find a function by exact name. Returns detailed info including signature, file path, and line numbers."
     )]
-    async fn find_function(&self, #[tool(aggr)] params: SearchParams) -> String {
+    async fn find_function(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -336,7 +335,7 @@ impl GraphRagServer {
     #[tool(
         description = "List all functions and classes in a file. Provides an overview of the file's structure."
     )]
-    async fn file_entities(&self, #[tool(aggr)] params: FileEntitiesParams) -> String {
+    async fn file_entities(&self, Parameters(params): Parameters<FileEntitiesParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -370,7 +369,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all functions that call the specified function. Useful for understanding who depends on a function."
     )]
-    async fn find_callers(&self, #[tool(aggr)] params: FindCallersParams) -> String {
+    async fn find_callers(&self, Parameters(params): Parameters<FindCallersParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -392,7 +391,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all functions called by the specified function. Useful for understanding a function's dependencies."
     )]
-    async fn find_callees(&self, #[tool(aggr)] params: FindCalleesParams) -> String {
+    async fn find_callees(&self, Parameters(params): Parameters<FindCalleesParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -432,7 +431,7 @@ impl GraphRagServer {
     #[tool(
         description = "Execute a raw SurrealQL query against the code graph database. Use for advanced queries like graph traversals."
     )]
-    async fn raw_query(&self, #[tool(aggr)] params: RawQueryParams) -> String {
+    async fn raw_query(&self, Parameters(params): Parameters<RawQueryParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -451,7 +450,7 @@ impl GraphRagServer {
     #[tool(
         description = "Index the codebase into the knowledge graph. Parses source files and extracts entities and relationships."
     )]
-    async fn index_codebase(&self, #[tool(aggr)] params: IndexParams) -> String {
+    async fn index_codebase(&self, Parameters(params): Parameters<IndexParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -582,7 +581,10 @@ impl GraphRagServer {
     #[tool(
         description = "Analyze the impact of changing a function. Shows the transitive call graph to understand what would be affected by a change."
     )]
-    async fn impact_analysis(&self, #[tool(aggr)] params: ImpactAnalysisParams) -> String {
+    async fn impact_analysis(
+        &self,
+        Parameters(params): Parameters<ImpactAnalysisParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -692,7 +694,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all HTTP client calls (reqwest, fetch, axios, requests) in the codebase. Optionally filter by HTTP method (GET, POST, PUT, DELETE, PATCH). Shows which functions make HTTP requests and to which endpoints."
     )]
-    async fn find_http_calls(&self, #[tool(aggr)] params: HttpCallParams) -> String {
+    async fn find_http_calls(&self, Parameters(params): Parameters<HttpCallParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -721,7 +723,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all code functions that call a specific HTTP endpoint by URL pattern. Example: '/users' finds all code that makes HTTP requests to any /users endpoint. Shows the calling function, HTTP method, and location."
     )]
-    async fn find_endpoint_callers(&self, #[tool(aggr)] params: SearchParams) -> String {
+    async fn find_endpoint_callers(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -767,7 +769,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all references to a symbol (function/class) across the codebase. Shows definitions, call sites, and imports. Use this to plan a rename — it shows every location that would need to change."
     )]
-    async fn rename_symbol(&self, #[tool(aggr)] params: RenameSymbolParams) -> String {
+    async fn rename_symbol(&self, Parameters(params): Parameters<RenameSymbolParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -819,7 +821,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find unused symbols — functions that are never called by any other function. Filters out known entry points (main, test functions, handlers, constructors). Useful for codebase cleanup and reducing maintenance burden."
     )]
-    async fn find_unused(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
+    async fn find_unused(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -864,7 +866,7 @@ impl GraphRagServer {
     #[tool(
         description = "Check if a symbol (function/class) can be safely deleted. Returns whether it has zero callers and zero importers. If not safe, shows what still references it."
     )]
-    async fn safe_delete(&self, #[tool(aggr)] params: SafeDeleteParams) -> String {
+    async fn safe_delete(&self, Parameters(params): Parameters<SafeDeleteParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -920,7 +922,7 @@ impl GraphRagServer {
     #[tool(
         description = "Show the type hierarchy for a class, struct, trait, or interface. Shows parent types (extends), child types (subtypes), implemented interfaces, and implementors."
     )]
-    async fn type_hierarchy(&self, #[tool(aggr)] params: TypeHierarchyParams) -> String {
+    async fn type_hierarchy(&self, Parameters(params): Parameters<TypeHierarchyParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -985,7 +987,10 @@ impl GraphRagServer {
     #[tool(
         description = "Index a folder of markdown skill/knowledge files into the graph. Parses YAML frontmatter (description, type, created) and [[wikilinks]] to create a navigable skill graph. Works alongside the code graph — existing tools (explore, backlinks, search) work with skill entities too."
     )]
-    async fn index_skill_graph(&self, #[tool(aggr)] params: IndexSkillGraphParams) -> String {
+    async fn index_skill_graph(
+        &self,
+        Parameters(params): Parameters<IndexSkillGraphParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1092,7 +1097,10 @@ impl GraphRagServer {
     #[tool(
         description = "Navigate the skill/knowledge graph with progressive disclosure. Start from any skill note and explore connected knowledge. Detail levels: 1=names+descriptions, 2=+links (default), 3=+sections, 4=+full content. Use this to traverse arscontexta-style skill graphs."
     )]
-    async fn traverse_skill_graph(&self, #[tool(aggr)] params: TraverseSkillGraphParams) -> String {
+    async fn traverse_skill_graph(
+        &self,
+        Parameters(params): Parameters<TraverseSkillGraphParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1195,7 +1203,10 @@ impl GraphRagServer {
     #[tool(
         description = "Auto-generate markdown skill notes from conversation history. Extracts decisions, problems, and solutions from indexed conversations and creates arscontexta-compatible skill files with [[wikilinks]] and YAML frontmatter. Creates an index.md MOC file."
     )]
-    async fn generate_skill_notes(&self, #[tool(aggr)] params: GenerateSkillNotesParams) -> String {
+    async fn generate_skill_notes(
+        &self,
+        Parameters(params): Parameters<GenerateSkillNotesParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1305,7 +1316,7 @@ impl GraphRagServer {
     #[tool(
         description = "Sync git commit history into the graph database. Enables temporal queries like hotspot detection, change coupling, and code evolution tracking."
     )]
-    async fn sync_git_history(&self, #[tool(aggr)] params: SyncHistoryParams) -> String {
+    async fn sync_git_history(&self, Parameters(params): Parameters<SyncHistoryParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1338,7 +1349,7 @@ impl GraphRagServer {
     #[tool(
         description = "Detect code hotspots: functions with high complexity and high change frequency. These are high-risk areas that may need refactoring."
     )]
-    async fn hotspot_detection(&self, #[tool(aggr)] params: HotspotParams) -> String {
+    async fn hotspot_detection(&self, Parameters(params): Parameters<HotspotParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1378,7 +1389,7 @@ impl GraphRagServer {
     #[tool(
         description = "Get the most frequently changed files in git history. High-churn files may indicate instability or active development areas."
     )]
-    async fn file_churn(&self, #[tool(aggr)] params: ChurnParams) -> String {
+    async fn file_churn(&self, Parameters(params): Parameters<ChurnParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1409,7 +1420,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find files that are frequently changed together in commits. High coupling suggests hidden dependencies or that files should be colocated."
     )]
-    async fn change_coupling(&self, #[tool(aggr)] params: CouplingParams) -> String {
+    async fn change_coupling(&self, Parameters(params): Parameters<CouplingParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1440,7 +1451,7 @@ impl GraphRagServer {
     #[tool(
         description = "Review a git diff with graph context. Shows which functions, classes, and call relationships are affected by changes between two git refs."
     )]
-    async fn review_diff(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
+    async fn review_diff(&self, Parameters(params): Parameters<DiffReviewParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1602,7 +1613,7 @@ impl GraphRagServer {
     #[tool(
         description = "Suggest code reviewers for a set of changed files based on who has the most expertise with those files."
     )]
-    async fn suggest_reviewers(&self, #[tool(aggr)] params: DiffReviewParams) -> String {
+    async fn suggest_reviewers(&self, Parameters(params): Parameters<DiffReviewParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1686,7 +1697,7 @@ impl GraphRagServer {
     #[tool(
         description = "Ask a question about the codebase in natural language. Translates to a graph query and returns results. Examples: 'what functions are in main.rs?', 'find all structs', 'show call graph for parse_file'"
     )]
-    async fn ask(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
+    async fn ask(&self, Parameters(params): Parameters<NaturalLanguageQueryParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1823,7 +1834,7 @@ impl GraphRagServer {
         Shows all connections: callers, callees, sibling functions, containing file, related configs/docs. \
         Use this to deeply understand how any piece of code or config fits into the system."
     )]
-    async fn explore(&self, #[tool(aggr)] params: ExploreParams) -> String {
+    async fn explore(&self, Parameters(params): Parameters<ExploreParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -1919,7 +1930,7 @@ impl GraphRagServer {
         description = "Get complete context for a file: all functions (with external callers), classes, imports, configs, docs, and packages. \
         Shows cross-file connections. Use this to understand a file's role in the system before reading or modifying it."
     )]
-    async fn context_bundle(&self, #[tool(aggr)] params: ContextBundleParams) -> String {
+    async fn context_bundle(&self, Parameters(params): Parameters<ContextBundleParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2066,7 +2077,7 @@ impl GraphRagServer {
         Unlike search_functions which only searches functions, this searches everything. \
         Use this when you need to find all mentions of a concept across code AND non-code files."
     )]
-    async fn related(&self, #[tool(aggr)] params: RelatedParams) -> String {
+    async fn related(&self, Parameters(params): Parameters<RelatedParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2120,7 +2131,7 @@ impl GraphRagServer {
         Like Obsidian's backlinks panel — shows everything that points TO this entity. \
         Use this to understand the impact of changing something."
     )]
-    async fn backlinks(&self, #[tool(aggr)] params: BacklinksParams) -> String {
+    async fn backlinks(&self, Parameters(params): Parameters<BacklinksParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2198,7 +2209,10 @@ impl GraphRagServer {
         Links them to code entities (functions, classes, files) mentioned in conversations. \
         After indexing, use conversation_search to query past decisions and problem-solving history."
     )]
-    async fn index_conversations(&self, #[tool(aggr)] params: IndexConversationsParams) -> String {
+    async fn index_conversations(
+        &self,
+        Parameters(params): Parameters<IndexConversationsParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2380,7 +2394,10 @@ impl GraphRagServer {
         Finds what was discussed about specific code entities, what decisions were made, and how problems were solved. \
         Like Obsidian search across your AI conversation notes. Index conversations first with index_conversations."
     )]
-    async fn conversation_search(&self, #[tool(aggr)] params: ConversationSearchParams) -> String {
+    async fn conversation_search(
+        &self,
+        Parameters(params): Parameters<ConversationSearchParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2486,7 +2503,7 @@ impl GraphRagServer {
     )]
     async fn conversation_timeline(
         &self,
-        #[tool(aggr)] params: ConversationTimelineParams,
+        Parameters(params): Parameters<ConversationTimelineParams>,
     ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -2581,7 +2598,7 @@ impl GraphRagServer {
         Uses local FastEmbed by default (no external service needed). \
         Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'."
     )]
-    async fn embed_functions(&self, #[tool(aggr)] params: EmbedParams) -> String {
+    async fn embed_functions(&self, Parameters(params): Parameters<EmbedParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2649,7 +2666,10 @@ impl GraphRagServer {
         using vector embeddings. Run embed_functions first to generate embeddings. \
         Example: 'parse configuration file' finds all config-parsing functions regardless of naming."
     )]
-    async fn semantic_search(&self, #[tool(aggr)] params: SemanticSearchParams) -> String {
+    async fn semantic_search(
+        &self,
+        Parameters(params): Parameters<SemanticSearchParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2732,7 +2752,7 @@ impl GraphRagServer {
         Filters out known entry points (main, test functions, handlers, constructors). \
         Useful for codebase cleanup and reducing maintenance burden."
     )]
-    async fn find_dead_code(&self, #[tool(aggr)] params: DeadCodeParams) -> String {
+    async fn find_dead_code(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2818,7 +2838,7 @@ impl GraphRagServer {
         description = "Detect code smells in the codebase: god functions (>200 lines), high fan-in (called by many), \
         high fan-out (calls many), and dense files (many functions). Use for codebase health assessment."
     )]
-    async fn detect_code_smells(&self, #[tool(aggr)] params: CodeSmellParams) -> String {
+    async fn detect_code_smells(&self, Parameters(params): Parameters<CodeSmellParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2931,7 +2951,7 @@ impl GraphRagServer {
         and a description of what the rule checks. Results are formatted as a violation report. \
         Example rule: SELECT name, file_path FROM `function` WHERE end_line - start_line > 100"
     )]
-    async fn custom_lint(&self, #[tool(aggr)] params: CustomLintParams) -> String {
+    async fn custom_lint(&self, Parameters(params): Parameters<CustomLintParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -2986,7 +3006,7 @@ impl GraphRagServer {
         and common architectural patterns. Analyzes the actual codebase to learn how the team codes. \
         Use this to understand conventions before writing new code."
     )]
-    async fn team_patterns(&self, #[tool(aggr)] params: TeamPatternsParams) -> String {
+    async fn team_patterns(&self, Parameters(params): Parameters<TeamPatternsParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3133,7 +3153,7 @@ impl GraphRagServer {
         Call before writing code to avoid introducing inconsistencies. \
         Returns warnings if naming, structure, or style deviates from the codebase norm."
     )]
-    async fn edit_preflight(&self, #[tool(aggr)] params: EditPreflightParams) -> String {
+    async fn edit_preflight(&self, Parameters(params): Parameters<EditPreflightParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3277,7 +3297,7 @@ impl GraphRagServer {
         'create' — record a new architectural decision with title and body, \
         'get' — retrieve a specific ADR by ID. \
         ADRs are stored in the graph and linked to conversation history.")]
-    async fn manage_adr(&self, #[tool(aggr)] params: ManageAdrParams) -> String {
+    async fn manage_adr(&self, Parameters(params): Parameters<ManageAdrParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3384,7 +3404,10 @@ impl GraphRagServer {
         (Claude Code, Cursor, etc.) connected to this project. Use for recording: preferences, conventions, \
         important context, architectural notes, TODOs. Memories are searchable via conversation_search."
     )]
-    async fn memory_save(&self, #[tool(aggr)] params: NaturalLanguageQueryParams) -> String {
+    async fn memory_save(
+        &self,
+        Parameters(params): Parameters<NaturalLanguageQueryParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3425,7 +3448,7 @@ impl GraphRagServer {
         description = "Search shared memories, decisions, and conversation history across all sessions. \
         Returns memories saved by any agent, plus auto-extracted decisions/problems/solutions."
     )]
-    async fn memory_search(&self, #[tool(aggr)] params: SearchParams) -> String {
+    async fn memory_search(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3515,7 +3538,7 @@ impl GraphRagServer {
         Tier 0 = critical (always shown, marked [PINNED]), 1 = important, 2 = contextual (default). \
         Matches by partial name across decision, problem, and solution tables."
     )]
-    async fn memory_pin(&self, #[tool(aggr)] params: MemoryPinParams) -> String {
+    async fn memory_pin(&self, Parameters(params): Parameters<MemoryPinParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -3572,7 +3595,10 @@ impl GraphRagServer {
         'central' — find the most connected/important entities (PageRank-like), \
         'all' — run all analyses."
     )]
-    async fn community_detection(&self, #[tool(aggr)] params: CommunityDetectionParams) -> String {
+    async fn community_detection(
+        &self,
+        Parameters(params): Parameters<CommunityDetectionParams>,
+    ) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,

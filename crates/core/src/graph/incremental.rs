@@ -2,6 +2,7 @@ use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 use tracing::{debug, info};
 
@@ -105,17 +106,17 @@ impl IncrementalIndexer {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct FileHashRecord {
     hash: Option<String>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct FilePathRecord {
     path: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct FileHashPathRecord {
     path: String,
     hash: Option<String>,

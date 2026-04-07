@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
 /// High-level graph query interface
@@ -8,7 +9,7 @@ pub struct GraphQuery {
     db: Surreal<Db>,
 }
 
-#[derive(Debug, serde::Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, Deserialize, SurrealValue)]
 pub struct SearchResult {
     pub qualified_name: Option<String>,
     pub name: Option<String>,

@@ -1,5 +1,6 @@
 use std::path::Path;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
 /// Load known entity names from the graph for conversation-to-code linking.
@@ -79,7 +80,7 @@ pub(crate) async fn check_conversation_hash(
     db: &Surreal<Db>,
     file_name: &str,
 ) -> anyhow::Result<Option<String>> {
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, SurrealValue)]
     struct HashRecord {
         hash: Option<String>,
     }

@@ -203,7 +203,7 @@ impl LanguageRegistry {
             // CMake
             LanguageConfig {
                 name: "cmake".into(),
-                language: tree_sitter_cmake::language(),
+                language: tree_sitter_cmake::LANGUAGE.into(),
                 extensions: vec!["cmake".into()],
             },
             // Makefile

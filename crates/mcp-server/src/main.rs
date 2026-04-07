@@ -1,13 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
-
-use rmcp::ServiceExt;
-
-use codescope_mcp::{daemon, server};
 
 #[derive(Parser)]
 #[command(name = "codescope-mcp")]
@@ -123,45 +117,14 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Daemon mode — SSE server, multi-project
-async fn run_daemon(bind: &str, port: u16) -> Result<()> {
-    let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
-    let state = Arc::new(daemon::DaemonState::new());
-
-    // Write PID file for stop command
-    let pid_path = pid_file_path(port);
-    if let Some(parent) = pid_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&pid_path, std::process::id().to_string())?;
-
-    tracing::info!("Codescope daemon starting on {}", addr);
-    eprintln!("Codescope daemon listening on http://{}", addr);
-
-    let mut sse_server = rmcp::transport::sse_server::SseServer::serve(addr).await?;
-
-    tracing::info!("SSE server ready, waiting for connections...");
-
-    while let Some(transport) = sse_server.next_transport().await {
-        let state = state.clone();
-        tokio::spawn(async move {
-            tracing::info!("New MCP connection");
-            let handler = server::GraphRagServer::new_daemon(state);
-            match handler.serve(transport).await {
-                Ok(service) => {
-                    if let Err(e) = service.waiting().await {
-                        tracing::error!("Connection error: {}", e);
-                    }
-                }
-                Err(e) => tracing::error!("Failed to serve connection: {}", e),
-            }
-        });
-    }
-
-    // Cleanup PID file on exit
-    let _ = std::fs::remove_file(&pid_path);
-
-    Ok(())
+/// Daemon mode — HTTP server, multi-project
+/// TODO: Migrate from old SSE transport to streamable HTTP transport (rmcp 1.3)
+async fn run_daemon(_bind: &str, _port: u16) -> Result<()> {
+    anyhow::bail!(
+        "Daemon mode is temporarily unavailable after rmcp upgrade to 1.3. \
+         The SSE transport was replaced by streamable HTTP transport. \
+         Use stdio mode instead: codescope-mcp <path> --auto-index"
+    );
 }
 
 fn pid_file_path(port: u16) -> PathBuf {

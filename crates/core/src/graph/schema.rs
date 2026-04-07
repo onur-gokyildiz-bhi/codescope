@@ -17,22 +17,22 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS file_path ON file FIELDS path;
         DEFINE INDEX IF NOT EXISTS file_repo ON file FIELDS repo;
 
-        DEFINE TABLE IF NOT EXISTS function SCHEMAFULL;
-        DEFINE FIELD IF NOT EXISTS name ON function TYPE string;
-        DEFINE FIELD IF NOT EXISTS qualified_name ON function TYPE string;
-        DEFINE FIELD IF NOT EXISTS signature ON function TYPE option<string>;
-        DEFINE FIELD IF NOT EXISTS body_hash ON function TYPE option<string>;
-        DEFINE FIELD IF NOT EXISTS file_path ON function TYPE string;
-        DEFINE FIELD IF NOT EXISTS repo ON function TYPE string;
-        DEFINE FIELD IF NOT EXISTS language ON function TYPE string;
-        DEFINE FIELD IF NOT EXISTS start_line ON function TYPE int;
-        DEFINE FIELD IF NOT EXISTS end_line ON function TYPE int;
-        DEFINE FIELD IF NOT EXISTS complexity ON function TYPE option<int>;
-        DEFINE FIELD IF NOT EXISTS embedding ON function TYPE option<array>;
-        DEFINE FIELD IF NOT EXISTS binary_embedding ON function TYPE option<array>;
-        DEFINE INDEX IF NOT EXISTS fn_name ON function FIELDS name;
-        DEFINE INDEX IF NOT EXISTS fn_qname ON function FIELDS qualified_name UNIQUE;
-        DEFINE INDEX IF NOT EXISTS fn_file ON function FIELDS file_path;
+        DEFINE TABLE IF NOT EXISTS `function` SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS name ON `function` TYPE string;
+        DEFINE FIELD IF NOT EXISTS qualified_name ON `function` TYPE string;
+        DEFINE FIELD IF NOT EXISTS signature ON `function` TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS body_hash ON `function` TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS file_path ON `function` TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON `function` TYPE string;
+        DEFINE FIELD IF NOT EXISTS language ON `function` TYPE string;
+        DEFINE FIELD IF NOT EXISTS start_line ON `function` TYPE int;
+        DEFINE FIELD IF NOT EXISTS end_line ON `function` TYPE int;
+        DEFINE FIELD IF NOT EXISTS complexity ON `function` TYPE option<int>;
+        DEFINE FIELD IF NOT EXISTS embedding ON `function` TYPE option<array>;
+        DEFINE FIELD IF NOT EXISTS binary_embedding ON `function` TYPE option<array>;
+        DEFINE INDEX IF NOT EXISTS fn_name ON `function` FIELDS name;
+        DEFINE INDEX IF NOT EXISTS fn_qname ON `function` FIELDS qualified_name UNIQUE;
+        DEFINE INDEX IF NOT EXISTS fn_file ON `function` FIELDS file_path;
 
         DEFINE TABLE IF NOT EXISTS class SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS name ON class TYPE string;
@@ -323,13 +323,13 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         -- === FULL-TEXT SEARCH INDEXES (speeds up name search queries) ===
 
         DEFINE ANALYZER IF NOT EXISTS name_analyzer TOKENIZERS blank, class FILTERS lowercase;
-        DEFINE INDEX IF NOT EXISTS fn_name_search ON `function` FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS class_name_search ON class FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS config_name_search ON config FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS doc_name_search ON doc FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name SEARCH ANALYZER name_analyzer BM25;
-        DEFINE INDEX IF NOT EXISTS skill_name_search ON skill FIELDS name SEARCH ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS fn_name_search ON `function` FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS class_name_search ON class FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS config_name_search ON config FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS doc_name_search ON doc FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS skill_name_search ON skill FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
         ",
     )
     .await?;

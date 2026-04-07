@@ -1,5 +1,6 @@
 use anyhow::Result;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 use tracing::{debug, info};
 
@@ -181,7 +182,7 @@ impl TemporalGraphSync {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, SurrealValue)]
 pub struct HotspotEntry {
     pub name: Option<String>,
     pub file_path: Option<String>,
@@ -192,7 +193,7 @@ pub struct HotspotEntry {
     pub risk_score: Option<i64>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, SurrealValue)]
 pub struct EvolutionEntry {
     pub commits: Option<serde_json::Value>,
 }

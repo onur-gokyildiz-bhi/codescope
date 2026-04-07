@@ -1,7 +1,23 @@
 use anyhow::Result;
 use surrealdb::engine::local::Db;
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, ToSql};
 use surrealdb::Surreal;
 use tracing::{debug, info, warn};
+
+/// Format a RecordId as "table:key" string (equivalent to surrealdb v2 Thing::to_string())
+fn record_id_string(id: &RecordId) -> String {
+    id.to_sql()
+}
+
+/// Extract just the key part of a RecordId as a string
+fn record_id_key_string(key: &RecordIdKey) -> String {
+    match key {
+        RecordIdKey::String(s) => s.clone(),
+        RecordIdKey::Number(n) => n.to_string(),
+        RecordIdKey::Uuid(u) => u.to_string(),
+        _ => format!("{:?}", key),
+    }
+}
 
 use super::provider::EmbeddingProvider;
 
@@ -107,7 +123,7 @@ impl EmbeddingPipeline {
             let bq = binary_quantize(&embedding);
             let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
 
-            let id_str = func.id.to_string();
+            let id_str = record_id_key_string(&func.id.key);
             let update_query = format!(
                 "UPDATE `function`:`{}` SET embedding = $embedding, binary_embedding = $bq",
                 crate::graph::builder::sanitize_id(&id_str)
@@ -175,14 +191,14 @@ impl EmbeddingPipeline {
             let bq = binary_quantize(&func.embedding);
             let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
 
-            let id_str = func.id.to_string();
+            let id_str = record_id_key_string(&func.id.key);
             let bq_query = format!(
                 "UPDATE `function`:`{}` SET binary_embedding = $bq",
                 crate::graph::builder::sanitize_id(&id_str)
             );
             match self.db.query(&bq_query).bind(("bq", bq_as_ints)).await {
                 Ok(_) => count += 1,
-                Err(e) => warn!("BQ backfill failed for {}: {}", func.id, e),
+                Err(e) => warn!("BQ backfill failed for {:?}: {}", func.id, e),
             }
         }
 
@@ -276,15 +292,11 @@ impl EmbeddingPipeline {
         // Stage 2: Load full f32 embeddings ONLY for top-K candidates
         let candidate_ids: Vec<String> = scored
             .iter()
-            .map(|&(i, _)| candidates[i].id.to_string())
+            .map(|&(i, _)| record_id_string(&candidates[i].id))
             .collect();
 
         // Build batch query for candidate embeddings
-        let id_list = candidate_ids
-            .iter()
-            .map(|id| format!("function:{}", id))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let id_list = candidate_ids.join(", ");
 
         let full_embeddings: Vec<FullEmbeddingRecord> = self
             .db
@@ -298,7 +310,7 @@ impl EmbeddingPipeline {
         // Build a map of id → f32 embedding
         let embed_map: std::collections::HashMap<String, &Vec<f32>> = full_embeddings
             .iter()
-            .map(|r| (r.id.to_string(), &r.embedding))
+            .map(|r| (record_id_string(&r.id), &r.embedding))
             .collect();
 
         // Compute cosine similarity for reranking
@@ -306,7 +318,7 @@ impl EmbeddingPipeline {
             .iter()
             .map(|&(i, hamming)| {
                 let c = &candidates[i];
-                let id_str = c.id.to_string();
+                let id_str = record_id_string(&c.id);
                 let cosine = embed_map
                     .get(&id_str)
                     .map(|emb| cosine_similarity(query_embedding, emb))
@@ -440,7 +452,7 @@ pub struct SemanticSearchResult {
     pub hamming_distance: Option<u32>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct SemanticSearchResultRaw {
     name: String,
     qualified_name: Option<String>,
@@ -451,17 +463,17 @@ struct SemanticSearchResultRaw {
     score: Option<f64>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct FunctionRecord {
-    id: surrealdb::sql::Thing,
+    id: surrealdb::types::RecordId,
     name: String,
     signature: Option<String>,
     file_path: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct BQRecord {
-    id: surrealdb::sql::Thing,
+    id: surrealdb::types::RecordId,
     name: String,
     qualified_name: Option<String>,
     signature: Option<String>,
@@ -471,15 +483,15 @@ struct BQRecord {
     binary_embedding: Vec<i64>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct FullEmbeddingRecord {
-    id: surrealdb::sql::Thing,
+    id: surrealdb::types::RecordId,
     embedding: Vec<f32>,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, SurrealValue)]
 struct BQBackfillRecord {
-    id: surrealdb::sql::Thing,
+    id: surrealdb::types::RecordId,
     embedding: Vec<f32>,
 }
 

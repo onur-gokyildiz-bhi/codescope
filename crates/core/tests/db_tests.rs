@@ -5,9 +5,10 @@ use codescope_core::graph::schema::init_schema;
 use codescope_core::{CodeEntity, CodeRelation, EntityKind, RelationKind};
 use serde::Deserialize;
 use surrealdb::engine::local::Mem;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, SurrealValue)]
 struct NameRow {
     name: String,
 }
