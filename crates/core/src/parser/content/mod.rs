@@ -1,4 +1,5 @@
 pub mod dockerfile_parser;
+pub mod gradle_parser;
 pub mod json_parser;
 pub mod markdown_parser;
 pub mod openapi_parser;
@@ -46,6 +47,7 @@ impl ContentParserRegistry {
             Box::new(terraform_parser::TerraformParser),
             Box::new(openapi_parser::OpenApiParser),
             Box::new(package_parser::PackageParser),
+            Box::new(gradle_parser::GradleParser),
         ];
         Self { parsers }
     }
@@ -72,6 +74,14 @@ impl ContentParserRegistry {
                 .parsers
                 .iter()
                 .find(|p| p.name() == "package")
+                .map(|p| p.as_ref());
+        }
+        // Gradle: build.gradle, build.gradle.kts, settings.gradle, settings.gradle.kts
+        if lower.ends_with(".gradle") || lower.ends_with(".gradle.kts") {
+            return self
+                .parsers
+                .iter()
+                .find(|p| p.name() == "gradle")
                 .map(|p| p.as_ref());
         }
         None
