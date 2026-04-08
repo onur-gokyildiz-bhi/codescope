@@ -144,8 +144,8 @@ jobs:
           key: ubuntu-aarch64-unknown-linux-gnu-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ubuntu-aarch64-unknown-linux-gnu-release-
 
-      - name: Build with cross
-        run: cross build --release --target aarch64-unknown-linux-gnu -p codescope -p codescope-mcp -p codescope-web
+      - name: Build with cross (vendored OpenSSL for cross-compilation)
+        run: cross build --release --target aarch64-unknown-linux-gnu -p codescope -p codescope-mcp -p codescope-web --features codescope-core/vendored-ssl
         env:
           RUST_MIN_STACK: "16777216"
 
