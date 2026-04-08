@@ -10,22 +10,58 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codescope_core::daemon::DaemonState;
 use codescope_core::graph::query::GraphQuery;
 
-pub struct AppState {
-    query: GraphQuery,
+enum ProjectSource {
+    Single(surrealdb::Surreal<surrealdb::engine::local::Db>),
+    Multi(Arc<DaemonState>),
 }
 
-/// Build the web API router from an existing DB connection (no new DB open).
-/// This allows embedding the web UI inside the MCP server process.
-pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) -> Router {
-    let state = Arc::new(AppState {
-        query: GraphQuery::new(db),
-    });
+pub struct AppState {
+    source: ProjectSource,
+}
 
+impl AppState {
+    async fn resolve_query(&self, repo: Option<&str>) -> Result<GraphQuery, (StatusCode, String)> {
+        match &self.source {
+            ProjectSource::Single(db) => Ok(GraphQuery::new(db.clone())),
+            ProjectSource::Multi(daemon) => {
+                let repo_name = match repo {
+                    Some(r) if !r.is_empty() => r.to_string(),
+                    _ => daemon
+                        .discover_repos()
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::NOT_FOUND,
+                                "No projects found. Index a codebase first.".into(),
+                            )
+                        })?,
+                };
+                let db = daemon.get_db(&repo_name).await.map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("DB error for '{}': {}", repo_name, e),
+                    )
+                })?;
+                Ok(GraphQuery::new(db))
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RepoParam {
+    repo: Option<String>,
+}
+
+fn build_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(index_page))
         .route("/assets/{*path}", get(serve_asset))
+        .route("/api/projects", get(api_projects))
         .route("/api/stats", get(api_stats))
         .route("/api/search", get(api_search))
         .route("/api/graph", get(api_graph))
@@ -37,7 +73,22 @@ pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) ->
         .route("/api/hotspots", get(api_hotspots))
         .route("/api/clusters", get(api_clusters))
         .route("/api/skill-graph", get(api_skill_graph))
-        .with_state(state)
+}
+
+/// Build the web API router from an existing DB connection (single-project mode).
+pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) -> Router {
+    let state = Arc::new(AppState {
+        source: ProjectSource::Single(db),
+    });
+    build_routes().with_state(state)
+}
+
+/// Build the web API router for daemon mode (multi-project).
+pub fn build_multi_web_router(daemon: Arc<DaemonState>) -> Router {
+    let state = Arc::new(AppState {
+        source: ProjectSource::Multi(daemon),
+    });
+    build_routes().with_state(state)
 }
 
 /// Run the web visualization server.
@@ -144,23 +195,10 @@ pub async fn run_web(
     }
 
     let state = Arc::new(AppState {
-        query: GraphQuery::new(db),
+        source: ProjectSource::Single(db),
     });
 
-    let app = Router::new()
-        .route("/", get(index_page))
-        .route("/assets/{*path}", get(serve_asset))
-        .route("/api/stats", get(api_stats))
-        .route("/api/search", get(api_search))
-        .route("/api/graph", get(api_graph))
-        .route("/api/query", get(api_raw_query))
-        .route("/api/conversations", get(api_conversations))
-        .route("/api/files", get(api_files))
-        .route("/api/file-content", get(api_file_content))
-        .route("/api/node-detail", get(api_node_detail))
-        .route("/api/hotspots", get(api_hotspots))
-        .route("/api/clusters", get(api_clusters))
-        .route("/api/skill-graph", get(api_skill_graph))
+    let app = build_routes()
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -202,10 +240,31 @@ async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> 
 #[derive(Deserialize)]
 struct SearchParams {
     q: Option<String>,
+    repo: Option<String>,
 }
 
-async fn api_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL").await {
+async fn api_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match &state.source {
+        ProjectSource::Multi(daemon) => {
+            let discovered = daemon.discover_repos();
+            let active = daemon.active_repos().await;
+            Json(serde_json::json!({ "projects": discovered, "active": active })).into_response()
+        }
+        ProjectSource::Single(_) => {
+            Json(serde_json::json!({ "projects": [], "active": [] })).into_response()
+        }
+    }
+}
+
+async fn api_stats(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let query = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    match query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL").await {
         Ok(result) => {
             // Flatten [[{"total":N}],...] -> {"files":N,"functions":N,...}
             let labels = ["files", "functions", "classes", "imports", "configs", "docs", "packages"];
@@ -236,7 +295,11 @@ async fn api_search(
     if pattern.is_empty() {
         return Json(serde_json::json!([])).into_response();
     }
-    match state.query.search_functions(&pattern).await {
+    let query = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    match query.search_functions(&pattern).await {
         Ok(results) => Json(serde_json::json!(results)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -246,6 +309,7 @@ async fn api_search(
 struct GraphParams {
     center: Option<String>,
     depth: Option<u32>,
+    repo: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -273,13 +337,17 @@ async fn api_graph(
     State(state): State<Arc<AppState>>,
     Query(params): Query<GraphParams>,
 ) -> impl IntoResponse {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let center = params.center.unwrap_or_default();
     let _depth = params.depth.unwrap_or(2);
 
     if center.is_empty() {
         // Return overview: top 50 functions with their call relationships
         let query = "SELECT name, qualified_name, file_path FROM `function` LIMIT 50";
-        match state.query.raw_query(query).await {
+        match gq.raw_query(query).await {
             Ok(result) => {
                 let mut nodes = Vec::new();
                 let mut edges = Vec::new();
@@ -301,7 +369,7 @@ async fn api_graph(
 
                 // Get call edges with valid source/target
                 let edge_query = "SELECT in.qualified_name AS source, out.qualified_name AS target FROM calls WHERE out.qualified_name != NONE LIMIT 200";
-                if let Ok(edge_result) = state.query.raw_query(edge_query).await {
+                if let Ok(edge_result) = gq.raw_query(edge_query).await {
                     for row in flatten_result(&edge_result) {
                         let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
                         let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
@@ -352,7 +420,7 @@ async fn api_graph(
             "SELECT name, qualified_name, file_path FROM `function` WHERE name = '{}' LIMIT 1",
             safe
         );
-        if let Ok(result) = state.query.raw_query(&fn_q).await {
+        if let Ok(result) = gq.raw_query(&fn_q).await {
             if let Some(row) = flatten_result(&result).first() {
                 center_id = row
                     .get("qualified_name")
@@ -371,7 +439,7 @@ async fn api_graph(
                 "SELECT name, qualified_name, file_path, kind FROM class WHERE name = '{}' LIMIT 1",
                 safe
             );
-            if let Ok(result) = state.query.raw_query(&cls_q).await {
+            if let Ok(result) = gq.raw_query(&cls_q).await {
                 if let Some(row) = flatten_result(&result).first() {
                     center_id = row
                         .get("qualified_name")
@@ -402,7 +470,7 @@ async fn api_graph(
              FROM calls WHERE out.name = '{}' AND in.name != NONE",
             safe
         );
-        if let Ok(result) = state.query.raw_query(&caller_q).await {
+        if let Ok(result) = gq.raw_query(&caller_q).await {
             let wrapped = serde_json::json!([{"callers": result}]);
             extract_neighbors(
                 &wrapped, "callers", &mut nodes, &mut edges, &mut seen, &center_id, true,
@@ -415,7 +483,7 @@ async fn api_graph(
              FROM calls WHERE in.name = '{}' AND out.name != NONE",
             safe
         );
-        if let Ok(result) = state.query.raw_query(&callee_q).await {
+        if let Ok(result) = gq.raw_query(&callee_q).await {
             let wrapped = serde_json::json!([{"callees": result}]);
             extract_neighbors(
                 &wrapped, "callees", &mut nodes, &mut edges, &mut seen, &center_id, false,
@@ -428,7 +496,7 @@ async fn api_graph(
                 "SELECT name, qualified_name, file_path FROM `function` WHERE file_path = '{}' AND name != '{}' LIMIT 15",
                 center_fp.replace('\'', ""), safe
             );
-            if let Ok(result) = state.query.raw_query(&sibling_q).await {
+            if let Ok(result) = gq.raw_query(&sibling_q).await {
                 for row in flatten_result(&result) {
                     let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                     let qn = row
@@ -519,7 +587,14 @@ fn extract_neighbors(
     }
 }
 
-async fn api_conversations(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn api_conversations(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let query = "\
         SELECT name, body, kind, timestamp, file_path FROM decision ORDER BY timestamp DESC LIMIT 50; \
         SELECT name, body, kind, timestamp, file_path FROM problem ORDER BY timestamp DESC LIMIT 50; \
@@ -531,7 +606,7 @@ async fn api_conversations(State(state): State<Arc<AppState>>) -> impl IntoRespo
         SELECT out.name AS entity, in.name AS segment, 'discussed_in' AS rel \
             FROM discussed_in LIMIT 50;";
 
-    match state.query.raw_query(query).await {
+    match gq.raw_query(query).await {
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();
@@ -563,26 +638,37 @@ async fn api_conversations(State(state): State<Arc<AppState>>) -> impl IntoRespo
 #[derive(Deserialize)]
 struct RawQueryParams {
     q: Option<String>,
+    repo: Option<String>,
 }
 
 async fn api_raw_query(
     State(state): State<Arc<AppState>>,
     Query(params): Query<RawQueryParams>,
 ) -> impl IntoResponse {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let query = params.q.unwrap_or_default();
     if query.is_empty() {
         return Json(serde_json::json!({"error": "No query provided"})).into_response();
     }
-    match state.query.raw_query(&query).await {
+    match gq.raw_query(&query).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 // File tree
-async fn api_files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state
-        .query
+async fn api_files(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    match gq
         .raw_query("SELECT path, language, line_count FROM file ORDER BY path")
         .await
     {
@@ -595,17 +681,22 @@ async fn api_files(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 #[derive(Deserialize)]
 struct FileContentParams {
     path: Option<String>,
+    repo: Option<String>,
 }
 
 async fn api_file_content(
     State(state): State<Arc<AppState>>,
     Query(params): Query<FileContentParams>,
 ) -> impl IntoResponse {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let path = params.path.unwrap_or_default();
     if path.is_empty() {
         return Json(serde_json::json!({"error": "No path"})).into_response();
     }
-    let entities = state.query.raw_query(&format!(
+    let entities = gq.raw_query(&format!(
         "SELECT name, start_line, end_line, signature, 'function' AS type FROM `function` WHERE file_path = '{}' ORDER BY start_line; \
          SELECT name, start_line, end_line, kind, 'class' AS type FROM class WHERE file_path = '{}' ORDER BY start_line",
         path.replace('\'', "\\'"), path.replace('\'', "\\'")
@@ -630,12 +721,17 @@ async fn api_file_content(
 #[derive(Deserialize)]
 struct NodeDetailParams {
     name: Option<String>,
+    repo: Option<String>,
 }
 
 async fn api_node_detail(
     State(state): State<Arc<AppState>>,
     Query(params): Query<NodeDetailParams>,
 ) -> impl IntoResponse {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let name = params.name.unwrap_or_default();
     if name.is_empty() {
         return Json(serde_json::json!({"error": "No name"})).into_response();
@@ -648,7 +744,7 @@ async fn api_node_detail(
         name.replace('\'', "\\'"), name.replace('\'', "\\'"),
         name.replace('\'', "\\'"), name.replace('\'', "\\'"),
     );
-    match state.query.raw_query(&q).await {
+    match gq.raw_query(&q).await {
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();
@@ -667,9 +763,15 @@ async fn api_node_detail(
 }
 
 // Hotspots
-async fn api_hotspots(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state
-        .query
+async fn api_hotspots(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    match gq
         .raw_query(
             "SELECT name, file_path, start_line, end_line, (end_line - start_line) AS size \
          FROM `function` ORDER BY size DESC LIMIT 50",
@@ -682,9 +784,15 @@ async fn api_hotspots(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 // Clusters
-async fn api_clusters(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state
-        .query
+async fn api_clusters(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    match gq
         .raw_query(
             "SELECT file_path, count() AS fn_count, array::group(name) AS functions \
          FROM `function` GROUP BY file_path ORDER BY fn_count DESC LIMIT 30",
@@ -697,11 +805,18 @@ async fn api_clusters(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 // Skill graph
-async fn api_skill_graph(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn api_skill_graph(
+    State(state): State<Arc<AppState>>,
+    Query(rp): Query<RepoParam>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(rp.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
     let q =
         "SELECT name, qualified_name, description, node_type, file_path FROM skill ORDER BY name; \
              SELECT in.name AS source, out.name AS target, context FROM links_to";
-    match state.query.raw_query(q).await {
+    match gq.raw_query(q).await {
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();

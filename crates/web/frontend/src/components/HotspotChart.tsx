@@ -1,6 +1,6 @@
-import { createSignal, onMount, For, Show } from 'solid-js';
+import { createSignal, createEffect, For, Show } from 'solid-js';
 import { api } from '../api';
-import { setCenterNode } from '../store';
+import { setCenterNode, projectVersion } from '../store';
 
 interface Hotspot {
   name: string;
@@ -13,7 +13,9 @@ export default function HotspotChart() {
   const [hotspots, setHotspots] = createSignal<Hotspot[]>([]);
   const [loading, setLoading] = createSignal(true);
 
-  onMount(async () => {
+  createEffect(async () => {
+    projectVersion(); // re-fetch on project switch
+    setLoading(true);
     try {
       const data = await api.hotspots();
       const items: Hotspot[] = (data || [])

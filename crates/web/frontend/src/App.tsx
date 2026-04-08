@@ -1,9 +1,10 @@
-import { onMount, Show } from 'solid-js';
+import { onMount, Show, createEffect } from 'solid-js';
 import {
   viewMode, setViewMode, showFiles, setShowFiles,
   showConv, setShowConv,
   showPalette, setShowPalette, showShortcuts, setShowShortcuts,
   currentFile, stats, setStats, selectedNode,
+  projectVersion,
 } from './store';
 import { api } from './api';
 import { registerShortcut } from './utils/keyboard';
@@ -19,6 +20,7 @@ import ConvPanel from './components/ConvPanel';
 import DepthSlider from './components/DepthSlider';
 import Legend from './components/Legend';
 import Minimap from './components/Minimap';
+import ProjectSwitcher from './components/ProjectSwitcher';
 
 type View = 'graph' | 'pack' | 'hotspot' | 'skill' | 'cluster';
 
@@ -31,7 +33,7 @@ const VIEW_LABELS: { id: View; label: string }[] = [
 ];
 
 export default function App() {
-  onMount(async () => {
+  onMount(() => {
     registerShortcut('cmd+k', () => setShowPalette(v => !v));
     registerShortcut('f', () => setShowFiles(v => !v));
     registerShortcut('c', () => setShowConv(v => !v));
@@ -43,7 +45,11 @@ export default function App() {
       setShowPalette(false);
       setShowShortcuts(false);
     });
+  });
 
+  // Re-fetch stats on project switch
+  createEffect(async () => {
+    projectVersion(); // track project changes
     try {
       const s = await api.stats();
       setStats(s);
@@ -54,6 +60,7 @@ export default function App() {
     <div class="app-layout">
       <header class="header">
         <span class="header-logo">Codescope</span>
+        <ProjectSwitcher />
         <input
           class="header-search"
           type="text"

@@ -127,7 +127,11 @@ async fn run_daemon(bind: &str, port: u16) -> Result<()> {
     use tokio_util::sync::CancellationToken;
 
     let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
-    let state = Arc::new(codescope_mcp::daemon::DaemonState::new());
+    let base_db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db");
+    let state = Arc::new(codescope_mcp::daemon::DaemonState::new(base_db_path));
 
     // Write PID file
     let pid_path = pid_file_path(port);
@@ -151,10 +155,14 @@ async fn run_daemon(bind: &str, port: u16) -> Result<()> {
         StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token()),
     );
 
-    let router = axum::Router::new().nest_service("/mcp", service);
+    // Merge MCP service + Web UI on the same port
+    let web_router = codescope_web::build_multi_web_router(state.clone());
+    let router = web_router.nest_service("/mcp", service);
 
     tracing::info!("Codescope daemon starting on {}", addr);
-    eprintln!("Codescope daemon listening on http://{}/mcp", addr);
+    eprintln!("Codescope daemon listening on http://{}", addr);
+    eprintln!("  Web UI: http://{}/", addr);
+    eprintln!("  MCP:    http://{}/mcp", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router)
@@ -297,7 +305,7 @@ async fn stop_daemon(port: u16) -> Result<()> {
 
 /// Check daemon status
 async fn check_status(port: u16) -> Result<()> {
-    let url = format!("http://127.0.0.1:{}/mcp", port);
+    let url = format!("http://127.0.0.1:{}/api/projects", port);
     match reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(2))
@@ -305,7 +313,18 @@ async fn check_status(port: u16) -> Result<()> {
         .await
     {
         Ok(resp) if resp.status().is_success() => {
-            eprintln!("Codescope daemon is running on port {}", port);
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let projects = body
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            eprintln!(
+                "Codescope daemon is running on port {} ({} projects)",
+                port, projects
+            );
+            eprintln!("  Web UI: http://127.0.0.1:{}/", port);
+            eprintln!("  MCP:    http://127.0.0.1:{}/mcp", port);
         }
         _ => {
             eprintln!("No daemon detected on port {}", port);

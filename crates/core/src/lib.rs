@@ -7,6 +7,7 @@
 #[allow(dead_code)] // Exposes fields for MCP tools and external consumers
 pub mod conversation;
 pub mod crossrepo;
+pub mod daemon;
 pub mod embeddings;
 pub mod graph;
 pub mod parser;

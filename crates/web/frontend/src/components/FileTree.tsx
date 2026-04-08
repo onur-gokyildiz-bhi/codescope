@@ -1,5 +1,5 @@
-import { createSignal, onMount, For, Show } from 'solid-js';
-import { setCenterNode, setShowFiles } from '../store';
+import { createSignal, createEffect, For, Show } from 'solid-js';
+import { setCenterNode, setShowFiles, projectVersion } from '../store';
 import { api } from '../api';
 
 interface TreeNode {
@@ -78,7 +78,8 @@ function TreeItem(props: { node: TreeNode; depth: number }) {
 export default function FileTree() {
   const [tree, setTree] = createSignal<TreeNode[]>([]);
 
-  onMount(async () => {
+  createEffect(async () => {
+    projectVersion(); // re-fetch on project switch
     try {
       const files = await api.files();
       const paths: string[] = Array.isArray(files)

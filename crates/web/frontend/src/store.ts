@@ -30,3 +30,8 @@ export const [centerGravity, setCenterGravity] = createSignal(0.1);
 
 // Stats
 export const [stats, setStats] = createSignal<any>(null);
+
+// Project (multi-project daemon mode)
+export const [currentProject, setCurrentProject] = createSignal<string | null>(null);
+export const [availableProjects, setAvailableProjects] = createSignal<string[]>([]);
+export const [projectVersion, setProjectVersion] = createSignal(0);

@@ -252,7 +252,7 @@ impl GraphRagServer {
     async fn list_projects(&self) -> String {
         match &self.daemon {
             Some(d) => {
-                let repos = d.list_repos().await;
+                let repos = d.active_repos().await;
                 if repos.is_empty() {
                     "No projects open. Call init_project first.".into()
                 } else {

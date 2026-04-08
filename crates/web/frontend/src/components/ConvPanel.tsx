@@ -1,5 +1,5 @@
-import { createSignal, onMount, For, Show } from 'solid-js';
-import { setShowConv } from '../store';
+import { createSignal, createEffect, For, Show } from 'solid-js';
+import { setShowConv, projectVersion } from '../store';
 import { api } from '../api';
 
 type TabId = 'decisions' | 'problems' | 'solutions';
@@ -15,7 +15,9 @@ export default function ConvPanel() {
   const [items, setItems] = createSignal<ConvItem[]>([]);
   const [loading, setLoading] = createSignal(true);
 
-  onMount(async () => {
+  createEffect(async () => {
+    projectVersion(); // re-fetch on project switch
+    setLoading(true);
     try {
       const data = await api.conversations();
       const all: ConvItem[] = (data || []).map((c: any) => ({

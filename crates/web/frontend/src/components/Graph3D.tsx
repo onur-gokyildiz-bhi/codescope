@@ -4,6 +4,7 @@ import {
   hoveredNode, setHoveredNode, graphDepth,
   centerNode, setCenterNode, colorMode,
   repelStrength, linkDistance, setCurrentFile,
+  projectVersion,
 } from '../store';
 import { api } from '../api';
 import { kindColor, moduleColor, edgeColor, DIM_COLOR, DIM_EDGE, HIGHLIGHT_EDGE } from '../utils/colors';
@@ -55,8 +56,14 @@ export default function Graph3D() {
       .warmupTicks(80)
       .cooldownTicks(120);
 
+  });
+
+  // Load graph data on mount and on project switch
+  createEffect(async () => {
+    projectVersion(); // re-fetch on project switch
+    const center = centerNode();
     try {
-      const data = await api.graph(undefined, graphDepth());
+      const data = await api.graph(center || undefined, graphDepth());
       setGraphData(data);
     } catch { /* graph load may fail if no data indexed */ }
   });
@@ -93,10 +100,12 @@ export default function Graph3D() {
   });
 
   createEffect(async () => {
+    // depth change also triggers re-fetch
     const center = centerNode();
+    const depth = graphDepth();
     if (center) {
       try {
-        const data = await api.graph(center, graphDepth());
+        const data = await api.graph(center, depth);
         setGraphData(data);
       } catch { /* ignore fetch errors */ }
     }
