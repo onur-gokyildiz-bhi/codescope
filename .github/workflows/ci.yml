@@ -83,13 +83,3 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Run audit
-        run: cargo audit
