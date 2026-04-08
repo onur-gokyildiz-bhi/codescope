@@ -123,10 +123,16 @@ jobs:
       - name: Setup multiarch and cross-compile toolchain
         run: |
           sudo dpkg --add-architecture arm64
-          # Pin amd64 on default sources, add arm64 from ports
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $(lsb_release -cs) main restricted universe" | sudo tee /etc/apt/sources.list.d/arm64.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $(lsb_release -cs)-updates main restricted universe" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          # Pin ALL existing sources to amd64-only so they don't try to fetch arm64
+          sudo find /etc/apt/sources.list.d/ -name '*.list' -exec sed -i 's/^deb \(http\|https\)/deb [arch=amd64] \1/' {} \;
+          sudo find /etc/apt/sources.list.d/ -name '*.sources' -exec bash -c 'grep -q "Architectures:" "$1" || sed -i "/^Types:/a Architectures: amd64" "$1"' _ {} \;
+          # Add arm64 from ports.ubuntu.com (the only mirror that has arm64)
+          CODENAME=$(lsb_release -cs)
+          sudo tee /etc/apt/sources.list.d/arm64-ports.list <<PORTS
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $CODENAME main restricted universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $CODENAME-updates main restricted universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $CODENAME-security main restricted universe
+          PORTS
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config perl make
           sudo apt-get install -y libssl-dev libssl-dev:arm64
