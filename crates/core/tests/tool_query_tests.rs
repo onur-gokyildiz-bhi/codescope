@@ -8,7 +8,11 @@ use codescope_core::{CodeEntity, CodeRelation, EntityKind, RelationKind};
 use surrealdb::engine::local::Mem;
 use surrealdb::Surreal;
 
-async fn setup() -> (Surreal<surrealdb::engine::local::Db>, GraphBuilder, GraphQuery) {
+async fn setup() -> (
+    Surreal<surrealdb::engine::local::Db>,
+    GraphBuilder,
+    GraphQuery,
+) {
     let db = Surreal::new::<Mem>(()).await.unwrap();
     db.use_ns("codescope").use_db("test").await.unwrap();
     init_schema(&db).await.unwrap();
@@ -97,10 +101,7 @@ async fn seed_data(builder: &GraphBuilder) {
             "test::src/main.rs::main",
             "test::src/parser.rs::parse_source",
         ),
-        make_call(
-            "test::src/main.rs::main",
-            "test::src/graph.rs::build_graph",
-        ),
+        make_call("test::src/main.rs::main", "test::src/graph.rs::build_graph"),
         make_call(
             "test::src/parser.rs::parse_source",
             "test::src/parser.rs::extract_entities",
@@ -239,10 +240,7 @@ async fn test_explore_class() {
         Some("class"),
         "GraphBuilder should be found as a class"
     );
-    assert!(
-        obj.contains_key("matches"),
-        "Should contain matches"
-    );
+    assert!(obj.contains_key("matches"), "Should contain matches");
 
     let matches = obj.get("matches").and_then(|v| v.as_array()).unwrap();
     assert!(
@@ -304,7 +302,9 @@ async fn test_type_hierarchy() {
     seed_data(&builder).await;
 
     let result = query.type_hierarchy("GraphBuilder", 2).await.unwrap();
-    let obj = result.as_object().expect("type_hierarchy should return an object");
+    let obj = result
+        .as_object()
+        .expect("type_hierarchy should return an object");
 
     assert_eq!(
         obj.get("name").and_then(|v| v.as_str()),
@@ -352,10 +352,7 @@ async fn test_find_duplicate_functions() {
     );
 
     let first = &results[0];
-    let cnt = first
-        .get("cnt")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let cnt = first.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
     assert!(
         cnt > 1,
         "Duplicate group should have count > 1, got {}",

@@ -29,16 +29,12 @@ impl AppState {
             ProjectSource::Multi(daemon) => {
                 let repo_name = match repo {
                     Some(r) if !r.is_empty() => r.to_string(),
-                    _ => daemon
-                        .discover_repos()
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| {
-                            (
-                                StatusCode::NOT_FOUND,
-                                "No projects found. Index a codebase first.".into(),
-                            )
-                        })?,
+                    _ => daemon.discover_repos().into_iter().next().ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            "No projects found. Index a codebase first.".into(),
+                        )
+                    })?,
                 };
                 let db = daemon.get_db(&repo_name).await.map_err(|e| {
                     (
@@ -198,8 +194,7 @@ pub async fn run_web(
         source: ProjectSource::Single(db),
     });
 
-    let app = build_routes()
-        .with_state(state);
+    let app = build_routes().with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
     println!("Codescope Web UI: http://localhost:{}", port);

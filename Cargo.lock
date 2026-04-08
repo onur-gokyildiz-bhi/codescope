@@ -937,6 +937,7 @@ dependencies = [
  "chrono",
  "clap",
  "codescope-core",
+ "codescope-web",
  "dirs 5.0.1",
  "git2",
  "hex",
