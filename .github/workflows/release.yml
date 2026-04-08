@@ -27,10 +27,6 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             ext: ""
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            ext: ""
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
@@ -48,13 +44,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config perl make
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          fi
+          sudo apt-get install -y pkg-config libssl-dev perl make
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install openssl@3 pkg-config
+          echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -111,9 +108,66 @@ jobs:
           name: codescope-${{ matrix.target }}
           path: codescope-${{ github.ref_name }}-${{ matrix.target }}.*
 
+  # Separate job for aarch64 Linux — uses cross for proper sysroot + OpenSSL
+  build-aarch64-linux:
+    name: Build aarch64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd crates/web/frontend
+          npm ci
+          npm run build
+
+      - name: Install cross
+        run: cargo install cross --locked
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-aarch64-unknown-linux-gnu-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-aarch64-unknown-linux-gnu-release-
+
+      - name: Build with cross
+        run: cross build --release --target aarch64-unknown-linux-gnu -p codescope -p codescope-mcp -p codescope-web
+        env:
+          RUST_MIN_STACK: "16777216"
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/aarch64-unknown-linux-gnu/release/codescope dist/
+          cp target/aarch64-unknown-linux-gnu/release/codescope-mcp dist/
+          cp target/aarch64-unknown-linux-gnu/release/codescope-web dist/
+          cp README.md LICENSE dist/
+          cd dist
+          tar czf ../codescope-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codescope-aarch64-unknown-linux-gnu
+          path: codescope-${{ github.ref_name }}-aarch64-unknown-linux-gnu.*
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-aarch64-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
