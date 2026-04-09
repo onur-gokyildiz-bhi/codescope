@@ -325,7 +325,7 @@ struct GraphEdge {
 #[derive(Serialize)]
 struct GraphData {
     nodes: Vec<GraphNode>,
-    edges: Vec<GraphEdge>,
+    links: Vec<GraphEdge>,
 }
 
 async fn api_graph(
@@ -362,7 +362,7 @@ async fn api_graph(
                     });
                 }
 
-                // Get call edges with valid source/target
+                // Get call edges
                 let edge_query = "SELECT in.qualified_name AS source, out.qualified_name AS target FROM calls WHERE out.qualified_name != NONE LIMIT 200";
                 if let Ok(edge_result) = gq.raw_query(edge_query).await {
                     for row in flatten_result(&edge_result) {
@@ -378,7 +378,43 @@ async fn api_graph(
                     }
                 }
 
-                Json(GraphData { nodes, edges }).into_response()
+                // Get contains edges (file → function) — group functions by file
+                {
+                    let node_ids: std::collections::HashSet<String> =
+                        nodes.iter().map(|n| n.id.clone()).collect();
+                    let mut file_fns: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for n in &nodes {
+                        if n.kind == "function" && !n.file_path.is_empty() {
+                            file_fns
+                                .entry(n.file_path.clone())
+                                .or_default()
+                                .push(n.id.clone());
+                        }
+                    }
+                    for (fp, fns) in &file_fns {
+                        let file_id = format!("file:{}", fp);
+                        if !node_ids.contains(&file_id) {
+                            let short = fp.rsplit('/').next().unwrap_or(fp);
+                            nodes.push(GraphNode {
+                                id: file_id.clone(),
+                                name: short.to_string(),
+                                kind: "file".to_string(),
+                                file_path: fp.clone(),
+                            });
+                        }
+                        for fn_id in fns {
+                            edges.push(GraphEdge {
+                                source: file_id.clone(),
+                                target: fn_id.clone(),
+                                kind: "contains".to_string(),
+                            });
+                        }
+                    }
+                }
+
+
+                Json(GraphData { nodes, links: edges }).into_response()
             }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
@@ -520,7 +556,7 @@ async fn api_graph(
             });
         }
 
-        Json(GraphData { nodes, edges }).into_response()
+        Json(GraphData { nodes, links: edges }).into_response()
     }
 }
 

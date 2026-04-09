@@ -147,6 +147,26 @@ code, pre, .mono {
   border-color: var(--accent);
 }
 
+.header-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all var(--transition);
+}
+.header-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.header-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(88,166,255,0.1);
+}
+
 .settings-btn {
   padding: 5px 8px;
   border: 1px solid var(--border);

@@ -448,7 +448,8 @@ impl EntityExtractor {
                 let text = child.utf8_text(source.as_bytes()).ok()?.trim().to_string();
                 if !text.is_empty() {
                     // For dotted access like obj.method(), extract just the method name
-                    return Some(text.rsplit('.').next().unwrap_or(&text).to_string());
+                    let name = text.rsplit('.').next().unwrap_or(&text).to_string();
+                    return Self::clean_callee_name(&name);
                 }
             }
         }
@@ -456,10 +457,24 @@ impl EntityExtractor {
         node.named_child(0)
             .or_else(|| node.child(0))
             .and_then(|c| c.utf8_text(source.as_bytes()).ok())
-            .map(|s| {
+            .and_then(|s| {
                 let t = s.trim();
-                t.rsplit('.').next().unwrap_or(t).to_string()
+                let name = t.rsplit('.').next().unwrap_or(t).to_string();
+                Self::clean_callee_name(&name)
             })
+    }
+
+    /// Clean a callee name: keep only valid identifier characters.
+    fn clean_callee_name(name: &str) -> Option<String> {
+        let cleaned: String = name
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if cleaned.is_empty() || cleaned.chars().next().map(|c| c.is_numeric()).unwrap_or(true) {
+            None
+        } else {
+            Some(cleaned)
+        }
     }
 
     fn extract_inheritance(

@@ -157,6 +157,38 @@ enum Commands {
         #[arg(long)]
         auto_index: bool,
     },
+
+    /// Start daemon (MCP + Web UI on single port, multi-project)
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "9877")]
+        port: u16,
+
+        /// Bind address
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+    },
+
+    /// Start daemon in background
+    Start {
+        /// Port to listen on
+        #[arg(long, default_value = "9877")]
+        port: u16,
+    },
+
+    /// Stop running daemon
+    Stop {
+        /// Port to listen on
+        #[arg(long, default_value = "9877")]
+        port: u16,
+    },
+
+    /// Check daemon status
+    Status {
+        /// Port to listen on
+        #[arg(long, default_value = "9877")]
+        port: u16,
+    },
 }
 
 #[derive(Subcommand)]
@@ -286,6 +318,18 @@ async fn main() -> Result<()> {
                 .ok()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
             codescope_web::run_web(path, repo, port, auto_index, cli.db_path).await?;
+        }
+        Commands::Serve { port, bind } => {
+            cmd_serve(&bind, port).await?;
+        }
+        Commands::Start { port } => {
+            cmd_start_daemon(port)?;
+        }
+        Commands::Stop { port } => {
+            cmd_stop_daemon(port).await?;
+        }
+        Commands::Status { port } => {
+            cmd_status_daemon(port).await?;
         }
     }
 
@@ -556,6 +600,95 @@ async fn cmd_index(
         }
         if errors.len() > 10 {
             println!("    ... and {} more", errors.len() - 10);
+        }
+    }
+
+    // Check calls created
+    let gq = GraphQuery::new(db.clone());
+    if let Ok(result) = gq.raw_query("SELECT count() AS cnt FROM calls GROUP ALL").await {
+        if let Some(cnt) = result.as_array().and_then(|a| a.first()).and_then(|v| v.get("cnt")).and_then(|v| v.as_u64()) {
+            println!("  Calls edges:        {}", cnt);
+        }
+    }
+
+    // Phase 5: Resolve cross-file call targets
+    match builder.resolve_call_targets(repo_name).await {
+        Ok(resolved) if resolved > 0 => {
+            println!("  Call targets resolved: {}", resolved);
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Call target resolution failed: {}", e),
+    }
+
+    // Phase 5b: Resolve virtual dispatch for OOP languages
+    match builder.resolve_virtual_dispatch(repo_name).await {
+        Ok(resolved) if resolved > 0 => {
+            println!("  Virtual dispatch resolved: {}", resolved);
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Virtual dispatch resolution failed: {}", e),
+    }
+
+    // Phase 6: Index conversations from Claude session logs
+    {
+        let project_dir = codescope_mcp::helpers::find_claude_project_dir(&path, repo_name);
+        let mut jsonl_files = Vec::new();
+        codescope_mcp::collect_jsonl_files(&project_dir, &mut jsonl_files);
+
+        if !jsonl_files.is_empty() {
+            let known_entities: Vec<String> = Vec::new();
+            let mut conv_count = 0;
+            for jsonl_path in &jsonl_files {
+                match codescope_core::conversation::parse_conversation(
+                    jsonl_path,
+                    repo_name,
+                    &known_entities,
+                ) {
+                    Ok((entities, relations, _)) => {
+                        if let Err(e) = builder.insert_entities(&entities).await {
+                            tracing::warn!("Conv entity insert failed: {e}");
+                        }
+                        if let Err(e) = builder.insert_relations(&relations).await {
+                            tracing::warn!("Conv relation insert failed: {e}");
+                        }
+                        conv_count += 1;
+                    }
+                    Err(e) => {
+                        tracing::debug!("Conversation parse error: {}", e);
+                    }
+                }
+            }
+
+            // Index memory files
+            let memory_dir = project_dir.join("memory");
+            let mut mem_count = 0;
+            if memory_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&memory_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.extension().map(|e| e == "md").unwrap_or(false) {
+                            if let Ok((ents, rels)) =
+                                codescope_core::conversation::parse_memory_file(
+                                    &p,
+                                    repo_name,
+                                    &known_entities,
+                                )
+                            {
+                                let _ = builder.insert_entities(&ents).await;
+                                let _ = builder.insert_relations(&rels).await;
+                                mem_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if conv_count > 0 || mem_count > 0 {
+                println!(
+                    "  Conversations: {} sessions, {} memory files",
+                    conv_count, mem_count
+                );
+            }
         }
     }
 
@@ -1172,4 +1305,191 @@ fn find_mcp_binary() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Daemon mode — MCP + Web UI on single port, multi-project
+async fn cmd_serve(bind: &str, port: u16) -> Result<()> {
+    use codescope_core::daemon::DaemonState;
+    use rmcp::transport::streamable_http_server::{
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    };
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    let addr: std::net::SocketAddr = format!("{}:{}", bind, port).parse()?;
+    let base_db_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("db");
+    let state = Arc::new(DaemonState::new(base_db_path));
+
+    // Write PID file
+    let pid_path = daemon_pid_path(port);
+    if let Some(parent) = pid_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&pid_path, std::process::id().to_string())?;
+
+    let ct = CancellationToken::new();
+
+    let service = StreamableHttpService::new(
+        {
+            let state = state.clone();
+            move || {
+                Ok(codescope_mcp::server::GraphRagServer::new_daemon(
+                    state.clone(),
+                ))
+            }
+        },
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default().with_cancellation_token(ct.child_token()),
+    );
+
+    let web_router = codescope_web::build_multi_web_router(state.clone());
+    let router = web_router.nest_service("/mcp", service);
+
+    eprintln!("Codescope daemon listening on http://{}", addr);
+    eprintln!("  Web UI: http://{}/", addr);
+    eprintln!("  MCP:    http://{}/mcp", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            tokio::signal::ctrl_c().await.ok();
+            ct.cancel();
+        })
+        .await?;
+
+    let _ = std::fs::remove_file(&pid_path);
+    Ok(())
+}
+
+fn daemon_pid_path(port: u16) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join(format!("daemon-{}.pid", port))
+}
+
+fn cmd_start_daemon(port: u16) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let log_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("daemon.log");
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let log_file = std::fs::File::create(&log_path)?;
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        let child = std::process::Command::new(exe)
+            .args(["serve", "--port", &port.to_string()])
+            .env("RUST_LOG", "info")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(log_file))
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .spawn()?;
+        eprintln!(
+            "Codescope daemon started (PID {}) on port {}",
+            child.id(),
+            port
+        );
+    }
+
+    #[cfg(not(windows))]
+    {
+        let child = std::process::Command::new(exe)
+            .args(["serve", "--port", &port.to_string()])
+            .env("RUST_LOG", "info")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::from(log_file))
+            .spawn()?;
+        eprintln!(
+            "Codescope daemon started (PID {}) on port {}",
+            child.id(),
+            port
+        );
+    }
+
+    eprintln!("Log: {}", log_path.display());
+    Ok(())
+}
+
+async fn cmd_stop_daemon(port: u16) -> Result<()> {
+    let pid_path = daemon_pid_path(port);
+    let pid_str = match std::fs::read_to_string(&pid_path) {
+        Ok(s) => s.trim().to_string(),
+        Err(_) => {
+            eprintln!("No daemon PID file found for port {}.", port);
+            return Ok(());
+        }
+    };
+    let pid: u32 = match pid_str.parse() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Invalid PID: {}", pid_str);
+            let _ = std::fs::remove_file(&pid_path);
+            return Ok(());
+        }
+    };
+
+    #[cfg(windows)]
+    {
+        let result = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+        match result {
+            Ok(output) if output.status.success() => eprintln!("Daemon (PID {}) stopped.", pid),
+            _ => eprintln!("Could not stop daemon (PID {}). May have already exited.", pid),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let result = std::process::Command::new("kill")
+            .args([&pid.to_string()])
+            .output();
+        match result {
+            Ok(output) if output.status.success() => eprintln!("Daemon (PID {}) stopped.", pid),
+            _ => eprintln!("Could not stop daemon (PID {}). May have already exited.", pid),
+        }
+    }
+
+    let _ = std::fs::remove_file(&pid_path);
+    Ok(())
+}
+
+async fn cmd_status_daemon(port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{}/api/projects", port);
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let projects = body
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            eprintln!(
+                "Codescope daemon is running on port {} ({} projects)",
+                port, projects
+            );
+            eprintln!("  Web UI: http://127.0.0.1:{}/", port);
+            eprintln!("  MCP:    http://127.0.0.1:{}/mcp", port);
+        }
+        _ => {
+            eprintln!("No daemon detected on port {}", port);
+        }
+    }
+    Ok(())
 }

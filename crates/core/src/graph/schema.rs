@@ -282,6 +282,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE contains TYPE RELATION SCHEMAFULL;
         DEFINE TABLE calls TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS line ON calls TYPE option<int>;
+        DEFINE FIELD IF NOT EXISTS raw_callee ON calls TYPE option<string>;
         DEFINE TABLE imports TYPE RELATION SCHEMAFULL;
         DEFINE TABLE inherits TYPE RELATION SCHEMAFULL;
         DEFINE TABLE implements TYPE RELATION SCHEMAFULL;

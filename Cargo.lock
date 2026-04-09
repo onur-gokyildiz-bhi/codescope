@@ -826,6 +826,7 @@ name = "codescope"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "codescope-core",
  "codescope-mcp",
@@ -833,9 +834,12 @@ dependencies = [
  "dirs 5.0.1",
  "ignore",
  "rayon",
+ "reqwest",
+ "rmcp",
  "serde_json",
  "surrealdb",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]

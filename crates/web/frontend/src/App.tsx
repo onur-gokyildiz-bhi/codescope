@@ -11,6 +11,7 @@ import { registerShortcut } from './utils/keyboard';
 import Graph3D from './components/Graph3D';
 import CirclePack from './components/CirclePack';
 import HotspotChart from './components/HotspotChart';
+import ClusterView from './components/ClusterView';
 import CommandPalette from './components/CommandPalette';
 import Sidebar from './components/Sidebar';
 import FileTree from './components/FileTree';
@@ -22,13 +23,12 @@ import Legend from './components/Legend';
 import Minimap from './components/Minimap';
 import ProjectSwitcher from './components/ProjectSwitcher';
 
-type View = 'graph' | 'pack' | 'hotspot' | 'skill' | 'cluster';
+type View = 'graph' | 'pack' | 'hotspot' | 'cluster';
 
 const VIEW_LABELS: { id: View; label: string }[] = [
   { id: 'graph', label: 'Graph' },
   { id: 'pack', label: 'Pack' },
   { id: 'hotspot', label: 'Hotspot' },
-  { id: 'skill', label: 'Skills' },
   { id: 'cluster', label: 'Clusters' },
 ];
 
@@ -41,6 +41,7 @@ export default function App() {
     registerShortcut('1', () => setViewMode('graph'));
     registerShortcut('2', () => setViewMode('pack'));
     registerShortcut('3', () => setViewMode('hotspot'));
+    registerShortcut('4', () => setViewMode('cluster'));
     registerShortcut('escape', () => {
       setShowPalette(false);
       setShowShortcuts(false);
@@ -49,7 +50,7 @@ export default function App() {
 
   // Re-fetch stats on project switch
   createEffect(async () => {
-    projectVersion(); // track project changes
+    projectVersion();
     try {
       const s = await api.stats();
       setStats(s);
@@ -83,7 +84,21 @@ export default function App() {
             {stats().functions ?? 0} fn | {stats().files ?? 0} files
           </span>
         </Show>
-        <button class="settings-btn" onClick={() => setShowShortcuts(v => !v)} title="Shortcuts">
+        <button
+          class={`header-btn ${showFiles() ? 'active' : ''}`}
+          onClick={() => setShowFiles(v => !v)}
+          title="Files (F)"
+        >
+          Files
+        </button>
+        <button
+          class={`header-btn ${showConv() ? 'active' : ''}`}
+          onClick={() => setShowConv(v => !v)}
+          title="Conversations (C)"
+        >
+          Conv
+        </button>
+        <button class="settings-btn" onClick={() => setShowShortcuts(v => !v)} title="Shortcuts (?)">
           ?
         </button>
       </header>
@@ -97,6 +112,9 @@ export default function App() {
         </Show>
         <Show when={viewMode() === 'hotspot'}>
           <HotspotChart />
+        </Show>
+        <Show when={viewMode() === 'cluster'}>
+          <ClusterView />
         </Show>
 
         <Show when={viewMode() === 'graph'}>

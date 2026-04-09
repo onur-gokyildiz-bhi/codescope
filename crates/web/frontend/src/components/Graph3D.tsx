@@ -89,7 +89,7 @@ export default function Graph3D() {
 
   createEffect(() => {
     const data = graphData();
-    if (graph && data.nodes.length) graph.graphData(data);
+    if (graph) graph.graphData({ nodes: data.nodes || [], links: data.links || [] });
   });
 
   createEffect(() => {

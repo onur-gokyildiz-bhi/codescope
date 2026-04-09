@@ -104,6 +104,37 @@ fn test_parse_rust_struct() {
 }
 
 #[test]
+fn test_rust_call_extraction() {
+    let parser = CodeParser::new();
+    let code = "fn helper() -> i32 { 42 }\nfn main() {\n    let x = helper();\n    println!(\"hello {}\", x);\n}\n";
+    let (entities, relations) = parser
+        .parse_source(std::path::Path::new("test.rs"), code, "test")
+        .unwrap();
+
+    let calls: Vec<_> = relations
+        .iter()
+        .filter(|r| r.kind == RelationKind::Calls)
+        .collect();
+
+    eprintln!("=== Entities ===");
+    for e in &entities {
+        eprintln!("  {:?} {} ({})", e.kind, e.name, e.qualified_name);
+    }
+    eprintln!("=== Relations ===");
+    for r in &relations {
+        eprintln!("  {:?}: {} -> {}", r.kind, r.from_entity, r.to_entity);
+    }
+    eprintln!("=== Calls: {} ===", calls.len());
+
+    assert!(
+        !calls.is_empty(),
+        "Should extract call relations from main() -> helper(). Got {} calls out of {} relations",
+        calls.len(),
+        relations.len()
+    );
+}
+
+#[test]
 fn test_parse_rust_enum() {
     let parser = CodeParser::new();
     let mut file = NamedTempFile::with_suffix(".rs").unwrap();

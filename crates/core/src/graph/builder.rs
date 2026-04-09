@@ -9,7 +9,7 @@ use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
 
 /// Batch size for multi-statement DB queries.
 /// 200 entities per round-trip balances throughput vs memory.
-const BATCH_SIZE: usize = 200;
+const BATCH_SIZE: usize = 50;
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -115,12 +115,37 @@ impl GraphBuilder {
                 ));
             }
 
+            let has_calls = chunk.iter().any(|r| r.kind == crate::RelationKind::Calls);
             match self.timed_query(&query).await {
-                Ok(_response) => {
-                    // Batch RELATE succeeded — count all relations in chunk.
+                Ok(mut response) => {
+                    // Check each statement result for errors
+                    let mut batch_ok = true;
+                    for i in 0..chunk.len() {
+                        let r: Result<Option<serde_json::Value>, _> = response.take(i);
+                        if let Err(e) = r {
+                            if has_calls && batch_ok {
+                                warn!("Statement {} in batch failed: {}", i, e);
+                                let rel = &chunk[i];
+                                warn!("  Relation: {:?} {} -> {}", rel.kind, rel.from_entity, rel.to_entity);
+                                warn!("  Query sample: {}", &query[..query.len().min(500)]);
+                            }
+                            batch_ok = false;
+                        }
+                    }
                     total += chunk.len();
+                    if has_calls {
+                        let call_count = chunk.iter().filter(|r| r.kind == crate::RelationKind::Calls).count();
+                        debug!("Batch with {} calls, ok={}", call_count, batch_ok);
+                    }
                 }
                 Err(e) => {
+                    if has_calls {
+                        warn!("Batch with calls FAILED: {}", e);
+                        // Log the first calls relation for debugging
+                        if let Some(call) = chunk.iter().find(|r| r.kind == crate::RelationKind::Calls) {
+                            warn!("  Sample call: {} -> {}", call.from_entity, call.to_entity);
+                        }
+                    }
                     debug!("Batch relate failed ({}), falling back to individual", e);
                     for rel in chunk {
                         let from_table = escape_table(&rel.from_table);
@@ -581,18 +606,26 @@ fn escape_table(name: &str) -> String {
 }
 
 /// Sanitize a string to be a valid SurrealDB record ID.
-/// Replaces all special characters with underscores, collapses doubles,
-/// and trims leading/trailing underscores.
+/// Only ASCII alphanumeric and underscore are kept; everything else becomes `_`.
+/// Collapses consecutive underscores, trims leading/trailing, and caps length.
 pub fn sanitize_id(s: &str) -> String {
-    s.replace(
-        [
-            '/', '\\', ':', '.', ' ', '<', '>', '"', '\'', '(', ')', ',', ';', '{', '}', '[', ']',
-            '-', '`', '~', '!', '@', '#', '$', '%', '^', '&', '*', '+', '=', '|', '?',
-        ],
-        "_",
-    )
-    .replace("__", "_")
-    .replace("__", "_") // Second pass for triple underscores
-    .trim_matches('_')
-    .to_string()
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    // Collapse consecutive underscores
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    // Cap at 200 chars to avoid excessively long IDs
+    if trimmed.len() > 200 {
+        trimmed[..200].trim_end_matches('_').to_string()
+    } else {
+        trimmed
+    }
 }

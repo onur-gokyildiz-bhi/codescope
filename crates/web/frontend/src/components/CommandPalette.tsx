@@ -1,5 +1,5 @@
 import { createSignal, createEffect, onMount, For, Show } from 'solid-js';
-import { setShowPalette, setShowFiles, setShowConv, setSplitMode, setCenterNode } from '../store';
+import { setShowPalette, setCenterNode } from '../store';
 import { api } from '../api';
 import { fuzzyScore } from '../utils/fuzzy';
 
@@ -9,11 +9,7 @@ interface PaletteItem {
   action: () => void;
 }
 
-const BUILT_IN: PaletteItem[] = [
-  { name: 'Toggle Files Panel', kind: 'action', action: () => setShowFiles(v => !v) },
-  { name: 'Toggle Conversations', kind: 'action', action: () => setShowConv(v => !v) },
-  { name: 'Toggle Split View', kind: 'action', action: () => setSplitMode(v => !v) },
-];
+const BUILT_IN: PaletteItem[] = [];
 
 export default function CommandPalette() {
   const [query, setQuery] = createSignal('');
