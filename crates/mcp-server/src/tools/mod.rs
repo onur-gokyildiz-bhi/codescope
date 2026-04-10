@@ -3,4 +3,7 @@
 //! that registers a subset of tools. The constructor in `server.rs` merges
 //! all routers into one.
 
+pub mod callgraph;
+pub mod http;
+pub mod refactor;
 pub mod search;
