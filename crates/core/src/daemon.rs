@@ -19,6 +19,17 @@ impl DaemonState {
         }
     }
 
+    /// Create a DaemonState pre-populated with a single project — used by stdio mode
+    /// so both stdio and daemon modes share the same DB-management codepath.
+    pub fn with_initial(base_db_path: PathBuf, repo_name: String, db: Surreal<Db>) -> Self {
+        let mut map = HashMap::new();
+        map.insert(repo_name, db);
+        Self {
+            dbs: tokio::sync::RwLock::new(map),
+            base_db_path,
+        }
+    }
+
     /// Get or create a DB connection for a repo.
     /// Each repo has its own SurrealKv directory — no lock contention.
     pub async fn get_db(&self, repo_name: &str) -> Result<Surreal<Db>> {

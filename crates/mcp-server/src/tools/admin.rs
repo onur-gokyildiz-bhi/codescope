@@ -15,10 +15,13 @@ impl GraphRagServer {
         description = "Initialize a project for this session. Required in daemon mode before using other tools. Pass the repo name and codebase path."
     )]
     async fn init_project(&self, Parameters(params): Parameters<InitProjectParams>) -> String {
+        if self.is_stdio_mode() {
+            return "Project already initialized (stdio mode).".into();
+        }
         let daemon = match self.daemon() {
             Some(d) => d.clone(),
             None => {
-                return "Project already initialized (stdio mode).".into();
+                return "Daemon state not available.".into();
             }
         };
 
@@ -118,6 +121,13 @@ impl GraphRagServer {
         description = "List all projects currently open in the daemon. Only available in daemon mode."
     )]
     async fn list_projects(&self) -> String {
+        if self.is_stdio_mode() {
+            let ctx = self.project_lock().read().await;
+            return match &*ctx {
+                Some(c) => format!("Stdio mode — project: {}", c.repo_name),
+                None => "No project initialized.".into(),
+            };
+        }
         match self.daemon() {
             Some(d) => {
                 let repos = d.active_repos().await;
@@ -127,13 +137,7 @@ impl GraphRagServer {
                     format!("Open projects: {}", repos.join(", "))
                 }
             }
-            None => {
-                let ctx = self.project_lock().read().await;
-                match &*ctx {
-                    Some(c) => format!("Stdio mode — project: {}", c.repo_name),
-                    None => "No project initialized.".into(),
-                }
-            }
+            None => "Daemon state not available.".into(),
         }
     }
 

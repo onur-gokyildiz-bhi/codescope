@@ -21,10 +21,16 @@ pub struct ProjectCtx {
 /// Supports two modes:
 /// - **Stdio**: project is pre-initialized at startup (single project)
 /// - **Daemon**: project is set via `init_project` tool (multi-project)
+///
+/// Both modes share the same `DaemonState` infrastructure — stdio mode
+/// creates a single-project state at construction time.
 #[derive(Clone)]
 pub struct GraphRagServer {
     project: Arc<tokio::sync::RwLock<Option<ProjectCtx>>>,
     daemon: Option<Arc<DaemonState>>,
+    /// True if this server was created via `new()` (stdio); false if via `new_daemon()`.
+    /// Used by `init_project` to differentiate behavior.
+    stdio_mode: bool,
     /// Cached conversation context summary, injected into ServerInfo.instructions
     context_summary: Arc<tokio::sync::RwLock<String>>,
     tool_router: ToolRouter<Self>,
@@ -32,27 +38,48 @@ pub struct GraphRagServer {
 
 impl GraphRagServer {
     /// Create for stdio mode — project ready immediately
+    /// Create for stdio mode — single project pre-loaded.
+    /// Internally builds a single-project DaemonState so both stdio and daemon
+    /// share the same DB-management codepath.
     pub fn new(db: Surreal<Db>, repo_name: String, codebase_path: PathBuf) -> Self {
+        // Use the parent dir of the DB as the daemon base path
+        let base_db_path = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".codescope")
+            .join("db");
+        let state = Arc::new(DaemonState::with_initial(
+            base_db_path,
+            repo_name.clone(),
+            db.clone(),
+        ));
+
         Self {
             project: Arc::new(tokio::sync::RwLock::new(Some(ProjectCtx {
                 db,
                 repo_name,
                 codebase_path,
             }))),
-            daemon: None,
+            daemon: Some(state),
+            stdio_mode: true,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             tool_router: Self::merged_router(),
         }
     }
 
-    /// Create for daemon mode — no project until init_project is called
+    /// Create for daemon mode — no project until init_project is called.
     pub fn new_daemon(state: Arc<DaemonState>) -> Self {
         Self {
             project: Arc::new(tokio::sync::RwLock::new(None)),
             daemon: Some(state),
+            stdio_mode: false,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             tool_router: Self::merged_router(),
         }
+    }
+
+    /// Whether this server was started in stdio mode (single project pre-loaded).
+    pub(crate) fn is_stdio_mode(&self) -> bool {
+        self.stdio_mode
     }
 
     /// Compose the master tool router from all per-topic sub-routers.
