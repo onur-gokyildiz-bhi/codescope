@@ -37,6 +37,10 @@ struct BenchmarkResults {
     // Index metrics
     index: IndexMetrics,
 
+    // Dynamically discovered target for impact / traversal queries
+    // (the function with the highest fan-in in this codebase)
+    impact_target: String,
+
     // Query metrics
     queries: Vec<QueryMetric>,
 
@@ -186,16 +190,26 @@ async fn main() -> Result<()> {
     println!("[3/4] Query benchmarks...");
     let gq = GraphQuery::new(db.clone());
 
-    let queries: Vec<(&str, &str)> = vec![
-        ("search_functions", "SELECT name, file_path, start_line FROM `function` WHERE string::contains(string::lowercase(name), 'new') LIMIT 20"),
-        ("find_function_exact", "SELECT * FROM `function` WHERE name = 'main' LIMIT 5"),
-        ("file_entities", "SELECT name, start_line, end_line FROM `function` ORDER BY file_path LIMIT 30"),
-        ("all_structs", "SELECT name, file_path FROM class ORDER BY name LIMIT 50"),
-        ("largest_functions", "SELECT name, file_path, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10"),
-        ("graph_traversal_callers", "SELECT <-calls<-`function`.name AS callers FROM `function` WHERE name = 'main'"),
-        ("graph_traversal_callees", "SELECT ->calls->`function`.name AS callees FROM `function` WHERE name = 'main'"),
-        ("count_all", "SELECT count() FROM file GROUP ALL"),
-        ("imports_list", "SELECT name, file_path FROM import_decl LIMIT 30"),
+    // Discover the highest fan-in function so impact benchmarks have a
+    // meaningful target. Hardcoding 'main' yields zero results because main
+    // is the *root* of the call graph (no callers), not an interior node.
+    let impact_target = discover_impact_target(&gq).await.unwrap_or_else(|| {
+        eprintln!("  ! Could not discover top fan-in function, falling back to 'main'");
+        "main".to_string()
+    });
+    let safe_target = impact_target.replace('\'', "''");
+    println!("  Impact target (highest fan-in): {}\n", impact_target);
+
+    let queries: Vec<(&str, String)> = vec![
+        ("search_functions", "SELECT name, file_path, start_line FROM `function` WHERE string::contains(string::lowercase(name), 'new') LIMIT 20".to_string()),
+        ("find_function_exact", format!("SELECT * FROM `function` WHERE name = '{safe_target}' LIMIT 5")),
+        ("file_entities", "SELECT name, start_line, end_line FROM `function` ORDER BY file_path LIMIT 30".to_string()),
+        ("all_structs", "SELECT name, file_path FROM class ORDER BY name LIMIT 50".to_string()),
+        ("largest_functions", "SELECT name, file_path, (end_line - start_line) AS size FROM `function` ORDER BY size DESC LIMIT 10".to_string()),
+        ("graph_traversal_callers", format!("SELECT <-calls<-`function`.name AS callers FROM `function` WHERE name = '{safe_target}'")),
+        ("graph_traversal_callees", format!("SELECT ->calls->`function`.name AS callees FROM `function` WHERE name = '{safe_target}'")),
+        ("count_all", "SELECT count() FROM file GROUP ALL".to_string()),
+        ("imports_list", "SELECT name, file_path FROM import_decl LIMIT 30".to_string()),
 
         // ─── Graph-first benchmarks (the differentiator) ───
         // These exercise multi-hop graph traversal that embedding-based
@@ -207,30 +221,36 @@ async fn main() -> Result<()> {
         //
         // The production MCP tool `impact_analysis` does iterative BFS
         // from Rust; these bench queries measure the pure-SurrealQL path.
+        // Target is dynamically discovered (highest fan-in function) so
+        // results are meaningful across repos.
         (
             "impact_d1_direct",
-            "SELECT in.name AS caller FROM calls WHERE out.name = 'main' AND in.name != NONE LIMIT 50",
+            format!("SELECT in.name AS caller FROM calls WHERE out.name = '{safe_target}' AND in.name != NONE LIMIT 50"),
         ),
         (
             "impact_d2_native_traversal",
-            "SELECT name, <-calls<-`function`.<-calls<-`function`.name AS hop2_callers \
-             FROM `function` WHERE name = 'main' LIMIT 1",
+            format!(
+                "SELECT name, <-calls<-`function`<-calls<-`function`.name AS hop2_callers \
+                 FROM `function` WHERE name = '{safe_target}' LIMIT 1"
+            ),
         ),
         (
             "impact_d3_native_traversal",
-            "SELECT name, \
-                    <-calls<-`function`.<-calls<-`function`.<-calls<-`function`.name AS hop3_callers \
-             FROM `function` WHERE name = 'main' LIMIT 1",
+            format!(
+                "SELECT name, \
+                        <-calls<-`function`<-calls<-`function`<-calls<-`function`.name AS hop3_callers \
+                 FROM `function` WHERE name = '{safe_target}' LIMIT 1"
+            ),
         ),
         (
             "type_hierarchy_traversal",
             "SELECT name, ->inherits->class.name AS parents, <-inherits<-class.name AS children \
-             FROM class LIMIT 20",
+             FROM class LIMIT 20".to_string(),
         ),
         (
             "fan_in_top10",
             "SELECT out.name AS name, count() AS callers \
-             FROM calls GROUP BY out.name ORDER BY callers DESC LIMIT 10",
+             FROM calls GROUP BY out.name ORDER BY callers DESC LIMIT 10".to_string(),
         ),
     ];
 
@@ -238,7 +258,7 @@ async fn main() -> Result<()> {
 
     for (name, surql) in &queries {
         let start = Instant::now();
-        let result = gq.raw_query(surql).await;
+        let result = gq.raw_query(surql.as_str()).await;
         let elapsed = start.elapsed();
 
         let (result_count, response_tokens) = match &result {
@@ -346,7 +366,10 @@ async fn main() -> Result<()> {
     // ─── Graph-first differentiator highlight ───
     // Show the multi-hop traversal latencies that embedding-based tools can't do.
     println!();
-    println!("Graph-first traversal benchmarks (the differentiator):");
+    println!(
+        "Graph-first traversal benchmarks (target = '{}'):",
+        impact_target
+    );
     println!("  {}", "-".repeat(83));
     let mut graph_metrics: Vec<(&str, f64)> = Vec::new();
     for name in &[
@@ -380,6 +403,7 @@ async fn main() -> Result<()> {
         repo_name: repo_name.clone(),
         repo_path: args.path.to_string_lossy().to_string(),
         index: index_metrics,
+        impact_target: impact_target.clone(),
         queries: query_metrics,
         token_savings: scenarios,
     };
@@ -400,6 +424,28 @@ async fn main() -> Result<()> {
 
     println!("\nBenchmark complete.");
     Ok(())
+}
+
+/// Discover the most-called function in this codebase. Used as the dynamic
+/// target for impact-analysis benchmarks so they produce meaningful results
+/// across repos (hardcoding `main` returns zero rows because main is the
+/// root of the call graph).
+async fn discover_impact_target(gq: &GraphQuery) -> Option<String> {
+    let result = gq
+        .raw_query(
+            "SELECT out.name AS name, count() AS callers \
+             FROM calls WHERE out.name != NONE \
+             GROUP BY out.name ORDER BY callers DESC LIMIT 1",
+        )
+        .await
+        .ok()?;
+
+    result
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 fn count_files(path: &PathBuf, parser: &CodeParser) -> (usize, usize, u64) {

@@ -135,12 +135,20 @@ impl GraphQuery {
         let stmt_count = query_str.matches(';').count() + 1;
         let mut response = self.db.query(query_str).await?;
 
-        // Collect results from ALL statements (not just index 0)
+        // Collect results from ALL statements (not just index 0).
+        //
+        // IMPORTANT: a parse error or runtime error in statement N appears
+        // here as `take(N) -> Err(...)`. We MUST surface the error from the
+        // first statement, otherwise broken queries silently return an empty
+        // array — which is exactly how the bogus 6.4M× benchmark shipped in
+        // commit 1cf1353. For statements after the first, breaking on error
+        // is fine (treated as "no more statements").
         let mut all_results = Vec::new();
         for i in 0..stmt_count {
             match response.take::<Vec<serde_json::Value>>(i) {
                 Ok(result) => all_results.push(serde_json::Value::Array(result)),
-                Err(_) => break, // No more results
+                Err(e) if i == 0 => return Err(e.into()),
+                Err(_) => break, // No more statements / later-statement error
             }
         }
 
