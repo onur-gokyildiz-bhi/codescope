@@ -4,6 +4,7 @@ pub mod indexing;
 pub mod nlp;
 pub mod params;
 pub mod server;
+pub mod tools;
 pub mod watcher;
 
 pub use server::GraphRagServer;
