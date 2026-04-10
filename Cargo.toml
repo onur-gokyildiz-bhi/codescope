@@ -66,6 +66,7 @@ schemars = "1"
 
 # Web server
 axum = "0.8"
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
 # Local embeddings (in-process, no external service needed)

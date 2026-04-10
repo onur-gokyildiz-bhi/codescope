@@ -978,6 +978,7 @@ dependencies = [
  "serde_json",
  "surrealdb",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
