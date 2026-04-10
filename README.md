@@ -4,8 +4,11 @@
 
 **The brain your AI coding assistant is missing.**
 
-Rust-native code intelligence engine that builds knowledge graphs from any codebase.
-54 MCP tools. 57 supported formats. 99%+ token savings.
+Most AI code tools embed your code as vectors and hope nearest-neighbor finds the
+right answer. Codescope builds an actual **knowledge graph** — entities, calls,
+imports, type hierarchies — so AI agents can *traverse* your code instead of guessing.
+
+Rust-native, fully local, 52 MCP tools, 57 supported formats, 99%+ token savings.
 
 [Install](#install) · [How It Works](#how-it-works) · [Tools](#tools) · [Benchmarks](BENCHMARKS.md) · [Contributing](CONTRIBUTING.md)
 
@@ -51,7 +54,7 @@ cd your-project
 codescope init    # indexes codebase + creates .mcp.json
 ```
 
-That's it. Open Claude Code and you have 54 code intelligence tools.
+That's it. Open Claude Code and you have 52 code intelligence tools.
 
 <details>
 <summary><b>Build from source</b></summary>
@@ -73,13 +76,43 @@ Requires Rust 1.82+ and a C/C++ compiler.
 ## How It Works
 
 ```
-Your Code  ──→  tree-sitter  ──→  SurrealDB Graph  ──→  54 MCP Tools  ──→  AI Agent
+Your Code  ──→  tree-sitter  ──→  SurrealDB Graph  ──→  52 MCP Tools  ──→  AI Agent
   .rs .ts       parse AST          entities +            search, trace,     Claude Code
   .py .go       47 languages       relations             analyze, remember  Cursor, Zed
   .dart .cs                        + embeddings                             Codex CLI
 ```
 
 **Index** any codebase in seconds. **Query** the graph instead of reading files. **Remember** decisions across sessions.
+
+### Why graph-first?
+
+Most AI code-context tools (Cursor, Windsurf, Continue) are **embeddings-first**:
+they chunk your code, embed it as vectors, and do nearest-neighbor lookups.
+Vectors are great for "find code that *means* X", but they can't answer:
+
+> *"What functions transitively depend on `parse_config`?"*
+> *"If I change `User::email`, what breaks?"*
+> *"Show me the call graph 3 hops out from `main`."*
+
+These are **graph traversal questions**. Embeddings give you a fuzzy match;
+codescope gives you a deterministic answer in milliseconds — because the
+graph already knows.
+
+```
+  EMBEDDINGS-FIRST                  GRAPH-FIRST (codescope)
+  ─────────────────                 ─────────────────────────
+  parse → embed → vector DB         parse → entities + edges → graph DB
+                                                                + embeddings (fallback)
+  query: nearest neighbor           query: traverse edges + nearest neighbor
+  best at: semantic similarity      best at: structural reasoning
+  blind to: call relationships      handles: who calls whom, blast radius,
+            type hierarchies                  inheritance, dependencies
+```
+
+Codescope keeps embeddings as a **secondary index** for the cases where
+structure doesn't help (`semantic_search` for "config parsing functions"),
+but the **primary index is the graph** — which is what developers actually
+walk through their code.
 
 ### The Three Pillars
 
@@ -116,7 +149,7 @@ Your Code  ──→  tree-sitter  ──→  SurrealDB Graph  ──→  54 MCP
 
 ## Tools
 
-### 54 MCP tools in 8 categories:
+### 52 MCP tools in 8 categories:
 
 <table>
 <tr>
@@ -234,7 +267,7 @@ Codescope is the **shared brain** for all your AI coding tools:
                           │
                  ┌────────▼────────┐
                  │  Codescope MCP  │
-                 │   (54 tools)    │
+                 │   (52 tools)    │
                  └────────┬────────┘
                           │
                  ┌────────▼────────┐
@@ -312,18 +345,34 @@ Environment variables:
 
 ## Comparison
 
-| Feature | Codescope | Greptile | Sourcegraph | Aider | Continue.dev |
-|---------|:---------:|:--------:|:-----------:|:-----:|:------------:|
-| Graph database | SurrealDB | Yes (cloud) | Partial | No | No |
-| MCP tools | **54** | API only | No | No | No |
-| Call graph | Yes | Yes | SCIP | No | No |
-| Semantic search | BQ + Cosine | Cosine | No | No | Cosine |
-| AI memory | Yes | No | No | No | No |
-| Dead code detection | Yes | No | No | No | No |
-| Git history analysis | Yes | No | No | No | No |
-| Fully local | **Yes** | No | No | Yes | Yes |
-| 99%+ token savings | **Yes** | Unknown | No | No | No |
-| Languages | 57 formats | N/A | 30+ | 130+ | Broad |
+### vs AI-native code editors
+
+| Feature | Codescope | Cursor | Windsurf | Claude Code | Continue.dev |
+|---------|:---------:|:------:|:--------:|:-----------:|:------------:|
+| Architecture | **Graph-first** | Embeddings | Embeddings | Built-in context | Embeddings |
+| Call graph traversal | **Native** | No | No | No | No |
+| Impact analysis (N-hop) | **Native** | No | No | No | No |
+| Type hierarchy queries | **Native** | No | No | No | No |
+| Semantic search | BQ + Cosine | Cosine | Cosine | — | Cosine |
+| Cross-repo queries | **Yes** | Limited | Limited | No | No |
+| MCP tools exposed | **52** | — | — | Native | — |
+| Persistent memory | **Yes** | Limited | No | Skill files | No |
+| Fully local | **Yes** | No (cloud) | No (cloud) | Local | Yes |
+| Works with any AI agent | **Yes** (MCP) | Cursor only | Windsurf only | Claude only | Continue only |
+
+### vs code-intelligence tools
+
+| Feature | Codescope | Greptile | Sourcegraph | Aider |
+|---------|:---------:|:--------:|:-----------:|:-----:|
+| Graph database | SurrealDB | Yes (cloud) | Partial (SCIP) | No |
+| MCP protocol | **52 tools** | API only | No | No |
+| Call graph | Yes | Yes | SCIP | Repo-map only |
+| AI memory | **Yes** | No | No | No |
+| Dead code detection | **Yes** | No | No | No |
+| Git history analysis | **Yes** | No | No | No |
+| Fully local | **Yes** | No | No | Yes |
+| Languages | 57 formats | N/A | 30+ | 130+ |
+| Pricing | **Free (MIT)** | Paid SaaS | Paid SaaS | Free |
 
 ---
 
