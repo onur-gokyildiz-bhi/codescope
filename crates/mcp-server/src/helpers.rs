@@ -77,27 +77,6 @@ pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
     }
 }
 
-pub(crate) fn extract_path_from_question(question: &str) -> String {
-    for word in question.split_whitespace() {
-        let clean = word.trim_matches(|c: char| {
-            !c.is_alphanumeric() && c != '/' && c != '\\' && c != '.' && c != '_' && c != '-'
-        });
-        if clean.contains('.')
-            && (clean.contains('/')
-                || clean.contains('\\')
-                || clean.ends_with(".rs")
-                || clean.ends_with(".ts")
-                || clean.ends_with(".py")
-                || clean.ends_with(".go")
-                || clean.ends_with(".java")
-                || clean.ends_with(".js"))
-        {
-            return clean.to_string();
-        }
-    }
-    question.to_string()
-}
-
 /// Check if a conversation file is already indexed by comparing stored hash
 pub(crate) async fn check_conversation_hash(
     db: &Surreal<Db>,

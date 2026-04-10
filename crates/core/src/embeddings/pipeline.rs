@@ -88,6 +88,7 @@ impl EmbeddingPipeline {
 
     /// Embed all functions that don't have embeddings yet.
     /// Stores both f32 embedding AND binary quantized version.
+    /// Uses a single batched UPDATE round-trip per chunk (was N+1 before).
     pub async fn embed_functions(&self, batch_size: usize) -> Result<EmbedResult> {
         // Get functions without embeddings
         let functions: Vec<FunctionRecord> = self
@@ -113,46 +114,28 @@ impl EmbeddingPipeline {
         // Batch embed all texts at once for efficiency
         let texts: Vec<String> = functions.iter().map(build_function_text).collect();
         let embeddings = self.provider.embed_batch(&texts).await?;
-
-        let mut count = 0;
-        let mut bq_count = 0;
         let dims = self.provider.dimensions();
 
-        for (func, embedding) in functions.iter().zip(embeddings.into_iter()) {
-            // Binary quantize the embedding
-            let bq = binary_quantize(&embedding);
-            let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
-
-            let id_str = record_id_key_string(&func.id.key);
-            let update_query = format!(
-                "UPDATE `function`:`{}` SET embedding = $embedding, binary_embedding = $bq",
-                crate::graph::builder::sanitize_id(&id_str)
-            );
-            let result = self
-                .db
-                .query(&update_query)
-                .bind(("embedding", embedding))
-                .bind(("bq", bq_as_ints))
-                .await;
-
-            match result {
-                Ok(mut response) => {
-                    let updated: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-                    if !updated.is_empty() {
-                        count += 1;
-                        bq_count += 1;
-                    } else {
-                        warn!(
-                            "Embedding UPDATE returned Ok but 0 rows affected for {}",
-                            func.name
-                        );
-                    }
+        // Build update payloads
+        let updates: Vec<EmbedUpdatePayload> = functions
+            .iter()
+            .zip(embeddings.into_iter())
+            .map(|(func, embedding)| {
+                let bq = binary_quantize(&embedding);
+                let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
+                let id_str = record_id_key_string(&func.id.key);
+                let sanitized_id = crate::graph::builder::sanitize_id(&id_str);
+                EmbedUpdatePayload {
+                    id: sanitized_id,
+                    embedding,
+                    bq: bq_as_ints,
                 }
-                Err(e) => {
-                    warn!("Failed to store embedding for {}: {}", func.name, e);
-                }
-            }
-        }
+            })
+            .collect();
+
+        // Single batched UPDATE (chunked to avoid huge query payloads)
+        let count = self.batch_update_embeddings(&updates).await?;
+        let bq_count = count;
 
         let f32_bytes = count * dims * 4;
         let bq_bytes = bq_count * dims.div_ceil(8);
@@ -175,6 +158,36 @@ impl EmbeddingPipeline {
         })
     }
 
+    /// Execute batched UPDATE for embeddings using a single SurrealQL FOR loop per chunk.
+    /// Chunks of 100 to keep query payloads bounded.
+    async fn batch_update_embeddings(&self, updates: &[EmbedUpdatePayload]) -> Result<usize> {
+        const CHUNK_SIZE: usize = 100;
+        let mut total = 0;
+
+        for chunk in updates.chunks(CHUNK_SIZE) {
+            let surql = "FOR $item IN $updates { \
+                         UPDATE type::thing('function', $item.id) \
+                         SET embedding = $item.embedding, binary_embedding = $item.bq; \
+                         }";
+            match self
+                .db
+                .query(surql)
+                .bind(("updates", chunk.to_vec()))
+                .await
+            {
+                Ok(_) => total += chunk.len(),
+                Err(e) => {
+                    warn!(
+                        "Batch UPDATE failed for chunk of {} (continuing): {}",
+                        chunk.len(),
+                        e
+                    );
+                }
+            }
+        }
+        Ok(total)
+    }
+
     /// Backfill binary embeddings for functions that have f32 but no BQ.
     /// Useful after upgrading from pre-BQ version.
     pub async fn backfill_binary_quantization(&self) -> Result<usize> {
@@ -193,30 +206,32 @@ impl EmbeddingPipeline {
         }
 
         info!("Backfilling BQ for {} functions...", functions.len());
-        let mut count = 0;
 
-        for func in &functions {
-            let bq = binary_quantize(&func.embedding);
-            let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
-
-            let id_str = record_id_key_string(&func.id.key);
-            let bq_query = format!(
-                "UPDATE `function`:`{}` SET binary_embedding = $bq",
-                crate::graph::builder::sanitize_id(&id_str)
-            );
-            match self.db.query(&bq_query).bind(("bq", bq_as_ints)).await {
-                Ok(mut response) => {
-                    let updated: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-                    if !updated.is_empty() {
-                        count += 1;
-                    } else {
-                        warn!(
-                            "BQ backfill UPDATE returned Ok but 0 rows affected for {:?}",
-                            func.id
-                        );
-                    }
+        // Build BQ-only payloads
+        let updates: Vec<BqOnlyPayload> = functions
+            .iter()
+            .map(|func| {
+                let bq = binary_quantize(&func.embedding);
+                let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
+                let id_str = record_id_key_string(&func.id.key);
+                BqOnlyPayload {
+                    id: crate::graph::builder::sanitize_id(&id_str),
+                    bq: bq_as_ints,
                 }
-                Err(e) => warn!("BQ backfill failed for {:?}: {}", func.id, e),
+            })
+            .collect();
+
+        // Single batched UPDATE per chunk
+        const CHUNK_SIZE: usize = 100;
+        let mut count = 0;
+        for chunk in updates.chunks(CHUNK_SIZE) {
+            let surql = "FOR $item IN $updates { \
+                         UPDATE type::thing('function', $item.id) \
+                         SET binary_embedding = $item.bq; \
+                         }";
+            match self.db.query(surql).bind(("updates", chunk.to_vec())).await {
+                Ok(_) => count += chunk.len(),
+                Err(e) => warn!("BQ backfill chunk failed ({}): {}", chunk.len(), e),
             }
         }
 
@@ -514,6 +529,22 @@ struct FullEmbeddingRecord {
 struct BQBackfillRecord {
     id: surrealdb::types::RecordId,
     embedding: Vec<f32>,
+}
+
+/// Payload for batched UPDATE — embed_functions sends Vec<EmbedUpdatePayload>
+/// to a SurrealQL FOR loop in one round-trip.
+#[derive(Debug, Clone, serde::Serialize, SurrealValue)]
+struct EmbedUpdatePayload {
+    id: String,
+    embedding: Vec<f32>,
+    bq: Vec<i64>,
+}
+
+/// Payload for batched BQ-only UPDATE — backfill_binary_quantization.
+#[derive(Debug, Clone, serde::Serialize, SurrealValue)]
+struct BqOnlyPayload {
+    id: String,
+    bq: Vec<i64>,
 }
 
 fn build_function_text(func: &FunctionRecord) -> String {
