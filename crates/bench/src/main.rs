@@ -196,6 +196,42 @@ async fn main() -> Result<()> {
         ("graph_traversal_callees", "SELECT ->calls->`function`.name AS callees FROM `function` WHERE name = 'main'"),
         ("count_all", "SELECT count() FROM file GROUP ALL"),
         ("imports_list", "SELECT name, file_path FROM import_decl LIMIT 30"),
+
+        // ─── Graph-first benchmarks (the differentiator) ───
+        // These exercise multi-hop graph traversal that embedding-based
+        // tools (Cursor, Windsurf, Continue) cannot answer at all.
+        //
+        // NOTE: We use SurrealDB's native graph traversal syntax
+        // (<-calls<-function) which is optimized as a single graph walk,
+        // NOT nested subqueries (which are quadratic and time out).
+        //
+        // The production MCP tool `impact_analysis` does iterative BFS
+        // from Rust; these bench queries measure the pure-SurrealQL path.
+        (
+            "impact_d1_direct",
+            "SELECT in.name AS caller FROM calls WHERE out.name = 'main' AND in.name != NONE LIMIT 50",
+        ),
+        (
+            "impact_d2_native_traversal",
+            "SELECT name, <-calls<-`function`.<-calls<-`function`.name AS hop2_callers \
+             FROM `function` WHERE name = 'main' LIMIT 1",
+        ),
+        (
+            "impact_d3_native_traversal",
+            "SELECT name, \
+                    <-calls<-`function`.<-calls<-`function`.<-calls<-`function`.name AS hop3_callers \
+             FROM `function` WHERE name = 'main' LIMIT 1",
+        ),
+        (
+            "type_hierarchy_traversal",
+            "SELECT name, ->inherits->class.name AS parents, <-inherits<-class.name AS children \
+             FROM class LIMIT 20",
+        ),
+        (
+            "fan_in_top10",
+            "SELECT out.name AS name, count() AS callers \
+             FROM calls GROUP BY out.name ORDER BY callers DESC LIMIT 10",
+        ),
     ];
 
     let mut query_metrics = Vec::new();
@@ -304,6 +340,38 @@ async fn main() -> Result<()> {
             format_tokens(s.traditional_tokens),
             format_tokens(s.codescope_tokens),
             s.saving_percent,
+        );
+    }
+
+    // ─── Graph-first differentiator highlight ───
+    // Show the multi-hop traversal latencies that embedding-based tools can't do.
+    println!();
+    println!("Graph-first traversal benchmarks (the differentiator):");
+    println!("  {}", "-".repeat(83));
+    let mut graph_metrics: Vec<(&str, f64)> = Vec::new();
+    for name in &[
+        "impact_d1_direct",
+        "impact_d2_native_traversal",
+        "impact_d3_native_traversal",
+        "type_hierarchy_traversal",
+        "fan_in_top10",
+    ] {
+        if let Some(q) = query_metrics.iter().find(|q| q.name == *name) {
+            graph_metrics.push((name, q.time_ms));
+            println!(
+                "  {:<45} {:>10.2}ms  ({} results)",
+                name, q.time_ms, q.result_count
+            );
+        }
+    }
+    if let Some((_, d3_ms)) = graph_metrics
+        .iter()
+        .find(|(n, _)| *n == "impact_d3_native_traversal")
+    {
+        println!();
+        println!(
+            "  → 3-hop transitive impact: {:.0}ms (Cursor/Windsurf cannot answer this)",
+            d3_ms
         );
     }
 
