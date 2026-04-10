@@ -14,7 +14,10 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Search for functions by name or pattern in the code graph
     #[tool(
-        description = "Search for functions by name or pattern. Returns matching functions with file paths and line numbers."
+        description = "Fuzzy/substring search for functions by name. Case-insensitive. \
+        Returns matching functions with file paths and line numbers. \
+        Use this when you know roughly what the function is called but not the exact name. \
+        If you know the exact name, prefer `find_function` instead (cheaper, single result)."
     )]
     async fn search_functions(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
@@ -54,7 +57,11 @@ impl GraphRagServer {
 
     /// Find a function by exact name
     #[tool(
-        description = "Find a function by exact name. Returns detailed info including signature, file path, and line numbers."
+        description = "Lookup a function by its EXACT name (case-sensitive). \
+        Returns full info including signature, file path, line numbers, and qualified name. \
+        Use this when you know the precise function name. \
+        For fuzzy/partial matches use `search_functions`. \
+        For full neighborhood (callers + callees + siblings) use `explore`."
     )]
     async fn find_function(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
@@ -111,7 +118,10 @@ impl GraphRagServer {
 
     /// Find all functions that call the specified function (callers / incoming calls)
     #[tool(
-        description = "Find all functions that call the specified function. Useful for understanding who depends on a function."
+        description = "Find DIRECT (1-hop) callers of a function — who calls it from one level up. \
+        Use this for the immediate question 'who uses this function?'. \
+        For TRANSITIVE callers across multiple hops (full blast radius of a change) \
+        use `impact_analysis` instead — same data, BFS to configurable depth."
     )]
     async fn find_callers(&self, Parameters(params): Parameters<FindCallersParams>) -> String {
         let ctx = match self.ctx().await {
@@ -134,7 +144,9 @@ impl GraphRagServer {
 
     /// Find all functions called by the specified function (callees / outgoing calls)
     #[tool(
-        description = "Find all functions called by the specified function. Useful for understanding a function's dependencies."
+        description = "Find DIRECT (1-hop) callees of a function — what it calls one level down. \
+        Use this to understand a function's immediate dependencies. \
+        Mirror of `find_callers`. For full neighborhood (both directions plus context) use `explore`."
     )]
     async fn find_callees(&self, Parameters(params): Parameters<FindCalleesParams>) -> String {
         let ctx = match self.ctx().await {
@@ -175,7 +187,13 @@ impl GraphRagServer {
 
     /// Execute a raw SurrealQL query against the code graph
     #[tool(
-        description = "Execute a raw SurrealQL query against the code graph database. Use for advanced queries like graph traversals."
+        description = "ESCAPE HATCH: execute a raw SurrealQL query against the code graph database. \
+        Prefer the dedicated tools first (search_functions, find_function, find_callers, impact_analysis, \
+        explore, type_hierarchy, etc.) — they are cheaper and harder to get wrong. \
+        Use raw_query only when no dedicated tool fits, e.g., custom aggregations or multi-edge joins. \
+        SurrealQL note: `function` is a reserved word, always backtick it (`\\`function\\``). \
+        For multi-hop traversal use the native syntax `<-calls<-\\`function\\`<-calls<-\\`function\\`.name`, \
+        NOT nested subqueries (slow scan instead of indexed graph walk)."
     )]
     async fn raw_query(&self, Parameters(params): Parameters<RawQueryParams>) -> String {
         let ctx = match self.ctx().await {
