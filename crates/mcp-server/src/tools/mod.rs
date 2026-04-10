@@ -4,6 +4,9 @@
 //! all routers into one.
 
 pub mod callgraph;
+pub mod contributors;
 pub mod http;
 pub mod refactor;
 pub mod search;
+pub mod skills;
+pub mod temporal;
