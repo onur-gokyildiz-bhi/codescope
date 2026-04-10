@@ -7,6 +7,8 @@ pub mod admin;
 pub mod ask;
 pub mod callgraph;
 pub mod contributors;
+pub mod conversations;
+pub mod embeddings;
 pub mod exploration;
 pub mod http;
 pub mod refactor;
