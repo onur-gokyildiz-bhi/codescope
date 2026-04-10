@@ -1,5 +1,6 @@
 pub mod daemon;
 pub mod helpers;
+pub mod nlp;
 pub mod params;
 pub mod server;
 pub mod watcher;

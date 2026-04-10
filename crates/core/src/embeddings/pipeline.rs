@@ -401,30 +401,34 @@ impl EmbeddingPipeline {
 
     /// Get embedding statistics
     pub async fn stats(&self) -> Result<EmbedStats> {
-        let result: Vec<serde_json::Value> = self
+        let mut response = self
             .db
             .query(
                 "SELECT count() AS total FROM `function` GROUP ALL; \
                  SELECT count() AS total FROM `function` WHERE embedding IS NOT NONE GROUP ALL; \
                  SELECT count() AS total FROM `function` WHERE binary_embedding IS NOT NONE GROUP ALL;"
             )
-            .await?
-            .take(0)?;
+            .await?;
 
-        // Parse results
-        let total_funcs = result
-            .first()
-            .and_then(|v| v.get("total"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
+        let extract_count = |rows: Vec<serde_json::Value>| -> usize {
+            rows.first()
+                .and_then(|v| v.get("total"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize
+        };
+
+        let total_funcs = extract_count(response.take(0).unwrap_or_default());
+        let with_embedding = extract_count(response.take(1).unwrap_or_default());
+        let with_binary = extract_count(response.take(2).unwrap_or_default());
+        let dims = self.provider.dimensions();
 
         Ok(EmbedStats {
             total_functions: total_funcs,
-            with_embedding: 0, // parsed from stmt 1
-            with_binary: 0,    // parsed from stmt 2
-            dimensions: self.provider.dimensions(),
-            f32_memory_kb: 0,
-            bq_memory_kb: 0,
+            with_embedding,
+            with_binary,
+            dimensions: dims,
+            f32_memory_kb: with_embedding * dims * 4 / 1024,
+            bq_memory_kb: with_binary * dims.div_ceil(8) / 1024,
         })
     }
 
