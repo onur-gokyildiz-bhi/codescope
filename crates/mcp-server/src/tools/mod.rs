@@ -4,6 +4,8 @@
 //! all routers into one.
 
 pub mod admin;
+pub mod adr;
+pub mod analytics;
 pub mod ask;
 pub mod callgraph;
 pub mod contributors;
@@ -11,6 +13,8 @@ pub mod conversations;
 pub mod embeddings;
 pub mod exploration;
 pub mod http;
+pub mod memory;
+pub mod quality;
 pub mod refactor;
 pub mod search;
 pub mod skills;
