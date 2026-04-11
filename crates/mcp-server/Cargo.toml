@@ -37,3 +37,9 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 tokio-util = "0.7"
 axum = { workspace = true }
+
+[dev-dependencies]
+# graph_query_tests.rs uses the in-memory SurrealDB engine for fast
+# isolated tests. Lives in dev-dependencies so production binaries
+# don't pull in the extra backend.
+surrealdb = { workspace = true, features = ["kv-mem"] }

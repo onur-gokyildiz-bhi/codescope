@@ -120,12 +120,11 @@ impl GraphBuilder {
                 Ok(mut response) => {
                     // Check each statement result for errors
                     let mut batch_ok = true;
-                    for i in 0..chunk.len() {
+                    for (i, rel) in chunk.iter().enumerate() {
                         let r: Result<Option<serde_json::Value>, _> = response.take(i);
                         if let Err(e) = r {
                             if has_calls && batch_ok {
                                 warn!("Statement {} in batch failed: {}", i, e);
-                                let rel = &chunk[i];
                                 warn!("  Relation: {:?} {} -> {}", rel.kind, rel.from_entity, rel.to_entity);
                                 warn!("  Query sample: {}", &query[..query.len().min(500)]);
                             }

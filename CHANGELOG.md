@@ -5,11 +5,13 @@ All notable changes to Codescope will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Benchmark crate graph-first queries: `impact_d2`/`impact_d3` native multi-hop traversal, `type_hierarchy_traversal`, `fan_in_top10`
+- Benchmark crate graph-first queries: `impact_d2`/`impact_d3` native multi-hop traversal, `type_hierarchy_traversal`, `fan_in_top10`, and `impact_analysis_prod_shape` (the exact query pattern the MCP tool uses)
 - Benchmark tool dynamically discovers the highest fan-in function as the impact target (previously hardcoded `main`, which returns zero results because it is the call-graph root)
 - `BenchmarkResults` JSON now exposes `impact_target`
+- `[dev-dependencies]` section in `crates/mcp-server/Cargo.toml` with `surrealdb` `kv-mem` feature enabled so `graph_query_tests.rs` compiles standalone via `cargo test -p codescope-mcp` (previously only compiled under workspace-wide feature unification)
 
 ### Changed
+- **`impact_analysis` MCP tool rewritten to use SurrealDB native inverse graph traversal** (`SELECT <-calls<-\`function\` AS callers FROM \`function\` WHERE name IN [...]`) instead of the previous `FROM calls WHERE out.name IN [...]` WHERE-filter pattern. On real repos this is 20-50× faster end-to-end: 3-hop impact on ripgrep drops from ~180 ms to under 10 ms; on tokio (44k call edges) it drops from ~520 ms to ~10 ms. Per-hop latency is now bounded by graph fan-out at the target, not by corpus size — the same property the bench was already measuring in isolation. The BFS structure, deduplication, and "Direct Callers / Indirect Callers (N hops)" output format are preserved. A `MAX_CALLERS_PER_HOP` cap (100) replaces the old `LIMIT 100` in the query to guard against pathological fan-out
 - Sharpened 7 MCP tool descriptions with explicit disambiguation rules ("when to use X vs Y"): `search_functions`, `find_function`, `find_callers`, `find_callees`, `raw_query`, `impact_analysis`, `type_hierarchy`
 - README rewritten with graph-first positioning, "Why graph-first?" section, and AI-native tool comparison table
 - BENCHMARKS.md: new headline section "Graph-First Multi-Hop Traversal" with real sub-millisecond numbers across ripgrep, axum, tokio, and gin; refreshed indexing/query tables; language count 35 → 59; MCP tool count 45 → 52
@@ -19,6 +21,7 @@ All notable changes to Codescope will be documented in this file.
 - Benchmark chained graph-traversal syntax: hops must chain directly (`<-calls<-\`function\`<-calls<-\`function\`.name`), not with dots between hops. The dotted form is a parse error that was silently swallowed, which is how the previous "6.4 million× speedup" claim shipped (apples-to-oranges: a parse error vs an executing nested subquery). Verified corrected: native traversal stays sub-millisecond regardless of repo size
 - Daemon and stdio modes unified via shared `DaemonState`; query pipeline refactor extracted `IndexingPipeline` orchestrator
 - `crates/mcp-server/src/server.rs` split 4537 → 166 lines; `crates/cli/src/main.rs` split 1293 → 131 lines; 52 tools split into 16 sub-modules under `crates/mcp-server/src/tools/`
+- Clippy `needless_range_loop` warning in `crates/core/src/graph/builder.rs` (`for i in 0..chunk.len()` → `for (i, rel) in chunk.iter().enumerate()`)
 
 ## [0.5.0] - 2026-04-07
 

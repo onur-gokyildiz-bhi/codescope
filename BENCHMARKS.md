@@ -6,18 +6,29 @@ Benchmarks run on real-world open-source projects. All measurements taken on Win
 
 This is what graph-based code intelligence enables that embedding-only tools (Cursor, Windsurf, Continue) **cannot answer at all**: walking the call graph to find transitive impact, type hierarchies, and fan-in.
 
-For each repo, the benchmark dynamically picks the highest fan-in function as the impact target (so the numbers are meaningful — hardcoding `main` produces zero results because it's the call-graph root). Both 2-hop and 3-hop transitive callers are computed using SurrealDB's native graph traversal syntax (`<-calls<-\`function\`<-calls<-\`function\`.name`), which walks indexed edges in a single statement.
+For each repo, the benchmark dynamically picks the highest fan-in function as the impact target (so the numbers are meaningful — hardcoding `main` produces zero results because it's the call-graph root). Transitive callers are computed using SurrealDB's native graph traversal syntax (`<-calls<-\`function\`<-calls<-\`function\`.name`), which walks indexed edges in a single statement.
 
-| Repo (size)              | Impact target | 2-hop callers | 3-hop callers | Type hierarchy | Top-10 fan-in |
-|--------------------------|---------------|---------------|---------------|----------------|---------------|
-| **ripgrep** (4.6k entities, 16.5k edges)  | `build`       | **0.64 ms**   | **0.92 ms**   | 0.91 ms        | 51.1 ms       |
-| **axum** (5.3k entities, 15.1k edges)     | `clone`       | **0.56 ms**   | **0.52 ms**   | 0.84 ms        | 42.6 ms       |
-| **tokio** (13.6k entities, 44.7k edges)   | `ms`          | **0.68 ms**   | **0.49 ms**   | 0.82 ms        | 167.0 ms      |
-| **gin** (Go, 2.4k entities, 11.3k edges)  | `testRequest` | **1.44 ms**   | **1.29 ms**   | 0.34 ms        | 39.4 ms       |
+| Repo (size) | Impact target | 2-hop traversal | 3-hop traversal | `impact_analysis` (prod, per hop) |
+|-------------|---------------|-----------------|-----------------|-----------------------------------|
+| **ripgrep** (4.6k entities, 16.5k edges) | `build` | **0.66 ms** | **0.63 ms** | **2.75 ms** |
+| **axum** (5.3k entities, 15.1k edges) | `clone` | **0.91 ms** | **0.80 ms** | **2.52 ms** |
+| **tokio** (13.6k entities, 44.7k edges) | `ms` | **1.10 ms** | **0.97 ms** | **3.26 ms** |
+| **gin** (Go, 2.4k entities, 11.3k edges) | `testRequest` | **1.49 ms** | **1.37 ms** | **1.06 ms** |
 
-**Key result:** native multi-hop traversal stays **sub-millisecond regardless of repo size** because it walks indexed graph edges. By contrast, the same question answered with a `WHERE out.name = 'X'` filter on the calls table (`impact_d1_direct` in the table below) scales linearly with edge count: 40 ms (gin, 11k edges) → 49 ms (axum) → 59 ms (ripgrep) → **118 ms (tokio, 44k edges)** — a 100×+ slowdown vs the native traversal. Multi-hop is *faster* than single-hop with WHERE because the WHERE has no graph index.
+The first two columns measure the minimal traversal primitive (returning just `.name` from each hop). The third column measures the production MCP tool `impact_analysis`, which returns **full function records** per caller — heavier payload, realistic workload. It runs BFS per hop using the same native traversal pattern.
 
-This is the property that makes graph-first viable for AI agents: a 3-hop "who transitively depends on this function?" query is bounded by graph fan-out, not corpus size.
+**Key result:** native multi-hop traversal stays **single-digit-millisecond regardless of repo size**. The production tool does a 3-hop BFS end-to-end in roughly 3 × per-hop cost — so under 10 ms on tokio (44.7k edges) where the old WHERE-filter path was ~520 ms.
+
+**Speedup vs the old WHERE-filter implementation.** Before 2026-04-12 the `impact_analysis` MCP tool issued `FROM calls WHERE out.name IN [...]` per hop, which is a full scan of the calls table and scales linearly with edge count. The new native traversal hits an indexed graph walk instead:
+
+| Repo | Edges | Old WHERE-filter (per hop) | New native traversal (per hop) | Speedup |
+|------|-------|----------------------------|--------------------------------|---------|
+| gin | 11.3k | 40.08 ms | 1.06 ms | **38×** |
+| axum | 15.1k | 89.70 ms | 2.52 ms | **36×** |
+| ripgrep | 16.5k | 57.19 ms | 2.75 ms | **21×** |
+| tokio | 44.7k | 173.19 ms | 3.26 ms | **53×** |
+
+The speedup grows with repo size because the old path scans linearly and the new path walks indexed edges with O(fan-out) cost at the target. Multi-hop is often *faster* than single-hop with WHERE because the WHERE has no graph index. This is the property that makes graph-first viable for AI agents: a 3-hop "who transitively depends on this function?" query is bounded by graph fan-out, not corpus size.
 
 ## Token Savings vs Traditional Approach
 
@@ -103,21 +114,22 @@ The core value proposition: instead of reading entire source files to understand
 
 Cold-start latencies (no caching) — single bench run on each repo:
 
-| Query                          | ripgrep   | axum     | tokio     | gin      |
-|--------------------------------|-----------|----------|-----------|----------|
-| search_functions               |   4.75 ms |  4.05 ms |   6.05 ms |  4.49 ms |
-| find_function_exact            |   0.42 ms |  0.42 ms |   0.41 ms |  0.42 ms |
-| all_structs                    |   1.59 ms |  1.83 ms |   3.19 ms |  0.25 ms |
-| largest_functions              |   8.02 ms |  8.15 ms |  32.38 ms |  7.17 ms |
-| graph_traversal_callers        |   3.86 ms |  1.80 ms |   3.03 ms |  1.32 ms |
-| graph_traversal_callees        |   2.25 ms |  1.45 ms |   0.59 ms |  0.43 ms |
-| count_all                      |   0.24 ms |  0.27 ms |   0.44 ms |  0.32 ms |
-| imports_list                   |   0.28 ms |  0.30 ms |   0.34 ms |  0.31 ms |
-| **impact_d1** (WHERE filter)   |  59.01 ms | 49.05 ms | 118.21 ms | 40.56 ms |
-| **impact_d2** (native, 2-hop)  |   0.64 ms |  0.56 ms |   0.68 ms |  1.44 ms |
-| **impact_d3** (native, 3-hop)  |   0.92 ms |  0.52 ms |   0.49 ms |  1.29 ms |
-| type_hierarchy_traversal       |   0.91 ms |  0.84 ms |   0.82 ms |  0.34 ms |
-| fan_in_top10                   |  51.12 ms | 42.59 ms | 166.98 ms | 39.37 ms |
+| Query                             | ripgrep   | axum     | tokio     | gin      |
+|-----------------------------------|-----------|----------|-----------|----------|
+| search_functions                  |   4.75 ms |  4.05 ms |   6.05 ms |  4.49 ms |
+| find_function_exact               |   0.42 ms |  0.42 ms |   0.41 ms |  0.42 ms |
+| all_structs                       |   1.59 ms |  1.83 ms |   3.19 ms |  0.25 ms |
+| largest_functions                 |   8.02 ms |  8.15 ms |  32.38 ms |  7.17 ms |
+| graph_traversal_callers           |   3.86 ms |  1.80 ms |   3.03 ms |  1.32 ms |
+| graph_traversal_callees           |   2.25 ms |  1.45 ms |   0.59 ms |  0.43 ms |
+| count_all                         |   0.24 ms |  0.27 ms |   0.44 ms |  0.32 ms |
+| imports_list                      |   0.28 ms |  0.30 ms |   0.34 ms |  0.31 ms |
+| **impact_d1** (WHERE filter)      |  57.19 ms | 89.70 ms | 173.19 ms | 40.08 ms |
+| **impact_d2** (native, 2-hop)     |   0.66 ms |  0.91 ms |   1.10 ms |  1.49 ms |
+| **impact_d3** (native, 3-hop)     |   0.63 ms |  0.80 ms |   0.97 ms |  1.37 ms |
+| **impact_analysis_prod_shape**    |   2.75 ms |  2.52 ms |   3.26 ms |  1.06 ms |
+| type_hierarchy_traversal          |   1.23 ms |  0.84 ms |   1.96 ms |  0.34 ms |
+| fan_in_top10                      |  54.73 ms | 42.59 ms | 254.50 ms | 39.37 ms |
 
 ## Semantic Search with Binary Quantization
 
@@ -166,7 +178,7 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 
 | Tool | Exact Search | Semantic Search | Graph Traversal (3-hop transitive) |
 |------|-------------|-----------------|-----------------|
-| **Codescope** | **0.4-6 ms** | **< 30 ms (BQ)** | **0.5-1.3 ms (sub-ms regardless of repo size)** |
+| **Codescope** | **0.4-6 ms** | **< 30 ms (BQ)** | **3-10 ms end-to-end via `impact_analysis` (single-digit ms regardless of repo size)** |
 | **Bloop** | Sub-second | 2-4s (with LLM) | N/A |
 | **Sourcegraph** | ~100ms p99/shard | N/A | SCIP navigation |
 | **GitHub Search** | ~100ms p99/shard | N/A | N/A |
@@ -202,7 +214,7 @@ Binary Quantization (BQ) converts float32 embeddings to packed binary vectors fo
 ### Key Differentiators
 
 1. **Only local graph-based tool** - Greptile uses graph + vector but is cloud-only. Codescope runs entirely on your machine.
-2. **Sub-millisecond multi-hop graph traversal** - 3-hop transitive impact in 0.5-1.3ms across repos from 11k to 45k edges. Cursor/Windsurf cannot answer this query at all; Sourcegraph SCIP navigation is single-step.
+2. **Single-digit-millisecond multi-hop graph traversal** - The `impact_analysis` MCP tool returns 3-hop transitive impact in roughly 3-10 ms end-to-end across repos from 11k to 45k edges (21-53× faster than the previous WHERE-filter implementation). Cursor/Windsurf cannot answer this query at all; Sourcegraph SCIP navigation is single-step.
 3. **32x memory-efficient semantic search** - Binary Quantization not available in any competitor.
 4. **99%+ token savings** - No competitor publishes this metric. Graph-based retrieval returns only what's needed.
 5. **52 MCP tools** - Richest tool set for AI agents (Greptile: API only, Bloop: 0 MCP, gstack: skills only).

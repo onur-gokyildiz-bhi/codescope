@@ -252,6 +252,21 @@ async fn main() -> Result<()> {
             "SELECT out.name AS name, count() AS callers \
              FROM calls GROUP BY out.name ORDER BY callers DESC LIMIT 10".to_string(),
         ),
+
+        // Production-shape impact_analysis per-hop query.
+        // This is the EXACT query pattern that the MCP tool
+        // `impact_analysis` uses after the 2026-04-12 rewrite:
+        // native inverse traversal returning full caller records.
+        // Shipping this as a bench query means the BENCHMARKS.md
+        // numbers and the MCP tool's real latency are verifiably
+        // the same pattern.
+        (
+            "impact_analysis_prod_shape",
+            format!(
+                "SELECT <-calls<-`function` AS callers \
+                 FROM `function` WHERE name IN ['{safe_target}']"
+            ),
+        ),
     ];
 
     let mut query_metrics = Vec::new();
