@@ -56,7 +56,10 @@ impl GraphRagServer {
         };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
-        let head_ref_str = params.head_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+        let head_ref_str = params
+            .head_ref
+            .clone()
+            .unwrap_or_else(|| "HEAD".to_string());
 
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(Vec<String>, std::collections::HashMap<String, Vec<(String, usize)>>)> {
             let repo = git2::Repository::open(&git_path)?;
@@ -93,7 +96,10 @@ impl GraphRagServer {
             std::collections::HashMap::new();
         for (author, files) in &contributor_map {
             for (file, count) in files {
-                if changed_files.iter().any(|cf| file.contains(cf) || cf.contains(file)) {
+                if changed_files
+                    .iter()
+                    .any(|cf| file.contains(cf) || cf.contains(file))
+                {
                     *reviewer_scores.entry(author.clone()).or_insert(0) += count;
                 }
             }

@@ -81,7 +81,10 @@ pub async fn stop(port: u16) -> Result<()> {
             .output();
         match result {
             Ok(output) if output.status.success() => eprintln!("Daemon (PID {}) stopped.", pid),
-            _ => eprintln!("Could not stop daemon (PID {}). May have already exited.", pid),
+            _ => eprintln!(
+                "Could not stop daemon (PID {}). May have already exited.",
+                pid
+            ),
         }
     }
     #[cfg(not(windows))]
@@ -91,7 +94,10 @@ pub async fn stop(port: u16) -> Result<()> {
             .output();
         match result {
             Ok(output) if output.status.success() => eprintln!("Daemon (PID {}) stopped.", pid),
-            _ => eprintln!("Could not stop daemon (PID {}). May have already exited.", pid),
+            _ => eprintln!(
+                "Could not stop daemon (PID {}). May have already exited.",
+                pid
+            ),
         }
     }
 

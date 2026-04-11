@@ -47,7 +47,9 @@ impl GraphRagServer {
         if let Some(info) = func_info.first() {
             output.push_str(&format!(
                 "**Location:** {}:{}\n\n",
-                info.get("file_path").and_then(|v| v.as_str()).unwrap_or("?"),
+                info.get("file_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?"),
                 info.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0),
             ));
         }
@@ -199,7 +201,10 @@ impl GraphRagServer {
                 }
 
                 if output.lines().count() <= 3 {
-                    format!("No type '{}' found or no inheritance relationships.", params.name)
+                    format!(
+                        "No type '{}' found or no inheritance relationships.",
+                        params.name
+                    )
                 } else {
                     output
                 }

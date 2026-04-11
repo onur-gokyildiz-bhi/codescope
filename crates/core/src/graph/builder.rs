@@ -125,7 +125,10 @@ impl GraphBuilder {
                         if let Err(e) = r {
                             if has_calls && batch_ok {
                                 warn!("Statement {} in batch failed: {}", i, e);
-                                warn!("  Relation: {:?} {} -> {}", rel.kind, rel.from_entity, rel.to_entity);
+                                warn!(
+                                    "  Relation: {:?} {} -> {}",
+                                    rel.kind, rel.from_entity, rel.to_entity
+                                );
                                 warn!("  Query sample: {}", &query[..query.len().min(500)]);
                             }
                             batch_ok = false;
@@ -133,7 +136,10 @@ impl GraphBuilder {
                     }
                     total += chunk.len();
                     if has_calls {
-                        let call_count = chunk.iter().filter(|r| r.kind == crate::RelationKind::Calls).count();
+                        let call_count = chunk
+                            .iter()
+                            .filter(|r| r.kind == crate::RelationKind::Calls)
+                            .count();
                         debug!("Batch with {} calls, ok={}", call_count, batch_ok);
                     }
                 }
@@ -141,7 +147,9 @@ impl GraphBuilder {
                     if has_calls {
                         warn!("Batch with calls FAILED: {}", e);
                         // Log the first calls relation for debugging
-                        if let Some(call) = chunk.iter().find(|r| r.kind == crate::RelationKind::Calls) {
+                        if let Some(call) =
+                            chunk.iter().find(|r| r.kind == crate::RelationKind::Calls)
+                        {
                             warn!("  Sample call: {} -> {}", call.from_entity, call.to_entity);
                         }
                     }

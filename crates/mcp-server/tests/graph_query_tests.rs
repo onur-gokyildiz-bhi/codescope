@@ -117,10 +117,7 @@ async fn find_function_exact_match() {
     let (_db, gq) = setup().await;
     let results = gq.find_function("parse_file").await.unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(
-        results[0].file_path.as_deref(),
-        Some("src/parser.rs")
-    );
+    assert_eq!(results[0].file_path.as_deref(), Some("src/parser.rs"));
 }
 
 #[tokio::test]
@@ -156,10 +153,7 @@ async fn find_callees_returns_correct_callees() {
     let (_db, gq) = setup().await;
     let callees = gq.find_callees("main").await.unwrap();
     assert_eq!(callees.len(), 2, "main calls parse_file and write_output");
-    let names: Vec<&str> = callees
-        .iter()
-        .filter_map(|c| c.name.as_deref())
-        .collect();
+    let names: Vec<&str> = callees.iter().filter_map(|c| c.name.as_deref()).collect();
     assert!(names.contains(&"parse_file"));
     assert!(names.contains(&"write_output"));
 }

@@ -48,9 +48,15 @@ impl GraphRagServer {
                     let lines = end.saturating_sub(start);
                     let sig = f.get("signature").and_then(|v| v.as_str()).unwrap_or("");
                     if sig.is_empty() {
-                        output.push_str(&format!("- **{}** (L{}-{}, {} lines)\n", name, start, end, lines));
+                        output.push_str(&format!(
+                            "- **{}** (L{}-{}, {} lines)\n",
+                            name, start, end, lines
+                        ));
                     } else {
-                        output.push_str(&format!("- **{}** (L{}-{}, {} lines) `{}`\n", name, start, end, lines, sig));
+                        output.push_str(&format!(
+                            "- **{}** (L{}-{}, {} lines) `{}`\n",
+                            name, start, end, lines, sig
+                        ));
                     }
                 }
 
@@ -72,7 +78,10 @@ impl GraphRagServer {
                             let start = c.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
                             let end = c.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
                             let lines = end.saturating_sub(start);
-                            output.push_str(&format!("- **{}** (L{}-{}, {} lines)\n", name, start, end, lines));
+                            output.push_str(&format!(
+                                "- **{}** (L{}-{}, {} lines)\n",
+                                name, start, end, lines
+                            ));
                         }
                     }
                 }
@@ -120,7 +129,8 @@ impl GraphRagServer {
                         let out_c = c.get("out_calls").and_then(|v| v.as_u64()).unwrap_or(0);
                         let in_c = c.get("in_calls").and_then(|v| v.as_u64()).unwrap_or(0);
                         let total = c.get("total_edges").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| {} | {} | {} | {} |\n", fp, out_c, in_c, total));
+                        output
+                            .push_str(&format!("| {} | {} | {} | {} |\n", fp, out_c, in_c, total));
                     }
                     output.push('\n');
                 }
@@ -145,7 +155,10 @@ impl GraphRagServer {
                         let callers = b.get("callers").and_then(|v| v.as_u64()).unwrap_or(0);
                         let callees = b.get("callees").and_then(|v| v.as_u64()).unwrap_or(0);
                         let score = b.get("bridge_score").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| **{}** | {} | {} | {} | {} |\n", name, fp, callers, callees, score));
+                        output.push_str(&format!(
+                            "| **{}** | {} | {} | {} | {} |\n",
+                            name, fp, callers, callees, score
+                        ));
                     }
                     output.push('\n');
                 }
@@ -164,7 +177,13 @@ impl GraphRagServer {
                         let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                         let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                         let deg = c.get("in_degree").and_then(|v| v.as_u64()).unwrap_or(0);
-                        output.push_str(&format!("| {} | **{}** | {} | {} |\n", i + 1, name, fp, deg));
+                        output.push_str(&format!(
+                            "| {} | **{}** | {} | {} |\n",
+                            i + 1,
+                            name,
+                            fp,
+                            deg
+                        ));
                     }
                 }
             }
@@ -273,7 +292,10 @@ impl GraphRagServer {
         for tf in &top_functions {
             let name = tf.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
             let fp = tf.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-            let lang = tf.get("language").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let lang = tf
+                .get("language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             let start = tf.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
             let end = tf.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0);
             let sig = tf.get("signature").and_then(|v| v.as_str()).unwrap_or("");
@@ -390,7 +412,10 @@ impl GraphRagServer {
             _ => unreachable!(),
         };
 
-        let agent = params.agent.clone().unwrap_or_else(|| "unknown".to_string());
+        let agent = params
+            .agent
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
 
         let scope = params.file_path.as_deref().map(derive_scope_from_file_path);
 
@@ -546,7 +571,10 @@ impl GraphRagServer {
             if profile.is_empty() {
                 return "Project is indexed but no profile data available. Try re-indexing.".into();
             }
-            return format!("Project already indexed. Here is the current profile:\n\n{}", profile);
+            return format!(
+                "Project already indexed. Here is the current profile:\n\n{}",
+                profile
+            );
         }
 
         let mut context_from_files = String::new();
@@ -556,7 +584,8 @@ impl GraphRagServer {
             if file_path.is_file() {
                 if let Ok(content) = std::fs::read_to_string(&file_path) {
                     let truncated: String = content.chars().take(2000).collect();
-                    context_from_files.push_str(&format!("### From {}\n{}\n\n", filename, truncated));
+                    context_from_files
+                        .push_str(&format!("### From {}\n{}\n\n", filename, truncated));
                 }
             }
         }
@@ -570,7 +599,8 @@ impl GraphRagServer {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("doc");
                             let truncated: String = content.chars().take(1000).collect();
-                            context_from_files.push_str(&format!("### From docs/{}\n{}\n\n", fname, truncated));
+                            context_from_files
+                                .push_str(&format!("### From docs/{}\n{}\n\n", fname, truncated));
                         }
                     }
                 }
@@ -589,13 +619,16 @@ impl GraphRagServer {
                 } else {
                     "javascript".to_string()
                 }
-            } else if codebase.join("pyproject.toml").is_file() || codebase.join("requirements.txt").is_file() {
+            } else if codebase.join("pyproject.toml").is_file()
+                || codebase.join("requirements.txt").is_file()
+            {
                 "python".to_string()
             } else if codebase.join("pubspec.yaml").is_file() {
                 "dart".to_string()
             } else if codebase.join("go.mod").is_file() {
                 "go".to_string()
-            } else if codebase.join("Project.csproj").is_file() || codebase.join("*.sln").is_file() {
+            } else if codebase.join("Project.csproj").is_file() || codebase.join("*.sln").is_file()
+            {
                 "csharp".to_string()
             } else {
                 "unknown".to_string()

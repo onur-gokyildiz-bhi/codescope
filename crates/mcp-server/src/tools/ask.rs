@@ -121,8 +121,16 @@ impl GraphRagServer {
 
                 all_results.sort_by(|a, b| {
                     let score = |v: &serde_json::Value| -> usize {
-                        let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
-                        let qname = v.get("qualified_name").and_then(|n| n.as_str()).unwrap_or("").to_lowercase();
+                        let name = v
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        let qname = v
+                            .get("qualified_name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         parsed
                             .search_terms
                             .iter()
@@ -144,7 +152,11 @@ impl GraphRagServer {
             }
 
             nlp::Intent::CallGraph(direction) => {
-                let func_name = parsed.search_terms.first().map(|s| s.as_str()).unwrap_or("");
+                let func_name = parsed
+                    .search_terms
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 if func_name.is_empty() {
                     return "Which function? Try: 'what calls parse_file?' or 'call graph for embed_functions'".into();
                 }
@@ -158,7 +170,9 @@ impl GraphRagServer {
                                     "- `{}` in {} (line {})\n",
                                     r.name.as_deref().unwrap_or("?"),
                                     r.file_path.as_deref().unwrap_or("?"),
-                                    r.start_line.map(|l| l.to_string()).unwrap_or_else(|| "?".into())
+                                    r.start_line
+                                        .map(|l| l.to_string())
+                                        .unwrap_or_else(|| "?".into())
                                 ));
                             }
                             if results.is_empty() {
@@ -177,7 +191,9 @@ impl GraphRagServer {
                                     "- `{}` in {} (line {})\n",
                                     r.name.as_deref().unwrap_or("?"),
                                     r.file_path.as_deref().unwrap_or("?"),
-                                    r.start_line.map(|l| l.to_string()).unwrap_or_else(|| "?".into())
+                                    r.start_line
+                                        .map(|l| l.to_string())
+                                        .unwrap_or_else(|| "?".into())
                                 ));
                             }
                             if results.is_empty() {
@@ -221,8 +237,12 @@ impl GraphRagServer {
                             out.push_str(&format!(
                                 "- `{}` (line {}–{})\n",
                                 r.name.as_deref().unwrap_or("?"),
-                                r.start_line.map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
-                                r.end_line.map(|l| l.to_string()).unwrap_or_else(|| "?".into())
+                                r.start_line
+                                    .map(|l| l.to_string())
+                                    .unwrap_or_else(|| "?".into()),
+                                r.end_line
+                                    .map(|l| l.to_string())
+                                    .unwrap_or_else(|| "?".into())
                             ));
                         }
                         if results.is_empty() {

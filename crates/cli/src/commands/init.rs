@@ -147,7 +147,10 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
     let elapsed = start.elapsed();
     println!(
         "   {} files, {} entities, {} relations ({:.1}s)",
-        file_count, entity_count, relation_count, elapsed.as_secs_f64()
+        file_count,
+        entity_count,
+        relation_count,
+        elapsed.as_secs_f64()
     );
 
     // Step 5: Summary

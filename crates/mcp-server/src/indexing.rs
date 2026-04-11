@@ -45,13 +45,13 @@ type ParseResult = (
 );
 
 impl IndexingPipeline {
-    pub fn new(
-        db: Surreal<Db>,
-        repo: String,
-        path: PathBuf,
-        mcp: GraphRagServer,
-    ) -> Arc<Self> {
-        Arc::new(Self { db, repo, path, mcp })
+    pub fn new(db: Surreal<Db>, repo: String, path: PathBuf, mcp: GraphRagServer) -> Arc<Self> {
+        Arc::new(Self {
+            db,
+            repo,
+            path,
+            mcp,
+        })
     }
 
     /// Run all phases sequentially. Each phase logs its own errors.
@@ -376,9 +376,7 @@ impl IndexingPipeline {
 
                     if let Ok((entities, relations, _)) =
                         codescope_core::conversation::parse_conversation(
-                            jsonl_path,
-                            &self.repo,
-                            &known,
+                            jsonl_path, &self.repo, &known,
                         )
                     {
                         if let Err(e) = builder.insert_entities(&entities).await {

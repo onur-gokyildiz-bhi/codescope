@@ -52,8 +52,7 @@ pub struct ParsedQuestion {
 fn is_count_keyword(w: &str) -> bool {
     matches!(
         w,
-        "how" | "many" | "count" | "total" | "number"
-            | "kaç" | "kac" | "tane" | "sayı" | "sayi"
+        "how" | "many" | "count" | "total" | "number" | "kaç" | "kac" | "tane" | "sayı" | "sayi"
     )
 }
 
@@ -61,8 +60,17 @@ fn is_count_keyword(w: &str) -> bool {
 fn is_list_keyword(w: &str) -> bool {
     matches!(
         w,
-        "list" | "show" | "display" | "all" | "every"
-            | "listele" | "göster" | "goster" | "hepsi" | "tüm" | "tum"
+        "list"
+            | "show"
+            | "display"
+            | "all"
+            | "every"
+            | "listele"
+            | "göster"
+            | "goster"
+            | "hepsi"
+            | "tüm"
+            | "tum"
     )
 }
 
@@ -71,22 +79,40 @@ fn is_list_keyword(w: &str) -> bool {
 fn is_qualifier_keyword(w: &str) -> bool {
     matches!(
         w,
-        "related" | "about" | "matching" | "named" | "called" | "containing"
-            | "like" | "similar" | "with" | "where" | "that" | "which"
-            | "ilgili" | "adlı" | "adli" | "benzer" | "olan" | "içeren" | "iceren"
+        "related"
+            | "about"
+            | "matching"
+            | "named"
+            | "called"
+            | "containing"
+            | "like"
+            | "similar"
+            | "with"
+            | "where"
+            | "that"
+            | "which"
+            | "ilgili"
+            | "adlı"
+            | "adli"
+            | "benzer"
+            | "olan"
+            | "içeren"
+            | "iceren"
     )
 }
 
 fn is_caller_keyword(w: &str) -> bool {
     matches!(
         w,
-        "caller" | "callers" | "calls" | "who" | "what"
-            | "çağıran" | "cagiran" | "kim"
+        "caller" | "callers" | "calls" | "who" | "what" | "çağıran" | "cagiran" | "kim"
     )
 }
 
 fn is_callee_keyword(w: &str) -> bool {
-    matches!(w, "callee" | "callees" | "called" | "çağırdığı" | "cagirdigi")
+    matches!(
+        w,
+        "callee" | "callees" | "called" | "çağırdığı" | "cagirdigi"
+    )
 }
 
 #[allow(dead_code)]
@@ -98,8 +124,16 @@ fn is_callgraph_keyword(w: &str) -> bool {
 fn is_size_keyword(w: &str) -> bool {
     matches!(
         w,
-        "largest" | "biggest" | "longest" | "huge" | "complex"
-            | "büyük" | "buyuk" | "uzun" | "karmaşık" | "karmasik"
+        "largest"
+            | "biggest"
+            | "longest"
+            | "huge"
+            | "complex"
+            | "büyük"
+            | "buyuk"
+            | "uzun"
+            | "karmaşık"
+            | "karmasik"
     )
 }
 

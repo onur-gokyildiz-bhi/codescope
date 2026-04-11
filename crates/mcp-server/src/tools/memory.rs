@@ -46,7 +46,10 @@ impl GraphRagServer {
             .bind(("ts", ts))
             .await
         {
-            Ok(_) => format!("Memory saved. Accessible by all agents connected to '{}'.", ctx.repo_name),
+            Ok(_) => format!(
+                "Memory saved. Accessible by all agents connected to '{}'.",
+                ctx.repo_name
+            ),
             Err(e) => format!("Error saving memory: {}", e),
         }
     }
@@ -107,7 +110,11 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No memories found for '{}'", params.query);
                 }
-                let mut output = format!("## Memory Search: '{}' ({} results)\n\n", params.query, results.len());
+                let mut output = format!(
+                    "## Memory Search: '{}' ({} results)\n\n",
+                    params.query,
+                    results.len()
+                );
                 for item in &results {
                     let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
                     let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
@@ -166,14 +173,20 @@ impl GraphRagServer {
                     total += updated.len();
                 }
                 if total == 0 {
-                    format!("No matching memories found for '{}'. Try a broader name.", params.name)
+                    format!(
+                        "No matching memories found for '{}'. Try a broader name.",
+                        params.name
+                    )
                 } else {
                     let tier_label = match params.tier {
                         0 => "critical (always shown)",
                         1 => "important",
                         _ => "contextual",
                     };
-                    format!("Updated {} record(s) matching '{}' to tier {} ({}).", total, params.name, params.tier, tier_label)
+                    format!(
+                        "Updated {} record(s) matching '{}' to tier {} ({}).",
+                        total, params.name, params.tier, tier_label
+                    )
                 }
             }
             Err(e) => format!("Error pinning memory: {}", e),

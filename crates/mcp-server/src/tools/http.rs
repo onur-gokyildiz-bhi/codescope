@@ -43,10 +43,7 @@ impl GraphRagServer {
     #[tool(
         description = "Find all code functions that call a specific HTTP endpoint by URL pattern. Example: '/users' finds all code that makes HTTP requests to any /users endpoint. Shows the calling function, HTTP method, and location."
     )]
-    async fn find_endpoint_callers(
-        &self,
-        Parameters(params): Parameters<SearchParams>,
-    ) -> String {
+    async fn find_endpoint_callers(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
@@ -73,7 +70,11 @@ impl GraphRagServer {
                     let http_call = r.get("http_call").and_then(|v| v.as_str()).unwrap_or("?");
                     output.push_str(&format!(
                         "{}. **{}** ({}) calls {} {}\n",
-                        i + 1, caller, file, method, http_call,
+                        i + 1,
+                        caller,
+                        file,
+                        method,
+                        http_call,
                     ));
                 }
                 output

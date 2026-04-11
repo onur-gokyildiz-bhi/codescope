@@ -413,8 +413,11 @@ async fn api_graph(
                     }
                 }
 
-
-                Json(GraphData { nodes, links: edges }).into_response()
+                Json(GraphData {
+                    nodes,
+                    links: edges,
+                })
+                .into_response()
             }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
@@ -556,7 +559,11 @@ async fn api_graph(
             });
         }
 
-        Json(GraphData { nodes, links: edges }).into_response()
+        Json(GraphData {
+            nodes,
+            links: edges,
+        })
+        .into_response()
     }
 }
 

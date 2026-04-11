@@ -197,7 +197,12 @@ fn global_repo_flag() {
 #[test]
 fn global_db_path_flag() {
     let cli = parse(&["--db-path", "/tmp/db", "stats"]);
-    assert_eq!(cli.db_path.as_deref().map(|p| p.to_string_lossy().to_string()), Some("/tmp/db".to_string()));
+    assert_eq!(
+        cli.db_path
+            .as_deref()
+            .map(|p| p.to_string_lossy().to_string()),
+        Some("/tmp/db".to_string())
+    );
 }
 
 // ── Daemon control ──────────────────────────────────────────────
@@ -223,6 +228,8 @@ fn languages_command_parses() {
 fn version_flag_works() {
     // -V / --version should exit cleanly (clap returns DisplayVersion error)
     let result = Cli::try_parse_from(["codescope", "--version"]);
-    let err = result.err().expect("--version should produce DisplayVersion error");
+    let err = result
+        .err()
+        .expect("--version should produce DisplayVersion error");
     assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
 }

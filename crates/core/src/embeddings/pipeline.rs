@@ -169,12 +169,7 @@ impl EmbeddingPipeline {
                          UPDATE type::thing('function', $item.id) \
                          SET embedding = $item.embedding, binary_embedding = $item.bq; \
                          }";
-            match self
-                .db
-                .query(surql)
-                .bind(("updates", chunk.to_vec()))
-                .await
-            {
+            match self.db.query(surql).bind(("updates", chunk.to_vec())).await {
                 Ok(_) => total += chunk.len(),
                 Err(e) => {
                     warn!(

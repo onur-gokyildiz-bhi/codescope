@@ -33,7 +33,9 @@ impl GraphRagServer {
                     Ok(k) => k,
                     Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
                 };
-                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(
+                    api_key, None,
+                ))
             }
             _ => match codescope_core::embeddings::FastEmbedProvider::new() {
                 Ok(p) => Box::new(p),
@@ -97,7 +99,9 @@ impl GraphRagServer {
                     Ok(k) => k,
                     Err(_) => return "OPENAI_API_KEY environment variable not set.".into(),
                 };
-                Box::new(codescope_core::embeddings::OpenAIProvider::new(api_key, None))
+                Box::new(codescope_core::embeddings::OpenAIProvider::new(
+                    api_key, None,
+                ))
             }
             _ => match codescope_core::embeddings::FastEmbedProvider::new() {
                 Ok(p) => Box::new(p),
@@ -126,8 +130,14 @@ impl GraphRagServer {
                     params.query, mode
                 );
                 for (i, r) in results.iter().enumerate() {
-                    let score = r.score.map(|s| format!("{:.3}", s)).unwrap_or_else(|| "?".into());
-                    let hamming = r.hamming_distance.map(|h| format!(" (hamming: {})", h)).unwrap_or_default();
+                    let score = r
+                        .score
+                        .map(|s| format!("{:.3}", s))
+                        .unwrap_or_else(|| "?".into());
+                    let hamming = r
+                        .hamming_distance
+                        .map(|h| format!(" (hamming: {})", h))
+                        .unwrap_or_default();
                     output.push_str(&format!(
                         "{}. **{}** ({}) — cosine: {}{}\n",
                         i + 1,

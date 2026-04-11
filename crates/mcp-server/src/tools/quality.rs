@@ -61,10 +61,14 @@ impl GraphRagServer {
             Ok(mut response) => {
                 let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
                 if results.is_empty() {
-                    return "No dead code found (all functions have callers or are entry points).".into();
+                    return "No dead code found (all functions have callers or are entry points)."
+                        .into();
                 }
 
-                let mut output = format!("## Dead Code: {} potentially unused functions\n\n", results.len());
+                let mut output = format!(
+                    "## Dead Code: {} potentially unused functions\n\n",
+                    results.len()
+                );
                 output.push_str("| # | Function | File | Lines | Size |\n");
                 output.push_str("|---|----------|------|-------|------|\n");
 
@@ -73,10 +77,20 @@ impl GraphRagServer {
                     let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                     let start = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
                     let size = r.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("| {} | **{}** | {} | L{} | {} lines |\n", i + 1, name, fp, start, size));
+                    output.push_str(&format!(
+                        "| {} | **{}** | {} | L{} | {} lines |\n",
+                        i + 1,
+                        name,
+                        fp,
+                        start,
+                        size
+                    ));
                 }
 
-                output.push_str(&format!("\n*Filtered: min {} lines, excluded main/test/handler/trait impls.*", min_lines));
+                output.push_str(&format!(
+                    "\n*Filtered: min {} lines, excluded main/test/handler/trait impls.*",
+                    min_lines
+                ));
                 output
             }
             Err(e) => format!("Error finding dead code: {}", e),
@@ -103,7 +117,10 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&god_q).await {
             let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!("### God Functions (>200 lines): {}\n", results.len()));
+            output.push_str(&format!(
+                "### God Functions (>200 lines): {}\n",
+                results.len()
+            ));
             if results.is_empty() {
                 output.push_str("None found.\n\n");
             } else {
@@ -125,7 +142,10 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&fanin_q).await {
             let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!("### High Fan-In (most callers): {}\n", results.len()));
+            output.push_str(&format!(
+                "### High Fan-In (most callers): {}\n",
+                results.len()
+            ));
             if !results.is_empty() {
                 output.push_str("| Function | File | Callers |\n|----------|------|---------|\n");
                 for r in &results {
@@ -145,7 +165,10 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&fanout_q).await {
             let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!("### High Fan-Out (most callees): {}\n", results.len()));
+            output.push_str(&format!(
+                "### High Fan-Out (most callees): {}\n",
+                results.len()
+            ));
             if !results.is_empty() {
                 output.push_str("| Function | File | Callees |\n|----------|------|---------|\n");
                 for r in &results {
@@ -164,7 +187,10 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&dense_q).await {
             let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!("### Dense Files (most functions): {}\n", results.len()));
+            output.push_str(&format!(
+                "### Dense Files (most functions): {}\n",
+                results.len()
+            ));
             if !results.is_empty() {
                 output.push_str("| File | Functions |\n|------|-----------|\n");
                 for r in &results {
@@ -177,7 +203,10 @@ impl GraphRagServer {
         }
 
         let gq = GraphQuery::new(ctx.db.clone());
-        let cycles = gq.detect_circular_deps(&ctx.repo_name).await.unwrap_or_default();
+        let cycles = gq
+            .detect_circular_deps(&ctx.repo_name)
+            .await
+            .unwrap_or_default();
         if !cycles.is_empty() {
             output.push_str(&format!("\n### Circular Dependencies ({})\n", cycles.len()));
             for c in &cycles {
@@ -187,14 +216,22 @@ impl GraphRagServer {
             }
         }
 
-        let dupes = gq.find_duplicate_functions(&ctx.repo_name).await.unwrap_or_default();
+        let dupes = gq
+            .find_duplicate_functions(&ctx.repo_name)
+            .await
+            .unwrap_or_default();
         if !dupes.is_empty() {
             output.push_str(&format!("\n### Duplicate Functions ({})\n", dupes.len()));
             for d in &dupes {
                 let names = d
                     .get("names")
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "))
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
                     .unwrap_or_default();
                 let cnt = d.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
                 output.push_str(&format!("- {} identical copies: {}\n", cnt, names));
@@ -290,9 +327,24 @@ impl GraphRagServer {
                 let total = snake + camel + pascal;
                 if total > 0 {
                     output.push_str("### Naming Conventions\n");
-                    output.push_str(&format!("- snake_case: {}% ({}/{})\n", snake * 100 / total, snake, total));
-                    output.push_str(&format!("- camelCase: {}% ({}/{})\n", camel * 100 / total, camel, total));
-                    output.push_str(&format!("- PascalCase: {}% ({}/{})\n\n", pascal * 100 / total, pascal, total));
+                    output.push_str(&format!(
+                        "- snake_case: {}% ({}/{})\n",
+                        snake * 100 / total,
+                        snake,
+                        total
+                    ));
+                    output.push_str(&format!(
+                        "- camelCase: {}% ({}/{})\n",
+                        camel * 100 / total,
+                        camel,
+                        total
+                    ));
+                    output.push_str(&format!(
+                        "- PascalCase: {}% ({}/{})\n\n",
+                        pascal * 100 / total,
+                        pascal,
+                        total
+                    ));
                 }
             }
         }
@@ -353,14 +405,18 @@ impl GraphRagServer {
                 if let Some(s) = stats.first() {
                     let avg = s.get("avg_size").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let max = s.get("max_size").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("### Function Size\n- Average: {:.0} lines\n- Largest: {} lines\n\n", avg, max));
+                    output.push_str(&format!(
+                        "### Function Size\n- Average: {:.0} lines\n- Largest: {} lines\n\n",
+                        avg, max
+                    ));
                 }
             }
 
             let dir_q = "SELECT file_path FROM file LIMIT 500";
             if let Ok(mut r) = ctx.db.query(dir_q).await {
                 let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-                let mut dirs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                let mut dirs: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for f in &files {
                     let fp = f.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
                     if let Some(first) = fp.split('/').next() {
@@ -401,23 +457,37 @@ impl GraphRagServer {
         if let Ok(mut r) = ctx.db.query(&file_q).await {
             let files: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
             if let Some(f) = files.first() {
-                lang = f.get("language").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                lang = f
+                    .get("language")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
             }
         }
 
         let name = &params.entity_name;
         let has_underscore = name.contains('_');
-        let starts_lower = name.chars().next().map(|c| c.is_lowercase()).unwrap_or(true);
+        let starts_lower = name
+            .chars()
+            .next()
+            .map(|c| c.is_lowercase())
+            .unwrap_or(true);
 
         match lang.as_str() {
             "rust" | "python" | "ruby" | "elixir" => {
                 if !has_underscore && name.len() > 3 && starts_lower {
-                    warnings.push(format!("Naming: '{}' uses camelCase but {} convention is snake_case", name, lang));
+                    warnings.push(format!(
+                        "Naming: '{}' uses camelCase but {} convention is snake_case",
+                        name, lang
+                    ));
                 }
             }
             "typescript" | "javascript" | "java" | "dart" | "kotlin" | "go" => {
                 if has_underscore && starts_lower {
-                    warnings.push(format!("Naming: '{}' uses snake_case but {} convention is camelCase", name, lang));
+                    warnings.push(format!(
+                        "Naming: '{}' uses snake_case but {} convention is camelCase",
+                        name, lang
+                    ));
                 }
             }
             _ => {}
@@ -429,19 +499,33 @@ impl GraphRagServer {
         );
         if let Ok(mut r) = ctx.db.query(&siblings_q).await {
             let siblings: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            let sibling_names: Vec<&str> = siblings.iter().filter_map(|s| s.get("name").and_then(|v| v.as_str())).collect();
+            let sibling_names: Vec<&str> = siblings
+                .iter()
+                .filter_map(|s| s.get("name").and_then(|v| v.as_str()))
+                .collect();
 
             if !sibling_names.is_empty() {
                 let snake_count = sibling_names.iter().filter(|n| n.contains('_')).count();
                 let ratio = snake_count as f32 / sibling_names.len() as f32;
 
                 if ratio > 0.7 && !has_underscore && name.len() > 3 {
-                    warnings.push(format!("Style: {}% of siblings use snake_case, but '{}' doesn't", (ratio * 100.0) as u32, name));
+                    warnings.push(format!(
+                        "Style: {}% of siblings use snake_case, but '{}' doesn't",
+                        (ratio * 100.0) as u32,
+                        name
+                    ));
                 } else if ratio < 0.3 && has_underscore {
-                    warnings.push(format!("Style: {}% of siblings use camelCase, but '{}' uses snake_case", ((1.0 - ratio) * 100.0) as u32, name));
+                    warnings.push(format!(
+                        "Style: {}% of siblings use camelCase, but '{}' uses snake_case",
+                        ((1.0 - ratio) * 100.0) as u32,
+                        name
+                    ));
                 }
 
-                info.push(format!("File has {} existing functions", sibling_names.len()));
+                info.push(format!(
+                    "File has {} existing functions",
+                    sibling_names.len()
+                ));
             }
         }
 
@@ -454,13 +538,19 @@ impl GraphRagServer {
             if let Some(s) = sizes.first() {
                 let lines = s.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
                 if lines > 500 {
-                    warnings.push(format!("File size: {} lines — consider splitting into smaller modules", lines));
+                    warnings.push(format!(
+                        "File size: {} lines — consider splitting into smaller modules",
+                        lines
+                    ));
                 }
                 info.push(format!("File is {} lines", lines));
             }
         }
 
-        let mut output = format!("## Edit Preflight: {} in {}\n\n", params.entity_name, params.file_path);
+        let mut output = format!(
+            "## Edit Preflight: {} in {}\n\n",
+            params.entity_name, params.file_path
+        );
         output.push_str(&format!("**Language:** {}\n\n", lang));
 
         if warnings.is_empty() {

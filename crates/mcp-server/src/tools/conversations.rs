@@ -72,7 +72,10 @@ impl GraphRagServer {
         };
 
         if jsonl_files.is_empty() {
-            return format!("No JSONL conversation files found in {}", project_dir.display());
+            return format!(
+                "No JSONL conversation files found in {}",
+                project_dir.display()
+            );
         }
 
         let known_entities = load_known_entities(&ctx.db).await;
@@ -145,7 +148,11 @@ impl GraphRagServer {
                                 memory_count += 1;
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to parse memory file {}: {}", path.display(), e);
+                                tracing::warn!(
+                                    "Failed to parse memory file {}: {}",
+                                    path.display(),
+                                    e
+                                );
                             }
                         }
                     }
@@ -350,7 +357,10 @@ impl GraphRagServer {
         for item in &all_results {
             let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("?");
             let item_name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            let timestamp = item.get("timestamp").and_then(|v| v.as_str()).unwrap_or("?");
+            let timestamp = item
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
             let icon = match item_type {

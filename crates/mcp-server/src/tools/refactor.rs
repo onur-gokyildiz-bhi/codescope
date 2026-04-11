@@ -92,7 +92,10 @@ impl GraphRagServer {
                     let sig = r.get("signature").and_then(|v| v.as_str()).unwrap_or("");
                     output.push_str(&format!(
                         "{}. **{}** ({}, {} lines)\n",
-                        i + 1, name, file, lines
+                        i + 1,
+                        name,
+                        file,
+                        lines
                     ));
                     if !sig.is_empty() {
                         output.push_str(&format!("   `{}`\n", sig));

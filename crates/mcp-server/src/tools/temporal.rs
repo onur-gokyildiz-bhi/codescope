@@ -157,7 +157,10 @@ impl GraphRagServer {
         };
         let git_path = ctx.codebase_path.clone();
         let base_ref = params.base_ref.clone();
-        let head_ref_str = params.head_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+        let head_ref_str = params
+            .head_ref
+            .clone()
+            .unwrap_or_else(|| "HEAD".to_string());
 
         let changed_files =
             match tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<(String, String)>> {
@@ -232,16 +235,11 @@ impl GraphRagServer {
                             for row in rows {
                                 let fp =
                                     row.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-                                let name =
-                                    row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let sl = row
-                                    .get("start_line")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0) as u32;
-                                let el = row
-                                    .get("end_line")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0) as u32;
+                                let name = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                let sl = row.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0)
+                                    as u32;
+                                let el = row.get("end_line").and_then(|v| v.as_u64()).unwrap_or(0)
+                                    as u32;
                                 entities_by_file.entry(fp.to_string()).or_default().push((
                                     name.to_string(),
                                     sl,

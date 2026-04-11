@@ -145,8 +145,14 @@ impl GraphRagServer {
 
                 if let Some(skill) = result.get("skill") {
                     let name = skill.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let desc = skill.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let ntype = skill.get("node_type").and_then(|v| v.as_str()).unwrap_or("skill");
+                    let desc = skill
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let ntype = skill
+                        .get("node_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("skill");
                     output.push_str(&format!("# {} [{}]\n\n", name, ntype));
                     if !desc.is_empty() {
                         output.push_str(&format!("{}\n\n", desc));
@@ -158,7 +164,10 @@ impl GraphRagServer {
                         output.push_str("## Links To\n\n");
                         for link in links {
                             let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let desc = link.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                            let desc = link
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             let ctx = link.get("context").and_then(|v| v.as_str()).unwrap_or("");
                             output.push_str(&format!("- [[{}]]", name));
                             if !desc.is_empty() {
@@ -178,7 +187,10 @@ impl GraphRagServer {
                         output.push_str("## Linked From\n\n");
                         for link in links {
                             let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let desc = link.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                            let desc = link
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             output.push_str(&format!("- [[{}]]", name));
                             if !desc.is_empty() {
                                 output.push_str(&format!(" — {}", desc));
@@ -249,9 +261,20 @@ impl GraphRagServer {
             ("solution", &solutions),
         ] {
             for item in items {
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let body = item.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let ts = item.get("timestamp").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let body = item
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ts = item
+                    .get("timestamp")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 if !name.is_empty() {
                     segments.push((kind.to_string(), name, body, ts));
                 }

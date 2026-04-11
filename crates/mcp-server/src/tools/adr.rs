@@ -30,7 +30,10 @@ impl GraphRagServer {
                         if decisions.is_empty() {
                             return "No ADRs found. Decisions are auto-extracted from conversations, or create one with action='create'.".into();
                         }
-                        let mut output = format!("## Architecture Decision Records ({} total)\n\n", decisions.len());
+                        let mut output = format!(
+                            "## Architecture Decision Records ({} total)\n\n",
+                            decisions.len()
+                        );
                         for (i, d) in decisions.iter().enumerate() {
                             let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                             let ts = d.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
@@ -57,7 +60,12 @@ impl GraphRagServer {
                 let qname = format!(
                     "{}:adr:{}",
                     ctx.repo_name,
-                    title.to_lowercase().replace(' ', "_").chars().take(60).collect::<String>()
+                    title
+                        .to_lowercase()
+                        .replace(' ', "_")
+                        .chars()
+                        .take(60)
+                        .collect::<String>()
                 );
                 let ts = chrono::Utc::now().to_rfc3339();
 
@@ -65,7 +73,9 @@ impl GraphRagServer {
                          body = $body, repo = $repo, language = 'adr', \
                          file_path = 'adr', start_line = 0, end_line = 0, \
                          timestamp = $ts";
-                match ctx.db.query(q)
+                match ctx
+                    .db
+                    .query(q)
                     .bind(("name", title.to_string()))
                     .bind(("qname", qname))
                     .bind(("body", body.to_string()))
@@ -79,8 +89,11 @@ impl GraphRagServer {
             }
             "get" => {
                 let id = params.id.as_deref().unwrap_or("");
-                let q = "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
-                match ctx.db.query(q)
+                let q =
+                    "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
+                match ctx
+                    .db
+                    .query(q)
                     .bind(("search", id.to_string()))
                     .bind(("repo", ctx.repo_name.clone()))
                     .await
@@ -88,7 +101,8 @@ impl GraphRagServer {
                     Ok(mut r) => {
                         let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                         if let Some(d) = results.first() {
-                            serde_json::to_string_pretty(d).unwrap_or_else(|_| "Error formatting".into())
+                            serde_json::to_string_pretty(d)
+                                .unwrap_or_else(|_| "Error formatting".into())
                         } else {
                             format!("No ADR found matching '{}'", id)
                         }

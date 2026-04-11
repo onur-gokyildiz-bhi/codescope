@@ -56,13 +56,11 @@ impl GraphRagServer {
     }
 
     /// Find a function by exact name
-    #[tool(
-        description = "Lookup a function by its EXACT name (case-sensitive). \
+    #[tool(description = "Lookup a function by its EXACT name (case-sensitive). \
         Returns full info including signature, file path, line numbers, and qualified name. \
         Use this when you know the precise function name. \
         For fuzzy/partial matches use `search_functions`. \
-        For full neighborhood (callers + callees + siblings) use `explore`."
-    )]
+        For full neighborhood (callers + callees + siblings) use `explore`.")]
     async fn find_function(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -135,8 +133,7 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callers found for '{}'", params.function_name);
                 }
-                serde_json::to_string_pretty(&results)
-                    .unwrap_or_else(|_| "Error formatting".into())
+                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -160,8 +157,7 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callees found for '{}'", params.function_name);
                 }
-                serde_json::to_string_pretty(&results)
-                    .unwrap_or_else(|_| "Error formatting".into())
+                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
             }
             Err(e) => format!("Error: {}", e),
         }

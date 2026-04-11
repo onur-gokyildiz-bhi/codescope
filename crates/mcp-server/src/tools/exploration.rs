@@ -127,7 +127,10 @@ impl GraphRagServer {
                 if let Some(file) = result.get("file") {
                     let lang = file.get("language").and_then(|v| v.as_str()).unwrap_or("?");
                     let lines = file.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("**Language:** {} | **Lines:** {}\n\n", lang, lines));
+                    output.push_str(&format!(
+                        "**Language:** {} | **Lines:** {}\n\n",
+                        lang, lines
+                    ));
                 }
 
                 if let Some(funcs) = result.get("functions").and_then(|v| v.as_array()) {
@@ -145,7 +148,10 @@ impl GraphRagServer {
                         if let Some(ext) = f.get("external_callers").and_then(|v| v.as_array()) {
                             for caller in ext {
                                 let cn = caller.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let cf = caller.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                let cf = caller
+                                    .get("file_path")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
                                 output.push_str(&format!("    ← called by **{}** ({})\n", cn, cf));
                             }
                         }
@@ -208,7 +214,10 @@ impl GraphRagServer {
                     let outgoing: Vec<serde_json::Value> = cross_resp.take(1).unwrap_or_default();
 
                     if !incoming.is_empty() {
-                        output.push_str(&format!("### Incoming Cross-File Calls ({})\n", incoming.len()));
+                        output.push_str(&format!(
+                            "### Incoming Cross-File Calls ({})\n",
+                            incoming.len()
+                        ));
                         for c in &incoming {
                             let caller = c.get("caller").and_then(|v| v.as_str()).unwrap_or("?");
                             let file = c.get("caller_file").and_then(|v| v.as_str()).unwrap_or("?");
@@ -218,7 +227,10 @@ impl GraphRagServer {
                     }
 
                     if !outgoing.is_empty() {
-                        output.push_str(&format!("### Outgoing Cross-File Calls ({})\n", outgoing.len()));
+                        output.push_str(&format!(
+                            "### Outgoing Cross-File Calls ({})\n",
+                            outgoing.len()
+                        ));
                         for c in &outgoing {
                             let callee = c.get("callee").and_then(|v| v.as_str()).unwrap_or("?");
                             let file = c.get("callee_file").and_then(|v| v.as_str()).unwrap_or("?");
@@ -299,7 +311,8 @@ impl GraphRagServer {
                     .get("total_results")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                let mut output = format!("## Related: '{}' ({} results)\n\n", params.keyword, total);
+                let mut output =
+                    format!("## Related: '{}' ({} results)\n\n", params.keyword, total);
 
                 for (key, icon, label) in [
                     ("functions", "fn", "Functions"),

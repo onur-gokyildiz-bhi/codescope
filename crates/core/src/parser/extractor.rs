@@ -470,7 +470,13 @@ impl EntityExtractor {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-        if cleaned.is_empty() || cleaned.chars().next().map(|c| c.is_numeric()).unwrap_or(true) {
+        if cleaned.is_empty()
+            || cleaned
+                .chars()
+                .next()
+                .map(|c| c.is_numeric())
+                .unwrap_or(true)
+        {
             None
         } else {
             Some(cleaned)
