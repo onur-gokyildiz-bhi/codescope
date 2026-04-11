@@ -4,6 +4,22 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Benchmark crate graph-first queries: `impact_d2`/`impact_d3` native multi-hop traversal, `type_hierarchy_traversal`, `fan_in_top10`
+- Benchmark tool dynamically discovers the highest fan-in function as the impact target (previously hardcoded `main`, which returns zero results because it is the call-graph root)
+- `BenchmarkResults` JSON now exposes `impact_target`
+
+### Changed
+- Sharpened 7 MCP tool descriptions with explicit disambiguation rules ("when to use X vs Y"): `search_functions`, `find_function`, `find_callers`, `find_callees`, `raw_query`, `impact_analysis`, `type_hierarchy`
+- README rewritten with graph-first positioning, "Why graph-first?" section, and AI-native tool comparison table
+- BENCHMARKS.md: new headline section "Graph-First Multi-Hop Traversal" with real sub-millisecond numbers across ripgrep, axum, tokio, and gin; refreshed indexing/query tables; language count 35 → 59; MCP tool count 45 → 52
+
+### Fixed
+- `GraphQuery::raw_query` no longer silently swallows parse errors from the first statement. Previously any `take(0)` error was treated as "no more statements", so a query with a SurrealQL syntax error returned an empty array instead of surfacing the parse error
+- Benchmark chained graph-traversal syntax: hops must chain directly (`<-calls<-\`function\`<-calls<-\`function\`.name`), not with dots between hops. The dotted form is a parse error that was silently swallowed, which is how the previous "6.4 million× speedup" claim shipped (apples-to-oranges: a parse error vs an executing nested subquery). Verified corrected: native traversal stays sub-millisecond regardless of repo size
+- Daemon and stdio modes unified via shared `DaemonState`; query pipeline refactor extracted `IndexingPipeline` orchestrator
+- `crates/mcp-server/src/server.rs` split 4537 → 166 lines; `crates/cli/src/main.rs` split 1293 → 131 lines; 52 tools split into 16 sub-modules under `crates/mcp-server/src/tools/`
+
 ## [0.5.0] - 2026-04-07
 
 ### Added
@@ -48,7 +64,7 @@ All notable changes to Codescope will be documented in this file.
 - Conversation history panel with date filter and search
 - Auto project insights after indexing
 - File tree, hotspots, skills, timeline, minimap in web UI
-- 45 MCP tools (up from 36)
+- 52 MCP tools (up from 36)
 
 ### Changed
 - Unified 3 binaries into single `codescope` executable (kept separate binaries for backward compat)

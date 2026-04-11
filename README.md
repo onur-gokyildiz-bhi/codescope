@@ -71,6 +71,8 @@ Requires Rust 1.82+ and a C/C++ compiler.
 
 </details>
 
+See [docs/quickstart.md](docs/quickstart.md) for a step-by-step walkthrough with expected output at every stage, and [docs/troubleshooting.md](docs/troubleshooting.md) if you hit install or indexing issues.
+
 ---
 
 ## How It Works
