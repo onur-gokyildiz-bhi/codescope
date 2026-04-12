@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "codescope"
-version = "0.5.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "codescope-bench"
-version = "0.5.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "codescope-core"
-version = "0.5.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "codescope-mcp"
-version = "0.5.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "codescope-web"
-version = "0.5.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "axum",

@@ -53,15 +53,11 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install openssl@3 pkg-config
-          # Only set OPENSSL_DIR for the native ARM build.
-          # For x86_64 cross-compilation, brew's ARM openssl won't link.
-          # The build falls back to native-tls (Security.framework) or
-          # vendored openssl-sys, both of which handle cross-arch correctly.
-          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
-            echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
-            echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> $GITHUB_ENV
-          fi
+          brew install pkg-config
+          # OpenSSL is vendored via git2's vendored-openssl feature,
+          # so no brew openssl needed — cross-compilation (ARM→x86_64)
+          # works automatically because openssl-sys builds from source
+          # for the target architecture.
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
