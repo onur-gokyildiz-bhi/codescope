@@ -70,7 +70,10 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
     let rule_path = rules_dir.join("codescope-mandatory.md");
     if !rule_path.exists() {
         std::fs::create_dir_all(&rules_dir)?;
-        std::fs::write(&rule_path, include_str!("../../../../.claude/rules/codescope-mandatory.md"))?;
+        std::fs::write(
+            &rule_path,
+            include_str!("../../../../.claude/rules/codescope-mandatory.md"),
+        )?;
         println!("📏 Created .claude/rules/codescope-mandatory.md");
     } else {
         println!("📏 .claude/rules/codescope-mandatory.md already exists");
@@ -86,7 +89,10 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
                 .append(true)
                 .open(&gitignore_path_check)?;
             use std::io::Write;
-            writeln!(f, "\n# Allow Claude Code rules to be committed\n!.claude/rules/")?;
+            writeln!(
+                f,
+                "\n# Allow Claude Code rules to be committed\n!.claude/rules/"
+            )?;
             println!("📝 Added !.claude/rules/ to .gitignore");
         }
     }

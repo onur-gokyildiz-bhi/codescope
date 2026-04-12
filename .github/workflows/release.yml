@@ -31,10 +31,9 @@ jobs:
             os: macos-latest
             archive: tar.gz
             ext: ""
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            archive: tar.gz
-            ext: ""
+          # x86_64-apple-darwin (Intel Mac) is excluded from the release
+          # matrix because ort-sys (ONNX Runtime) does not provide prebuilt
+          # binaries for that target. Intel Mac users can build from source.
 
     steps:
       - uses: actions/checkout@v4
@@ -253,7 +252,7 @@ jobs:
           | Linux x64 | `codescope-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz` |
           | Linux ARM64 | `codescope-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz` |
           | macOS ARM | `codescope-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz` |
-          | macOS Intel | `codescope-${{ github.ref_name }}-x86_64-apple-darwin.tar.gz` |
+          | macOS Intel | Build from source (`cargo build --release`) — ONNX Runtime has no prebuilt x86_64-apple-darwin binaries |
           NOTES
 
       - name: Create Release

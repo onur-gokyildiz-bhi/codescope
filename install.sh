@@ -36,7 +36,16 @@ case "$OS" in
         ;;
     Darwin)
         case "$ARCH" in
-            x86_64) TARGET="x86_64-apple-darwin" ;;
+            x86_64)
+                echo "  Error: Intel Mac (x86_64) prebuilt binaries are not available."
+                echo "  ONNX Runtime does not provide x86_64-apple-darwin builds."
+                echo ""
+                echo "  Build from source instead:"
+                echo "    git clone https://github.com/onur-gokyildiz-bhi/codescope"
+                echo "    cd codescope && cargo build --release"
+                echo "    cp target/release/codescope target/release/codescope-mcp ~/.local/bin/"
+                exit 1
+                ;;
             arm64)  TARGET="aarch64-apple-darwin" ;;
             *) echo "  Error: Unsupported architecture: $ARCH"; exit 1 ;;
         esac
