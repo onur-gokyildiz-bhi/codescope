@@ -4,6 +4,15 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-12
+
+### Fixed
+- Install scripts (`install.ps1`, `install.sh`) now detect existing install path and update in-place instead of installing to a different directory. Root cause of `/cs-update` appearing to do nothing.
+- `install.ps1` stops running codescope processes before overwriting binaries (Windows file-lock issue)
+- Added `.claude/rules/codescope-mandatory.md` (`alwaysApply: true`) so Claude Code is required to use codescope MCP tools instead of falling back to Read/Grep
+- Added Intel macOS (`x86_64-apple-darwin`) build to release matrix. Uses `macos-13` runner (native x86_64). Previously Intel Mac users got a 404 on install.
+- Tool count in install scripts updated 45 → 52
+
 ## [0.6.0] - 2026-04-12
 
 Graph-first launch release. Headline change is a 21-53× speedup in the `impact_analysis` MCP tool from a rewrite to native SurrealDB inverse graph traversal, plus a complete refactor of the server and CLI into smaller modules, a sharpened graph-first positioning in README/BENCHMARKS.md, and the launch docs and asset drafts.
