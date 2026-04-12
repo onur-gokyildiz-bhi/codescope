@@ -91,6 +91,15 @@ pub enum Commands {
     /// Initialize Codescope in current project (creates .mcp.json + first index)
     Init { path: Option<PathBuf> },
 
+    /// Diagnose and fix common setup issues
+    Doctor {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Auto-fix issues that can be resolved automatically
+        #[arg(long)]
+        fix: bool,
+    },
+
     /// Install codescope binary to ~/.local/bin (adds to PATH)
     Install,
 

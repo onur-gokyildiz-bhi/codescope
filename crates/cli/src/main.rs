@@ -93,6 +93,9 @@ async fn main() -> Result<()> {
         Commands::Install => {
             commands::install::run()?;
         }
+        Commands::Doctor { path, fix } => {
+            commands::doctor::run(path, fix).await?;
+        }
         Commands::Mcp { path, auto_index } => {
             // Derive repo from target path, not CWD
             let repo = path
