@@ -12,6 +12,12 @@ pub struct SearchParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FindFunctionParams {
+    /// The exact function name to look up
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FileEntitiesParams {
     /// Path to the file to inspect
     pub file_path: String,

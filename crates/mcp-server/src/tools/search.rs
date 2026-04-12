@@ -61,17 +61,17 @@ impl GraphRagServer {
         Use this when you know the precise function name. \
         For fuzzy/partial matches use `search_functions`. \
         For full neighborhood (callers + callees + siblings) use `explore`.")]
-    async fn find_function(&self, Parameters(params): Parameters<SearchParams>) -> String {
+    async fn find_function(&self, Parameters(params): Parameters<FindFunctionParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
         let gq = GraphQuery::new(ctx.db);
 
-        match gq.find_function(&params.query).await {
+        match gq.find_function(&params.name).await {
             Ok(results) => {
                 if results.is_empty() {
-                    return format!("No function found with name '{}'", params.query);
+                    return format!("No function found with name '{}'", params.name);
                 }
                 serde_json::to_string_pretty(&results)
                     .unwrap_or_else(|_| "Error formatting results".into())
