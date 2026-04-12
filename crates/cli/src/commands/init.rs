@@ -64,7 +64,34 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
     std::fs::write(&mcp_json_path, &mcp_json)?;
     println!("   {}", mcp_json_path.display());
 
-    // Step 3: Add .mcp.json to .gitignore if not already there
+    // Step 3: Create .claude/rules/codescope-mandatory.md so Claude Code
+    // is required to use codescope MCP tools instead of Read/Grep.
+    let rules_dir = project_path.join(".claude").join("rules");
+    let rule_path = rules_dir.join("codescope-mandatory.md");
+    if !rule_path.exists() {
+        std::fs::create_dir_all(&rules_dir)?;
+        std::fs::write(&rule_path, include_str!("../../../../.claude/rules/codescope-mandatory.md"))?;
+        println!("📏 Created .claude/rules/codescope-mandatory.md");
+    } else {
+        println!("📏 .claude/rules/codescope-mandatory.md already exists");
+    }
+
+    // Step 3b: Ensure .claude/rules/ is not gitignored (but rest of .claude is).
+    // If .gitignore has ".claude/" but not "!.claude/rules/", add the negation.
+    let gitignore_path_check = project_path.join(".gitignore");
+    if gitignore_path_check.exists() {
+        let gi_content = std::fs::read_to_string(&gitignore_path_check).unwrap_or_default();
+        if gi_content.contains(".claude") && !gi_content.contains("!.claude/rules") {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&gitignore_path_check)?;
+            use std::io::Write;
+            writeln!(f, "\n# Allow Claude Code rules to be committed\n!.claude/rules/")?;
+            println!("📝 Added !.claude/rules/ to .gitignore");
+        }
+    }
+
+    // Step 4: Add .mcp.json to .gitignore if not already there
     let gitignore_path = project_path.join(".gitignore");
     if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
@@ -156,7 +183,7 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
     // Step 5: Summary
     println!("\n✅ Codescope initialized!\n");
     println!("   Next time you open this project in Claude Code,");
-    println!("   Codescope starts automatically with 36 MCP tools.\n");
+    println!("   Codescope starts automatically with 52 MCP tools.\n");
     println!("   Manual commands:");
     println!("     codescope search <query> --repo {}", repo_name);
     println!("     codescope stats --repo {}", repo_name);
