@@ -87,10 +87,19 @@ curl -fsSL "$DOWNLOAD_URL" -o "$TEMP_DIR/$ARCHIVE"
 echo "  Extracting..."
 tar xzf "$TEMP_DIR/$ARCHIVE" -C "$TEMP_DIR"
 
-# Install
+# Stop running codescope processes before overwriting
+if pgrep -x "codescope" > /dev/null 2>&1 || pgrep -x "codescope-mcp" > /dev/null 2>&1; then
+    echo "  Stopping running codescope processes..."
+    pkill -f "codescope" 2>/dev/null || true
+    sleep 1
+fi
+
+# Install — remove old binaries first to avoid "text file busy" on some systems
 mkdir -p "$INSTALL_DIR"
 for bin in codescope codescope-mcp codescope-web; do
     if [ -f "$TEMP_DIR/$bin" ]; then
+        # Remove old binary first (avoids ETXTBSY on Linux when process just exited)
+        rm -f "$INSTALL_DIR/$bin" 2>/dev/null || true
         cp "$TEMP_DIR/$bin" "$INSTALL_DIR/$bin"
         chmod +x "$INSTALL_DIR/$bin"
     fi
