@@ -4,6 +4,19 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-13
+
+### Added
+- `codescope doctor` command — diagnoses 8 setup checks (binary, .mcp.json, rules, CLAUDE.md, database, stale processes, gitignore) with pass/fail + actionable fix instructions. `--fix` auto-repairs missing rules and gitignore entries.
+- Claude Code Plugin packaging (`.claude-plugin/plugin.json` + `skills/` with references). Installable via `/plugin marketplace add onur-gokyildiz-bhi/codescope`.
+- `skills/cs-query/references/SURREALQL.md` — full SurrealQL syntax guide for agents (tables, edges, traversal, anti-patterns, parameterized queries)
+- `skills/codescope/references/TOOLS.md` — complete 52-tool reference with params
+
+### Fixed
+- `find_function` MCP tool: param renamed `query` → `name` (agents send `name: "X"`, not `query: "X"`)
+- `install.sh`: kills running codescope processes (`pkill`) and removes old binaries (`rm -f`) before copy to avoid ETXTBSY ("text file busy") on Linux
+- Clippy `useless_format` and `collapsible_else_if` in doctor.rs
+
 ## [0.6.1] - 2026-04-12
 
 ### Fixed
