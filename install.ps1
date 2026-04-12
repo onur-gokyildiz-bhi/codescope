@@ -4,7 +4,6 @@
 
 $ErrorActionPreference = "Stop"
 $REPO = "onur-gokyildiz-bhi/codescope"
-$INSTALL_DIR = "$env:LOCALAPPDATA\codescope\bin"
 
 Write-Host ""
 Write-Host "  Codescope Installer" -ForegroundColor Cyan
@@ -20,6 +19,17 @@ if ($arch -ne "X64") {
 }
 
 $target = "x86_64-pc-windows-msvc"
+
+# Detect install directory: if codescope is already on PATH, update in-place.
+# Otherwise fall back to ~/.local/bin (cross-platform convention).
+$existing = Get-Command codescope -ErrorAction SilentlyContinue
+if ($existing) {
+    $INSTALL_DIR = Split-Path $existing.Source
+    Write-Host "  Existing install detected: $INSTALL_DIR" -ForegroundColor Green
+} else {
+    $INSTALL_DIR = "$env:USERPROFILE\.local\bin"
+    Write-Host "  Fresh install to: $INSTALL_DIR" -ForegroundColor Yellow
+}
 
 # Get latest release
 Write-Host "  Fetching latest release..." -ForegroundColor Yellow
@@ -51,6 +61,14 @@ if (-not (Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
 }
 
+# Stop running codescope processes before overwriting binaries
+$procs = Get-Process -Name "codescope*" -ErrorAction SilentlyContinue
+if ($procs) {
+    Write-Host "  Stopping running codescope processes..." -ForegroundColor Yellow
+    $procs | Stop-Process -Force
+    Start-Sleep -Seconds 1
+}
+
 # Download
 $tempZip = Join-Path $env:TEMP "codescope-$version.zip"
 Write-Host "  Downloading $assetName..." -ForegroundColor Yellow
@@ -63,10 +81,12 @@ if (Test-Path $tempExtract) { Remove-Item -Recurse -Force $tempExtract }
 Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
 
 # Copy binaries
+$installed = @()
 foreach ($bin in @("codescope.exe", "codescope-mcp.exe", "codescope-web.exe")) {
     $src = Join-Path $tempExtract $bin
     if (Test-Path $src) {
         Copy-Item $src "$INSTALL_DIR\$bin" -Force
+        $installed += $bin
     }
 }
 
@@ -86,20 +106,21 @@ if ($currentPath -notlike "*$INSTALL_DIR*") {
 }
 
 # Verify
+$newVersion = & "$INSTALL_DIR\codescope.exe" --version 2>$null
 Write-Host ""
-Write-Host "  Installation complete!" -ForegroundColor Green
+Write-Host "  Installation complete! ($newVersion)" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Installed:" -ForegroundColor Cyan
-Write-Host "    codescope.exe     -> $INSTALL_DIR\codescope.exe"
-Write-Host "    codescope-mcp.exe -> $INSTALL_DIR\codescope-mcp.exe"
-Write-Host "    codescope-web.exe -> $INSTALL_DIR\codescope-web.exe"
+foreach ($bin in $installed) {
+    Write-Host "    $bin -> $INSTALL_DIR\$bin"
+}
 Write-Host ""
 Write-Host "  Quick start:" -ForegroundColor Cyan
 Write-Host "    cd your-project"
 Write-Host "    codescope init"
 Write-Host ""
 Write-Host "  That's it! Open the project in Claude Code and" -ForegroundColor Green
-Write-Host "  Codescope starts automatically with 45 MCP tools." -ForegroundColor Green
+Write-Host "  Codescope starts automatically with 52 MCP tools." -ForegroundColor Green
 Write-Host ""
 Write-Host "  NOTE: Restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
 Write-Host ""

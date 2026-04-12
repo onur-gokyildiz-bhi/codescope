@@ -5,7 +5,17 @@
 set -euo pipefail
 
 REPO="onur-gokyildiz-bhi/codescope"
-INSTALL_DIR="${HOME}/.local/bin"
+
+# Detect install directory: if codescope is already on PATH, update in-place.
+# Otherwise fall back to ~/.local/bin (standard XDG convention).
+EXISTING=$(command -v codescope 2>/dev/null || true)
+if [ -n "$EXISTING" ] && [ -f "$EXISTING" ]; then
+    INSTALL_DIR="$(dirname "$EXISTING")"
+    echo "  Existing install detected: $INSTALL_DIR"
+else
+    INSTALL_DIR="${HOME}/.local/bin"
+    echo "  Fresh install to: $INSTALL_DIR"
+fi
 
 echo ""
 echo "  Codescope Installer"
@@ -130,5 +140,5 @@ echo "    cd your-project"
 echo "    codescope init        # indexes + sets up MCP for Claude Code"
 echo ""
 echo "  That's it! Open the project in Claude Code and"
-echo "  Codescope starts automatically with 45 MCP tools."
+echo "  Codescope starts automatically with 52 MCP tools."
 echo ""
