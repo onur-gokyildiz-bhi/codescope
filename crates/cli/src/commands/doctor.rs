@@ -104,29 +104,27 @@ pub async fn run(project_path: PathBuf, auto_fix: bool) -> Result<()> {
             detail: ".claude/rules/codescope-mandatory.md present".into(),
             fix: None,
         });
+    } else if auto_fix {
+        let rules_dir = project_path.join(".claude").join("rules");
+        let _ = std::fs::create_dir_all(&rules_dir);
+        let _ = std::fs::write(
+            &rule_path,
+            include_str!("../../../../.claude/rules/codescope-mandatory.md"),
+        );
+        checks.push(Check {
+            name: "Claude rule (codescope-mandatory)",
+            status: Status::Pass,
+            detail: "FIXED — created .claude/rules/codescope-mandatory.md".into(),
+            fix: None,
+        });
+        fixes_applied += 1;
     } else {
-        if auto_fix {
-            let rules_dir = project_path.join(".claude").join("rules");
-            let _ = std::fs::create_dir_all(&rules_dir);
-            let _ = std::fs::write(
-                &rule_path,
-                include_str!("../../../../.claude/rules/codescope-mandatory.md"),
-            );
-            checks.push(Check {
-                name: "Claude rule (codescope-mandatory)",
-                status: Status::Pass,
-                detail: "FIXED — created .claude/rules/codescope-mandatory.md".into(),
-                fix: None,
-            });
-            fixes_applied += 1;
-        } else {
-            checks.push(Check {
-                name: "Claude rule (codescope-mandatory)",
-                status: Status::Fail,
-                detail: "missing — Claude Code won't use codescope tools".into(),
-                fix: Some("Run: codescope doctor --fix\nOr: codescope init".into()),
-            });
-        }
+        checks.push(Check {
+            name: "Claude rule (codescope-mandatory)",
+            status: Status::Fail,
+            detail: "missing — Claude Code won't use codescope tools".into(),
+            fix: Some("Run: codescope doctor --fix\nOr: codescope init".into()),
+        });
     }
 
     // 4. CLAUDE.md has codescope instructions
@@ -337,7 +335,7 @@ fn check_binary(name: &str) -> Check {
             detail: if version.is_empty() {
                 "on PATH".into()
             } else {
-                format!("{}", version)
+                version.clone()
             },
             fix: None,
         }
