@@ -4,24 +4,36 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-12
+
+Graph-first launch release. Headline change is a 21-53× speedup in the `impact_analysis` MCP tool from a rewrite to native SurrealDB inverse graph traversal, plus a complete refactor of the server and CLI into smaller modules, a sharpened graph-first positioning in README/BENCHMARKS.md, and the launch docs and asset drafts.
+
 ### Added
 - Benchmark crate graph-first queries: `impact_d2`/`impact_d3` native multi-hop traversal, `type_hierarchy_traversal`, `fan_in_top10`, and `impact_analysis_prod_shape` (the exact query pattern the MCP tool uses)
 - Benchmark tool dynamically discovers the highest fan-in function as the impact target (previously hardcoded `main`, which returns zero results because it is the call-graph root)
 - `BenchmarkResults` JSON now exposes `impact_target`
 - `[dev-dependencies]` section in `crates/mcp-server/Cargo.toml` with `surrealdb` `kv-mem` feature enabled so `graph_query_tests.rs` compiles standalone via `cargo test -p codescope-mcp` (previously only compiled under workspace-wide feature unification)
+- `docs/quickstart.md` — 60-second walkthrough with expected output at every step
+- `docs/troubleshooting.md` — top install, indexing, query, and MCP issues grouped and documented
+- `docs/launch/` — HN post, tweet thread, and blog post drafts for the OSS launch
+- CONTRIBUTING.md: new "Filing Issues", "Support Expectations", and "Scope Boundaries" sections for post-launch issue triage
 
 ### Changed
-- **`impact_analysis` MCP tool rewritten to use SurrealDB native inverse graph traversal** (`SELECT <-calls<-\`function\` AS callers FROM \`function\` WHERE name IN [...]`) instead of the previous `FROM calls WHERE out.name IN [...]` WHERE-filter pattern. On real repos this is 20-50× faster end-to-end: 3-hop impact on ripgrep drops from ~180 ms to under 10 ms; on tokio (44k call edges) it drops from ~520 ms to ~10 ms. Per-hop latency is now bounded by graph fan-out at the target, not by corpus size — the same property the bench was already measuring in isolation. The BFS structure, deduplication, and "Direct Callers / Indirect Callers (N hops)" output format are preserved. A `MAX_CALLERS_PER_HOP` cap (100) replaces the old `LIMIT 100` in the query to guard against pathological fan-out
-- Sharpened 7 MCP tool descriptions with explicit disambiguation rules ("when to use X vs Y"): `search_functions`, `find_function`, `find_callers`, `find_callees`, `raw_query`, `impact_analysis`, `type_hierarchy`
+- **`impact_analysis` MCP tool rewritten to use SurrealDB native inverse graph traversal** (`SELECT <-calls<-\`function\` AS callers FROM \`function\` WHERE name IN [...]`) instead of the previous `FROM calls WHERE out.name IN [...]` WHERE-filter pattern. On real repos this is 21-53× faster per hop: 2.75 ms on ripgrep (was 57.19 ms), 2.52 ms on axum (was 89.70 ms), 3.26 ms on tokio (was 173.19 ms), 1.06 ms on gin (was 40.08 ms). End-to-end 3-hop impact drops from ~180-520 ms to under 10 ms across repos from 11k to 45k call edges. Per-hop latency is now bounded by graph fan-out at the target, not by corpus size. The BFS structure, deduplication, and "Direct Callers / Indirect Callers (N hops)" output format are preserved. A `MAX_CALLERS_PER_HOP` cap (100) replaces the old `LIMIT 100` in the query to guard against pathological fan-out.
+- Sharpened 7 MCP tool descriptions with explicit disambiguation rules ("when to use X vs Y"): `search_functions`, `find_function`, `find_callers`, `find_callees`, `raw_query`, `impact_analysis`, `type_hierarchy`. Lifted structure from Leonie Monigatti's agentic search workshop (github.com/iamleonie/workshop-agentic-search).
 - README rewritten with graph-first positioning, "Why graph-first?" section, and AI-native tool comparison table
-- BENCHMARKS.md: new headline section "Graph-First Multi-Hop Traversal" with real sub-millisecond numbers across ripgrep, axum, tokio, and gin; refreshed indexing/query tables; language count 35 → 59; MCP tool count 45 → 52
+- BENCHMARKS.md: new headline section "Graph-First Multi-Hop Traversal" with real sub-millisecond numbers across ripgrep, axum, tokio, and gin; refreshed indexing/query tables; speedup table showing old WHERE-filter vs new native traversal per repo; language count 35 → 59; MCP tool count 45 → 52
+- Phase 1-4 refactor landed: `crates/mcp-server/src/server.rs` split 4537 → 166 lines; `crates/cli/src/main.rs` split 1293 → 131 lines; 52 MCP tools split into 16 sub-modules under `crates/mcp-server/src/tools/`; `IndexingPipeline` orchestrator extracted from lib.rs
+- Daemon and stdio modes unified via shared `DaemonState`
+- NLP `ask()` engine rewritten with intent + entity extraction (12 new unit tests)
+- Embed pipeline now batches a single round-trip per 100 functions (was N+1 UPDATEs)
+- `EmbedStats` regression test added (was returning hardcoded zeros)
 
 ### Fixed
-- `GraphQuery::raw_query` no longer silently swallows parse errors from the first statement. Previously any `take(0)` error was treated as "no more statements", so a query with a SurrealQL syntax error returned an empty array instead of surfacing the parse error
-- Benchmark chained graph-traversal syntax: hops must chain directly (`<-calls<-\`function\`<-calls<-\`function\`.name`), not with dots between hops. The dotted form is a parse error that was silently swallowed, which is how the previous "6.4 million× speedup" claim shipped (apples-to-oranges: a parse error vs an executing nested subquery). Verified corrected: native traversal stays sub-millisecond regardless of repo size
-- Daemon and stdio modes unified via shared `DaemonState`; query pipeline refactor extracted `IndexingPipeline` orchestrator
-- `crates/mcp-server/src/server.rs` split 4537 → 166 lines; `crates/cli/src/main.rs` split 1293 → 131 lines; 52 tools split into 16 sub-modules under `crates/mcp-server/src/tools/`
-- Clippy `needless_range_loop` warning in `crates/core/src/graph/builder.rs` (`for i in 0..chunk.len()` → `for (i, rel) in chunk.iter().enumerate()`)
+- `GraphQuery::raw_query` no longer silently swallows parse errors from the first statement. Previously any `take(0)` error was treated as "no more statements", so a query with a SurrealQL syntax error returned an empty array instead of surfacing the parse error. This bug was what enabled the bogus "6.4 million× speedup" claim in a previous session's bench commit — a parse error reported as a 0.05 ms successful query.
+- Benchmark chained graph-traversal syntax: hops must chain directly (`<-calls<-\`function\`<-calls<-\`function\`.name`), not with dots between hops. The dotted form was the parse error silently swallowed above.
+- Clippy `needless_range_loop` warning in `crates/core/src/graph/builder.rs` (`for i in 0..chunk.len()` → `for (i, rel) in chunk.iter().enumerate()`) — the root cause of the CI `Check` job failing on every push for the last 30+ runs.
+- Pre-existing `cargo fmt` violations across 25 files and 96 call sites — the root cause of the CI `Rustfmt` job failing on every push for the last 30+ runs.
 
 ## [0.5.0] - 2026-04-07
 
