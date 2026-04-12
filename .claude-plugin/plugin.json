@@ -1,0 +1,20 @@
+{
+  "name": "codescope",
+  "version": "0.6.1",
+  "description": "Graph-first code intelligence for AI agents. Query knowledge graphs, trace call chains, analyze impact, search functions — all via MCP tools backed by SurrealDB. Teaches your agent to use codescope instead of reading raw files.",
+  "author": {
+    "name": "Onur Gokyildiz",
+    "url": "https://github.com/onur-gokyildiz-bhi"
+  },
+  "repository": "https://github.com/onur-gokyildiz-bhi/codescope",
+  "license": "MIT",
+  "keywords": [
+    "code-analysis",
+    "graph-database",
+    "mcp",
+    "surrealdb",
+    "call-graph",
+    "impact-analysis",
+    "code-intelligence"
+  ]
+}

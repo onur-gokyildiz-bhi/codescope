@@ -1,0 +1,15 @@
+{
+  "name": "codescope",
+  "owner": {
+    "name": "Onur Gokyildiz",
+    "url": "https://github.com/onur-gokyildiz-bhi"
+  },
+  "plugins": [
+    {
+      "name": "codescope",
+      "source": "./",
+      "description": "Graph-first code intelligence skills for Claude Code",
+      "version": "0.6.1"
+    }
+  ]
+}
