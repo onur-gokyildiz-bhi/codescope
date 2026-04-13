@@ -59,6 +59,13 @@ impl IndexingPipeline {
         tracing::info!("Background indexing {}...", self.path.display());
         let builder = GraphBuilder::new(self.db.clone());
 
+        // Phase 0: clean stale entities to prevent abs-path / rel-path duplicates.
+        // UPSERT keys on qualified_name which includes file_path — if the same
+        // file was previously indexed with a different path form (absolute vs
+        // relative, \\?\ prefix vs not), the old record stays alongside the new
+        // one. Wiping code entities before re-indexing is the simplest fix.
+        self.phase0_clean_stale().await;
+
         // Phase 1: parse files in parallel (CPU-bound)
         let parse_results = self.phase1_parse_files().await;
 
@@ -94,10 +101,53 @@ impl IndexingPipeline {
         self.clone().phase7_spawn_periodic();
     }
 
+    // ─── Phase 0: clean stale entities ────────────────────────────
+
+    async fn phase0_clean_stale(&self) {
+        // Delete all code entities and edges, then re-insert fresh.
+        // This prevents duplicates from path normalization differences
+        // between CLI init and MCP auto-index.
+        //
+        // We preserve: conversations, memory, skills (non-code data).
+        let tables = [
+            "`function`",
+            "class",
+            "import_decl",
+            "file",
+            "config",
+            "doc",
+            "package",
+            "infra",
+            "calls",
+            "contains",
+            "imports",
+            "inherits",
+        ];
+        for table in &tables {
+            if let Err(e) = self.db.query(format!("DELETE {table}")).await {
+                tracing::warn!("Clean {table}: {e}");
+            }
+        }
+        tracing::info!("Cleaned stale entities for fresh re-index");
+    }
+
     // ─── Phase 1: file collection + parallel parsing ─────────────
 
     async fn phase1_parse_files(&self) -> Vec<ParseResult> {
         let parse_path = self.path.clone();
+        // Normalize the base path: canonicalize + strip \\?\ prefix (Windows).
+        // This must match what init.rs does, otherwise the same file gets
+        // different qualified_names from CLI init vs MCP auto-index, creating
+        // duplicate entities in the graph.
+        let parse_path = parse_path.canonicalize().unwrap_or(parse_path);
+        let parse_path = {
+            let s = parse_path.to_string_lossy();
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                PathBuf::from(stripped)
+            } else {
+                parse_path
+            }
+        };
         let parse_repo = self.repo.clone();
         tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
