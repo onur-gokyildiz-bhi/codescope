@@ -26,12 +26,14 @@ pub struct FileEntitiesParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindCallersParams {
     /// Name of the function to find callers for
+    #[serde(alias = "name")]
     pub function_name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FindCalleesParams {
     /// Name of the function to find callees for
+    #[serde(alias = "name")]
     pub function_name: String,
 }
 
