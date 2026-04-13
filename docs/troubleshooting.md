@@ -140,6 +140,31 @@ codescope index . --repo <repo>
 
 If the `.mcp.json` is missing, re-run `codescope init` in the project root.
 
+### Duplicate tools / double MCP server (marketplace + bash install conflict)
+
+If you installed codescope from both the Claude Code marketplace **and** from the bash install script (`install.sh` / `install.ps1`), you may end up with two MCP server instances running simultaneously. Symptoms:
+
+- Duplicate tool names in the tool list
+- Tools failing intermittently (DB lock contention between two instances)
+- `IO error: The process cannot access the file because another process has locked a portion of the file`
+
+**Fix — pick one method and remove the other:**
+
+**Option A: Keep marketplace, remove bash MCP config**
+```bash
+# Remove the global MCP entry (if setup-claude added one)
+# Edit ~/.claude.json and delete the "codescope" key from "mcpServers"
+# Keep .mcp.json in projects only if the marketplace doesn't auto-configure it
+```
+
+**Option B: Keep bash install, remove marketplace**
+```bash
+# Edit ~/.claude/settings.json and remove the "codescope" key from "extraKnownMarketplaces"
+# Keep .mcp.json in your project root (codescope init creates this)
+```
+
+The `setup-claude` scripts (v0.7.1+) now detect marketplace installs and skip global MCP config automatically. If you run the setup wizard after installing from the marketplace, it will not create a conflicting global entry.
+
 ### Tool descriptions look truncated in the agent
 
 Codescope's tool descriptions use multi-line string literals. If your MCP client truncates them, the client isn't the latest version. Update to a recent Claude Code / Cursor / Zed build.

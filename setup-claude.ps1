@@ -137,9 +137,30 @@ function Configure-McpJson($configFile, $label) {
     }
 }
 
+# Check for marketplace install — avoid double MCP registration
+$marketplaceDetected = $false
+$settingsFile = "$env:USERPROFILE\.claude\settings.json"
+if (Test-Path $settingsFile) {
+    $settingsContent = Get-Content $settingsFile -Raw -ErrorAction SilentlyContinue
+    if ($settingsContent -match "extraKnownMarketplaces.*codescope") {
+        $marketplaceDetected = $true
+        Write-Host "         ! Codescope marketplace plugin detected in settings.json" -ForegroundColor Yellow
+        Write-Host "         ! Skipping global MCP config to avoid double registration." -ForegroundColor Yellow
+        Write-Host "         ! MCP will be configured per-project via .mcp.json instead." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
 foreach ($agent in $agents) {
     switch ($agent) {
-        "claude-code" { Configure-McpJson "$env:USERPROFILE\.claude.json" "~/.claude.json (Claude Code)" }
+        "claude-code" {
+            if ($marketplaceDetected) {
+                Write-Host "         -> Claude Code: using marketplace plugin (no global MCP needed)" -ForegroundColor Green
+                Write-Host "         -> Run 'codescope init' in each project for .mcp.json" -ForegroundColor Cyan
+            } else {
+                Configure-McpJson "$env:USERPROFILE\.claude.json" "~/.claude.json (Claude Code)"
+            }
+        }
         "codex-cli" { Configure-McpJson "$env:USERPROFILE\.codex.json" "~/.codex.json (Codex CLI)" }
         "cursor" { Write-Host "         -> Cursor: add codescope to .cursor/mcp.json in your project" }
         "zed" { Write-Host "         -> Zed: add codescope to .zed/mcp.json in your project" }

@@ -152,10 +152,29 @@ MCPEOF
     fi
 }
 
+# Check for marketplace install — avoid double MCP registration
+MARKETPLACE_DETECTED=false
+SETTINGS_FILE="$HOME/.claude/settings.json"
+if [ -f "$SETTINGS_FILE" ]; then
+    if grep -q "extraKnownMarketplaces.*codescope\|codescope.*extraKnownMarketplaces" "$SETTINGS_FILE" 2>/dev/null || \
+       grep -q '"codescope"' "$SETTINGS_FILE" 2>/dev/null && grep -q 'extraKnownMarketplaces' "$SETTINGS_FILE" 2>/dev/null; then
+        MARKETPLACE_DETECTED=true
+        echo "         ! Codescope marketplace plugin detected in settings.json"
+        echo "         ! Skipping global MCP config to avoid double registration."
+        echo "         ! MCP will be configured per-project via .mcp.json instead."
+        echo ""
+    fi
+fi
+
 for agent in "${AGENTS[@]}"; do
     case "$agent" in
         claude-code)
-            configure_mcp_json "$HOME/.claude.json" "~/.claude.json (Claude Code global)"
+            if [ "$MARKETPLACE_DETECTED" = true ]; then
+                echo "         ✓ Claude Code: using marketplace plugin (no global MCP needed)"
+                echo "         → Run 'codescope init' in each project for .mcp.json"
+            else
+                configure_mcp_json "$HOME/.claude.json" "~/.claude.json (Claude Code global)"
+            fi
             ;;
         codex-cli)
             configure_mcp_json "$HOME/.codex.json" "~/.codex.json (Codex CLI global)"
