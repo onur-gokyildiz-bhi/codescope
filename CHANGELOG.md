@@ -4,6 +4,17 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-13
+
+Knowledge graph release. Codescope is no longer code-only — it now manages general knowledge (concepts, entities, sources, claims) alongside code entities in the same SurrealDB graph. Inspired by Karpathy's LLM Wiki pattern and claude-obsidian.
+
+### Added
+- **Knowledge graph schema:** `knowledge` table with title, content, kind (concept/entity/source/claim/contradiction/question), confidence, tags, embeddings. Edge tables: `supports`, `contradicts`, `related_to` for typed relationships between any entities (knowledge↔knowledge, knowledge↔code).
+- **4 new MCP tools:** `knowledge_save` (create/update knowledge nodes), `knowledge_search` (full-text search with kind filter), `knowledge_link` (typed edges across knowledge and code entities), `knowledge_lint` (health check: orphans, contradictions, low-confidence clusters).
+- **4 new skills:** `/wiki-ingest` (source ingestion pipeline: file/URL/image → extract entities/concepts/claims → file to graph → cross-reference with code), `/autoresearch` (autonomous research loop: web search → fetch → synthesize → file, based on Karpathy's pattern), `/wiki-query` (answer questions from knowledge graph, cite specific nodes), `/wiki-lint` (knowledge graph health report with severity levels).
+- **Knowledge source watcher:** `.raw/` directory monitored for changes; creates a notification node when new/modified sources detected so the agent knows to run `/wiki-ingest`.
+- `skills/autoresearch/references/program.md` — customizable research constraints (max rounds, source preferences, confidence scoring, stop conditions).
+
 ## [0.6.3] - 2026-04-13
 
 ### Fixed

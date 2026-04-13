@@ -102,6 +102,7 @@ impl GraphRagServer {
         router.merge(Self::adr_router());
         router.merge(Self::memory_router());
         router.merge(Self::analytics_router());
+        router.merge(Self::knowledge_router());
         router
     }
 
@@ -191,3 +192,16 @@ TOOL CHEAT SHEET:\n\
 /// `Self::tool_router()` reference. All actual tools live in `tools/*.rs`.
 #[tool_router]
 impl GraphRagServer {}
+
+/// Convert a title/name to a URL-safe slug for use as SurrealDB record ID.
+pub fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if matches!(c, ' ' | '-' | '_' | '/' | '.') && !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    out.trim_matches('_').to_string()
+}

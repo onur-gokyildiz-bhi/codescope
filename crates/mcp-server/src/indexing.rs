@@ -91,8 +91,11 @@ impl IndexingPipeline {
         // Phase 4.5: auto-embed
         self.phase45_auto_embed().await;
 
-        // Phase 5: file watcher
+        // Phase 5: file watcher (code changes)
         self.phase5_start_watcher();
+
+        // Phase 5.5: knowledge source watcher (.raw/ directory)
+        self.phase55_watch_knowledge_sources();
 
         // Phase 6: health check
         self.clone().phase6_spawn_health();
@@ -377,6 +380,45 @@ impl IndexingPipeline {
             }
             Err(e) => {
                 tracing::warn!("File watcher failed to start: {}", e);
+            }
+        }
+    }
+
+    // ─── Phase 5.5: knowledge source watcher ──────────────────────
+
+    fn phase55_watch_knowledge_sources(&self) {
+        let raw_dir = self.path.join(".raw");
+        if !raw_dir.exists() {
+            tracing::debug!("No .raw/ directory — skipping knowledge source watcher");
+            return;
+        }
+
+        match watcher::start_watcher(&raw_dir) {
+            Ok(rx) => {
+                let db = self.db.clone();
+                let repo = self.repo.clone();
+                tokio::spawn(async move {
+                    let mut debounce_rx = rx;
+                    while let Some(_changed_files) = debounce_rx.recv().await {
+                        tracing::info!("Knowledge source change detected in .raw/ — notify agent to /wiki-ingest");
+                        // Log the event so the agent picks it up on next query
+                        let _ = db
+                            .query(format!(
+                                "UPSERT knowledge:raw_change_pending SET \
+                                 title = 'Pending source changes in .raw/', \
+                                 content = 'New or modified files detected in .raw/ directory. Run /wiki-ingest to process them.', \
+                                 kind = 'notification', \
+                                 repo = '{}', \
+                                 updated_at = time::now()",
+                                repo
+                            ))
+                            .await;
+                    }
+                });
+                tracing::info!("Knowledge source watcher active on .raw/");
+            }
+            Err(e) => {
+                tracing::debug!("Knowledge source watcher skipped: {}", e);
             }
         }
     }

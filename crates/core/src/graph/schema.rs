@@ -335,6 +335,37 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS pkg_name_search ON package FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS infra_name_search ON infra FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS skill_name_search ON skill FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+
+        -- === KNOWLEDGE GRAPH TABLES ===
+        -- General-purpose knowledge entities beyond code: concepts, people,
+        -- orgs, technologies, sources, claims. These live alongside code
+        -- entities in the same graph, enabling cross-domain queries.
+
+        DEFINE TABLE IF NOT EXISTS knowledge SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS title ON knowledge TYPE string;
+        DEFINE FIELD IF NOT EXISTS content ON knowledge TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON knowledge TYPE string;
+        DEFINE FIELD IF NOT EXISTS repo ON knowledge TYPE string;
+        DEFINE FIELD IF NOT EXISTS source_url ON knowledge TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS confidence ON knowledge TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS tags ON knowledge TYPE option<array>;
+        DEFINE FIELD IF NOT EXISTS created_at ON knowledge TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS updated_at ON knowledge TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS embedding ON knowledge TYPE option<array>;
+        DEFINE FIELD IF NOT EXISTS binary_embedding ON knowledge TYPE option<array>;
+        DEFINE INDEX IF NOT EXISTS know_title ON knowledge FIELDS title;
+        DEFINE INDEX IF NOT EXISTS know_kind ON knowledge FIELDS kind;
+        DEFINE INDEX IF NOT EXISTS know_repo ON knowledge FIELDS repo;
+        DEFINE INDEX IF NOT EXISTS know_title_search ON knowledge FIELDS title FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS know_content_search ON knowledge FIELDS content FULLTEXT ANALYZER name_analyzer BM25;
+
+        -- Knowledge edge tables
+        DEFINE TABLE supports TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS context ON supports TYPE option<string>;
+        DEFINE TABLE contradicts TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS context ON contradicts TYPE option<string>;
+        DEFINE TABLE related_to TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS relation ON related_to TYPE option<string>;
         ",
     )
     .await?;
