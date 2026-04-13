@@ -361,11 +361,14 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
 
         -- Knowledge edge tables
         DEFINE TABLE supports TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS relation ON supports TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS context ON supports TYPE option<string>;
         DEFINE TABLE contradicts TYPE RELATION SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS relation ON contradicts TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS context ON contradicts TYPE option<string>;
         DEFINE TABLE related_to TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS relation ON related_to TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS context ON related_to TYPE option<string>;
         ",
     )
     .await?;

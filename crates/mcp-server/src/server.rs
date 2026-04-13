@@ -125,7 +125,7 @@ impl GraphRagServer {
             .ok_or_else(|| "No project initialized. Call `init_project` first with repo name and codebase path.".into())
     }
 
-    /// Load conversation context summary from DB and cache it.
+    /// Load conversation context + knowledge hot cache from DB and cache it.
     /// Called after auto-indexing completes.
     pub async fn load_context_summary(&self) {
         let ctx = match self.ctx().await {
@@ -134,14 +134,50 @@ impl GraphRagServer {
         };
         let summary = build_context_summary(&ctx.db, &ctx.repo_name).await;
         let insights = crate::helpers::build_post_index_insights(&ctx.db, &ctx.repo_name).await;
-        let combined = if insights.is_empty() {
-            summary
-        } else if summary.is_empty() {
-            insights
-        } else {
-            format!("{}\n\n{}", insights, summary)
+
+        // Knowledge hot cache: recent knowledge nodes for agent context
+        let hot_cache = Self::build_knowledge_hot_cache(&ctx.db).await;
+
+        let mut parts = Vec::new();
+        if !insights.is_empty() {
+            parts.push(insights);
+        }
+        if !summary.is_empty() {
+            parts.push(summary);
+        }
+        if !hot_cache.is_empty() {
+            parts.push(hot_cache);
+        }
+        *self.context_summary.write().await = parts.join("\n\n");
+    }
+
+    /// Build a hot cache of recent knowledge entities (~500 words) so agents
+    /// start each session with awareness of what's in the knowledge graph.
+    async fn build_knowledge_hot_cache(
+        db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+    ) -> String {
+        let query =
+            "SELECT title, kind, confidence FROM knowledge ORDER BY updated_at DESC LIMIT 15";
+        let results: Vec<serde_json::Value> = match db.query(query).await {
+            Ok(mut r) => r.take(0).unwrap_or_default(),
+            Err(_) => return String::new(),
         };
-        *self.context_summary.write().await = combined;
+        if results.is_empty() {
+            return String::new();
+        }
+
+        let mut hot = String::from("# Knowledge Graph Hot Cache\n\n");
+        hot.push_str(&format!("Recent knowledge nodes ({}):\n", results.len()));
+        for r in &results {
+            let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+            let kind = r.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+            let conf = r.get("confidence").and_then(|v| v.as_str()).unwrap_or("-");
+            hot.push_str(&format!("- **{}** [{}] ({})\n", title, kind, conf));
+        }
+        hot.push_str(
+            "\nUse `knowledge_search` to drill into any node. Use `/wiki-ingest` to add more.\n",
+        );
+        hot
     }
 }
 

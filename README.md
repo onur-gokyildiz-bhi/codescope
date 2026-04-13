@@ -8,7 +8,8 @@ Most AI code tools embed your code as vectors and hope nearest-neighbor finds th
 right answer. Codescope builds an actual **knowledge graph** — entities, calls,
 imports, type hierarchies — so AI agents can *traverse* your code instead of guessing.
 
-Rust-native, fully local, 52 MCP tools, 57 supported formats, 99%+ token savings.
+A **GraphRAG engine** — not just embeddings, not just search.
+Rust-native, fully local, 56 MCP tools, 59 supported formats, 99%+ token savings.
 
 [Install](#install) · [How It Works](#how-it-works) · [Tools](#tools) · [Benchmarks](BENCHMARKS.md) · [Contributing](CONTRIBUTING.md)
 
