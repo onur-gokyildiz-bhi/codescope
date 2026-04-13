@@ -1,15 +1,20 @@
 import { createSignal, createEffect, onMount, For, Show } from 'solid-js';
-import { setShowPalette, setCenterNode } from '../store';
+import { setShowPalette, setCenterNode, setSelectedNode } from '../store';
 import { api } from '../api';
 import { fuzzyScore } from '../utils/fuzzy';
 
 interface PaletteItem {
   name: string;
   kind: string;
+  confidence?: string;
   action: () => void;
 }
 
 const BUILT_IN: PaletteItem[] = [];
+
+function isKnowledge(kind: string): boolean {
+  return kind.startsWith('knowledge:');
+}
 
 export default function CommandPalette() {
   const [query, setQuery] = createSignal('');
@@ -35,7 +40,20 @@ export default function CommandPalette() {
         const items: PaletteItem[] = (searchResults || []).map((r: any) => ({
           name: r.name || r.id,
           kind: r.kind || 'function',
-          action: () => setCenterNode(r.name || r.id),
+          confidence: r.confidence,
+          action: () => {
+            if (isKnowledge(r.kind || '')) {
+              setSelectedNode({
+                id: r.id,
+                name: r.name || r.id,
+                kind: r.kind,
+                confidence: r.confidence,
+                tags: r.tags,
+              });
+            } else {
+              setCenterNode(r.name || r.id);
+            }
+          },
         }));
 
         const builtinMatches = BUILT_IN.filter(b => fuzzyScore(q, b.name) > 0);
@@ -75,6 +93,16 @@ export default function CommandPalette() {
     }
   }
 
+  function kindLabel(kind: string): string {
+    if (isKnowledge(kind)) return kind.split(':')[1] || 'knowledge';
+    return kind;
+  }
+
+  function kindClass(kind: string): string {
+    if (isKnowledge(kind)) return 'palette-item-kind knowledge';
+    return 'palette-item-kind';
+  }
+
   return (
     <div class="palette-overlay">
       <div class="palette-backdrop" onClick={close} />
@@ -83,7 +111,7 @@ export default function CommandPalette() {
           ref={inputRef}
           class="palette-input"
           type="text"
-          placeholder="Search functions, files, actions..."
+          placeholder="Search functions, knowledge, files..."
           value={query()}
           onInput={e => setQuery(e.currentTarget.value)}
           onKeyDown={onKeyDown}
@@ -97,7 +125,12 @@ export default function CommandPalette() {
                 onMouseEnter={() => setSelected(i())}
               >
                 <span>{item.name}</span>
-                <span class="palette-item-kind">{item.kind}</span>
+                <span class="palette-item-meta">
+                  <Show when={item.confidence}>
+                    <span class={`confidence-dot confidence-${item.confidence}`} />
+                  </Show>
+                  <span class={kindClass(item.kind)}>{kindLabel(item.kind)}</span>
+                </span>
               </div>
             )}
           </For>

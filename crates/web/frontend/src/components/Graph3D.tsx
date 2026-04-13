@@ -4,10 +4,14 @@ import {
   hoveredNode, setHoveredNode, graphDepth,
   centerNode, setCenterNode, colorMode,
   repelStrength, linkDistance, setCurrentFile,
-  projectVersion,
+  projectVersion, setLoading, setErrorMsg,
 } from '../store';
 import { api } from '../api';
 import { kindColor, moduleColor, edgeColor, DIM_COLOR, DIM_EDGE, HIGHLIGHT_EDGE } from '../utils/colors';
+
+function isKnowledge(kind: string): boolean {
+  return kind.startsWith('knowledge:');
+}
 
 export default function Graph3D() {
   let container!: HTMLDivElement;
@@ -18,6 +22,7 @@ export default function Graph3D() {
     graph = ForceGraph3D()(container)
       .backgroundColor('#0d1117')
       .nodeVal((n: any) => {
+        if (isKnowledge(n.kind)) return 4;
         const s = n.kind === 'file' ? 2 : n.kind === 'class' ? 1.5 : 1;
         return s * s;
       })
@@ -29,7 +34,29 @@ export default function Graph3D() {
         }
         return getNodeColor(n);
       })
-      .nodeLabel((n: any) => `${n.kind}: ${n.name}`)
+      .nodeLabel((n: any) => {
+        if (isKnowledge(n.kind)) {
+          const sub = n.kind.split(':')[1] || 'knowledge';
+          return `${sub}: ${n.name}${n.confidence ? ` (${n.confidence})` : ''}`;
+        }
+        return `${n.kind}: ${n.name}`;
+      })
+      .nodeThreeObject((n: any) => {
+        if (!isKnowledge(n.kind)) return undefined;
+        const THREE = (window as any).__THREE || (graph as any).scene()?.constructor;
+        if (!THREE) return undefined;
+        try {
+          const geo = new (window as any).THREE.OctahedronGeometry(4);
+          const mat = new (window as any).THREE.MeshLambertMaterial({
+            color: getNodeColor(n),
+            transparent: true,
+            opacity: 0.85,
+          });
+          return new (window as any).THREE.Mesh(geo, mat);
+        } catch {
+          return undefined;
+        }
+      })
       .linkColor((l: any) => {
         const hov = hoveredNode();
         if (hov) {
@@ -41,12 +68,30 @@ export default function Graph3D() {
         return edgeColor(l);
       })
       .linkOpacity(0.4)
-      .linkDirectionalParticles((l: any) => l.kind === 'calls' ? 2 : 0)
+      .linkWidth((l: any) => {
+        const k = l.kind;
+        if (k === 'supports' || k === 'contradicts' || k === 'related_to') return 1.5;
+        return 0;
+      })
+      .linkLineDash((l: any) => {
+        const k = l.kind;
+        if (k === 'supports' || k === 'contradicts' || k === 'related_to') return [4, 2];
+        return null;
+      })
+      .linkDirectionalParticles((l: any) => {
+        if (l.kind === 'calls') return 2;
+        if (l.kind === 'supports') return 1;
+        if (l.kind === 'contradicts') return 1;
+        return 0;
+      })
       .linkDirectionalParticleSpeed(0.005)
+      .linkDirectionalParticleColor((l: any) => edgeColor(l))
       .onNodeHover((node: any) => setHoveredNode(node))
       .onNodeClick((node: any) => {
         setSelectedNode(node);
-        setCenterNode(node.name);
+        if (!isKnowledge(node.kind)) {
+          setCenterNode(node.name);
+        }
       })
       .onNodeRightClick((node: any) => {
         if (node.file_path) setCurrentFile(node.file_path);
@@ -56,16 +101,27 @@ export default function Graph3D() {
       .warmupTicks(80)
       .cooldownTicks(120);
 
+    // Expose THREE for knowledge node shapes
+    try {
+      const THREE = await import('three');
+      (window as any).THREE = THREE;
+    } catch { /* three.js already bundled by 3d-force-graph */ }
   });
 
   // Load graph data on mount and on project switch
   createEffect(async () => {
-    projectVersion(); // re-fetch on project switch
+    projectVersion();
     const center = centerNode();
+    setLoading(true);
     try {
       const data = await api.graph(center || undefined, graphDepth());
       setGraphData(data);
-    } catch { /* graph load may fail if no data indexed */ }
+      setErrorMsg(null);
+    } catch (e: any) {
+      setErrorMsg('Failed to load graph data');
+    } finally {
+      setLoading(false);
+    }
   });
 
   function getNodeColor(n: any): string {
@@ -100,14 +156,19 @@ export default function Graph3D() {
   });
 
   createEffect(async () => {
-    // depth change also triggers re-fetch
     const center = centerNode();
     const depth = graphDepth();
     if (center) {
+      setLoading(true);
       try {
         const data = await api.graph(center, depth);
         setGraphData(data);
-      } catch { /* ignore fetch errors */ }
+        setErrorMsg(null);
+      } catch {
+        setErrorMsg('Failed to load graph data');
+      } finally {
+        setLoading(false);
+      }
     }
   });
 

@@ -45,6 +45,9 @@ export const api = {
 
   skillGraph: () => fetch(withRepo(`${BASE}/api/skill-graph`)).then(r => r.json()),
 
+  knowledgeDetail: (id: string) =>
+    fetch(withRepo(`${BASE}/api/knowledge-detail?id=${encodeURIComponent(id)}`)).then(r => r.json()),
+
   rawQuery: (q: string) =>
     fetch(withRepo(`${BASE}/api/query?q=${encodeURIComponent(q)}`)).then(r => r.json()),
 };

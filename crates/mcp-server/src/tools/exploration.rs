@@ -119,6 +119,7 @@ impl GraphRagServer {
         };
         let db = ctx.db.clone();
         let gq = GraphQuery::new(ctx.db);
+        let cache = self.context_cache().clone();
 
         match gq.file_context(&params.file_path).await {
             Ok(result) => {
@@ -285,7 +286,46 @@ impl GraphRagServer {
                     }
                 }
 
-                output
+                // Delta mode: compare with cached output
+                let file_key = params.file_path.clone();
+                let mut cache_guard = cache.write().await;
+                if let Some(prev) = cache_guard.get(&file_key) {
+                    if *prev == output {
+                        drop(cache_guard);
+                        return format!(
+                            "## Context: {} (UNCHANGED)\n\nNo structural changes since last check. \
+                             {} functions, same callers, same imports.",
+                            params.file_path,
+                            result.get("functions").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                        );
+                    }
+                    // Compute diff: find added/removed lines
+                    let prev_lines: std::collections::HashSet<&str> = prev.lines().collect();
+                    let curr_lines: std::collections::HashSet<&str> = output.lines().collect();
+                    let added: Vec<&&str> = curr_lines.difference(&prev_lines).collect();
+                    let removed: Vec<&&str> = prev_lines.difference(&curr_lines).collect();
+
+                    let mut delta = format!("## Context: {} (DELTA)\n\n", params.file_path);
+                    if !added.is_empty() {
+                        delta.push_str(&format!("### Added ({} lines)\n", added.len()));
+                        for line in &added {
+                            delta.push_str(&format!("+ {}\n", line));
+                        }
+                        delta.push('\n');
+                    }
+                    if !removed.is_empty() {
+                        delta.push_str(&format!("### Removed ({} lines)\n", removed.len()));
+                        for line in &removed {
+                            delta.push_str(&format!("- {}\n", line));
+                        }
+                        delta.push('\n');
+                    }
+                    cache_guard.insert(file_key, output);
+                    delta
+                } else {
+                    cache_guard.insert(file_key, output.clone());
+                    output
+                }
             }
             Err(e) => format!("Error getting context for '{}': {}", params.file_path, e),
         }

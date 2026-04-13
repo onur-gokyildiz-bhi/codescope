@@ -4,7 +4,7 @@ import {
   showConv, setShowConv,
   showPalette, setShowPalette, showShortcuts, setShowShortcuts,
   currentFile, stats, setStats, selectedNode,
-  projectVersion,
+  projectVersion, loading, errorMsg, setErrorMsg,
 } from './store';
 import { api } from './api';
 import { registerShortcut } from './utils/keyboard';
@@ -48,7 +48,6 @@ export default function App() {
     });
   });
 
-  // Re-fetch stats on project switch
   createEffect(async () => {
     projectVersion();
     try {
@@ -59,6 +58,10 @@ export default function App() {
 
   return (
     <div class="app-layout">
+      <Show when={loading()}>
+        <div class="loading-bar" />
+      </Show>
+
       <header class="header">
         <span class="header-logo">Codescope</span>
         <ProjectSwitcher />
@@ -81,7 +84,11 @@ export default function App() {
         </div>
         <Show when={stats()}>
           <span class="stats-badge">
-            {stats().functions ?? 0} fn | {stats().files ?? 0} files
+            {stats().functions ?? 0} fn
+            {' | '}{stats().files ?? 0} files
+            <Show when={(stats().knowledge ?? 0) > 0}>
+              {' | '}{stats().knowledge} knowledge
+            </Show>
           </span>
         </Show>
         <button
@@ -140,6 +147,13 @@ export default function App() {
         <Show when={showConv()}>
           <div class="float-panel right panel" style="top:auto;bottom:8px;max-height:300px">
             <ConvPanel />
+          </div>
+        </Show>
+
+        <Show when={errorMsg()}>
+          <div class="error-toast">
+            <span>{errorMsg()}</span>
+            <button class="error-toast-close" onClick={() => setErrorMsg(null)}>&times;</button>
           </div>
         </Show>
       </div>

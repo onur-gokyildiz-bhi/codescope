@@ -25,25 +25,75 @@ impl GraphRagServer {
             Err(e) => return e,
         };
         let limit = params.limit.unwrap_or(20);
-        let gq = GraphQuery::new(ctx.db);
+        let gq = GraphQuery::new(ctx.db.clone());
 
         match gq.search_functions(&params.query).await {
             Ok(results) => {
                 if results.is_empty() {
                     return format!("No functions found matching '{}'", params.query);
                 }
+
+                // Graph-ranked reranking: boost by caller count (simplified PPR)
+                let names: Vec<String> = results
+                    .iter()
+                    .take(limit)
+                    .filter_map(|r| r.name.clone())
+                    .collect();
+
+                let mut caller_counts: std::collections::HashMap<String, u64> =
+                    std::collections::HashMap::new();
+
+                if !names.is_empty() {
+                    let placeholders: Vec<String> = names
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("$n{}", i))
+                        .collect();
+                    let in_list = placeholders.join(", ");
+                    let rank_q = format!(
+                        "SELECT out.name AS name, count() AS cnt \
+                         FROM calls WHERE out.name IN [{}] AND in.name != NONE \
+                         GROUP BY name",
+                        in_list
+                    );
+                    let mut q = ctx.db.query(&rank_q);
+                    for (i, name) in names.iter().enumerate() {
+                        q = q.bind((format!("n{}", i), name.clone()));
+                    }
+                    if let Ok(mut r) = q.await {
+                        let rows: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                        for row in &rows {
+                            let n = row.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                            let c = row.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
+                            caller_counts.insert(n.to_string(), c);
+                        }
+                    }
+                }
+
+                // Sort by caller count (descending), then by original order
+                let mut ranked: Vec<(usize, &codescope_core::graph::query::SearchResult)> =
+                    results.iter().enumerate().take(limit).collect();
+                ranked.sort_by(|a, b| {
+                    let ca = a.1.name.as_deref().and_then(|n| caller_counts.get(n)).unwrap_or(&0);
+                    let cb = b.1.name.as_deref().and_then(|n| caller_counts.get(n)).unwrap_or(&0);
+                    cb.cmp(ca)
+                });
+
                 let mut output = format!(
-                    "Found {} functions matching '{}':\n\n",
+                    "Found {} functions matching '{}' (ranked by graph importance):\n\n",
                     results.len().min(limit),
                     params.query
                 );
-                for (i, r) in results.iter().enumerate().take(limit) {
+                for (i, (_, r)) in ranked.iter().enumerate() {
+                    let name = r.name.as_deref().unwrap_or("?");
+                    let callers = caller_counts.get(name).unwrap_or(&0);
                     output.push_str(&format!(
-                        "{}. **{}** ({}:{})\n",
+                        "{}. **{}** ({}:{}) [{} callers]\n",
                         i + 1,
-                        r.name.as_deref().unwrap_or("?"),
+                        name,
                         r.file_path.as_deref().unwrap_or("?"),
                         r.start_line.unwrap_or(0),
+                        callers,
                     ));
                     if let Some(sig) = &r.signature {
                         output.push_str(&format!("   `{}`\n", sig));

@@ -33,6 +33,9 @@ pub struct GraphRagServer {
     stdio_mode: bool,
     /// Cached conversation context summary, injected into ServerInfo.instructions
     context_summary: Arc<tokio::sync::RwLock<String>>,
+    /// Delta-mode cache: stores last context_bundle output per file path.
+    /// On repeat calls, returns only structural diff instead of full output.
+    context_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -62,6 +65,7 @@ impl GraphRagServer {
             daemon: Some(state),
             stdio_mode: true,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
+            context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             tool_router: Self::merged_router(),
         }
     }
@@ -73,6 +77,7 @@ impl GraphRagServer {
             daemon: Some(state),
             stdio_mode: false,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
+            context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             tool_router: Self::merged_router(),
         }
     }
@@ -114,6 +119,11 @@ impl GraphRagServer {
     /// Accessor for the project RwLock — used by admin tool sub-module.
     pub(crate) fn project_lock(&self) -> &Arc<tokio::sync::RwLock<Option<ProjectCtx>>> {
         &self.project
+    }
+
+    /// Accessor for the delta-mode context cache.
+    pub(crate) fn context_cache(&self) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
+        &self.context_cache
     }
 
     /// Get the active project context, or return an error message

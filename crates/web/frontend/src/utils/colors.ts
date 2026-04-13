@@ -12,6 +12,12 @@ export const KIND_COLORS: Record<string, string> = {
   config: '#E6B450',
   doc: '#79C0FF',
   package: '#FF7B72',
+  'knowledge:concept': '#F0883E',
+  'knowledge:entity': '#DA77F2',
+  'knowledge:source': '#79C0FF',
+  'knowledge:claim': '#D29922',
+  'knowledge:decision': '#F85149',
+  'knowledge:pattern': '#3FB950',
 };
 
 export const EDGE_COLORS: Record<string, string> = {
@@ -19,6 +25,9 @@ export const EDGE_COLORS: Record<string, string> = {
   same_file: '#1C2333',
   contains: '#21262D',
   wikilink: '#BC8CFF',
+  supports: '#3FB950',
+  contradicts: '#F85149',
+  related_to: '#DA77F2',
 };
 
 export function kindColor(node: any): string {

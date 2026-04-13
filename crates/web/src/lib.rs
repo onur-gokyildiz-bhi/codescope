@@ -66,6 +66,7 @@ fn build_routes() -> Router<Arc<AppState>> {
         .route("/api/files", get(api_files))
         .route("/api/file-content", get(api_file_content))
         .route("/api/node-detail", get(api_node_detail))
+        .route("/api/knowledge-detail", get(api_knowledge_detail))
         .route("/api/hotspots", get(api_hotspots))
         .route("/api/clusters", get(api_clusters))
         .route("/api/skill-graph", get(api_skill_graph))
@@ -259,10 +260,10 @@ async fn api_stats(
         Ok(q) => q,
         Err(e) => return (e.0, e.1).into_response(),
     };
-    match query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL").await {
+    match query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL; SELECT count() AS total FROM knowledge GROUP ALL; SELECT count() AS total FROM decision GROUP ALL").await {
         Ok(result) => {
             // Flatten [[{"total":N}],...] -> {"files":N,"functions":N,...}
-            let labels = ["files", "functions", "classes", "imports", "configs", "docs", "packages"];
+            let labels = ["files", "functions", "classes", "imports", "configs", "docs", "packages", "knowledge", "decisions"];
             let arr = result.as_array();
             let mut stats = serde_json::Map::new();
             if let Some(items) = arr {
@@ -290,14 +291,45 @@ async fn api_search(
     if pattern.is_empty() {
         return Json(serde_json::json!([])).into_response();
     }
-    let query = match state.resolve_query(params.repo.as_deref()).await {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
         Err(e) => return (e.0, e.1).into_response(),
     };
-    match query.search_functions(&pattern).await {
-        Ok(results) => Json(serde_json::json!(results)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    if let Ok(fn_results) = gq.search_functions(&pattern).await {
+        for sr in fn_results {
+            if let Ok(val) = serde_json::to_value(&sr) {
+                results.push(val);
+            }
+        }
     }
+
+    let safe = pattern.replace('\'', "");
+    let know_q = format!(
+        "SELECT id, title AS name, kind, confidence, tags FROM knowledge \
+         WHERE title CONTAINS '{}' OR content CONTAINS '{}' LIMIT 20",
+        safe, safe
+    );
+    if let Ok(know_results) = gq.raw_query(&know_q).await {
+        for row in flatten_result(&know_results) {
+            let mut obj = serde_json::Map::new();
+            let title = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("concept");
+            obj.insert("name".into(), serde_json::json!(title));
+            obj.insert("id".into(), row.get("id").cloned().unwrap_or(serde_json::json!(title)));
+            obj.insert("kind".into(), serde_json::json!(format!("knowledge:{}", kind)));
+            if let Some(conf) = row.get("confidence") {
+                obj.insert("confidence".into(), conf.clone());
+            }
+            if let Some(tags) = row.get("tags") {
+                obj.insert("tags".into(), tags.clone());
+            }
+            results.push(serde_json::Value::Object(obj));
+        }
+    }
+
+    Json(serde_json::json!(results)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -313,6 +345,14 @@ struct GraphNode {
     name: String,
     kind: String,
     file_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -359,6 +399,10 @@ async fn api_graph(
                         name: name.to_string(),
                         kind: "function".to_string(),
                         file_path: fp.to_string(),
+                        confidence: None,
+                        tags: None,
+                        content: None,
+                        source_url: None,
                     });
                 }
 
@@ -401,6 +445,10 @@ async fn api_graph(
                                 name: short.to_string(),
                                 kind: "file".to_string(),
                                 file_path: fp.clone(),
+                                confidence: None,
+                                tags: None,
+                                content: None,
+                                source_url: None,
                             });
                         }
                         for fn_id in fns {
@@ -409,6 +457,58 @@ async fn api_graph(
                                 target: fn_id.clone(),
                                 kind: "contains".to_string(),
                             });
+                        }
+                    }
+                }
+
+                // Knowledge nodes + edges
+                let know_q = "SELECT id, title, kind, confidence, tags, content, source_url FROM knowledge LIMIT 50";
+                if let Ok(know_result) = gq.raw_query(know_q).await {
+                    for row in flatten_result(&know_result) {
+                        let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let title = row.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                        let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("concept");
+                        let conf = row.get("confidence").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let tags_val = row.get("tags").and_then(|v| v.as_array()).map(|a| {
+                            a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
+                        });
+                        let content_val = row.get("content").and_then(|v| v.as_str()).map(|s| {
+                            if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() }
+                        });
+                        let src_url = row.get("source_url").and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty()).map(|s| s.to_string());
+                        nodes.push(GraphNode {
+                            id: id.to_string(),
+                            name: title.to_string(),
+                            kind: format!("knowledge:{}", kind),
+                            file_path: String::new(),
+                            confidence: conf,
+                            tags: tags_val,
+                            content: content_val,
+                            source_url: src_url,
+                        });
+                    }
+                }
+
+                // Knowledge relation edges
+                let know_edge_q = "SELECT in AS source, out AS target, 'supports' AS kind FROM supports; \
+                                   SELECT in AS source, out AS target, 'contradicts' AS kind FROM contradicts; \
+                                   SELECT in AS source, out AS target, 'related_to' AS kind FROM related_to";
+                if let Ok(ke_result) = gq.raw_query(know_edge_q).await {
+                    if let Some(arr) = ke_result.as_array() {
+                        for batch in arr {
+                            for row in batch.as_array().unwrap_or(&vec![]) {
+                                let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                                let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
+                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("related_to");
+                                if !src.is_empty() && !tgt.is_empty() {
+                                    edges.push(GraphEdge {
+                                        source: src.to_string(),
+                                        target: tgt.to_string(),
+                                        kind: kind.to_string(),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -441,6 +541,10 @@ async fn api_graph(
                     name: name.to_string(),
                     kind: kind.to_string(),
                     file_path: fp.to_string(),
+                    confidence: None,
+                    tags: None,
+                    content: None,
+                    source_url: None,
                 });
             }
         };
@@ -608,6 +712,10 @@ fn extract_neighbors(
                         name: name.to_string(),
                         kind: kind.to_string(),
                         file_path: fp.to_string(),
+                        confidence: None,
+                        tags: None,
+                        content: None,
+                        source_url: None,
                     });
                 }
                 let (src, tgt) = if is_caller {
@@ -838,6 +946,52 @@ async fn api_clusters(
         .await
     {
         Ok(result) => Json(result).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// Knowledge detail
+#[derive(Deserialize)]
+struct KnowledgeDetailParams {
+    id: Option<String>,
+    repo: Option<String>,
+}
+
+async fn api_knowledge_detail(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<KnowledgeDetailParams>,
+) -> impl IntoResponse {
+    let gq = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return (e.0, e.1).into_response(),
+    };
+    let id = params.id.unwrap_or_default();
+    if id.is_empty() {
+        return Json(serde_json::json!({"error": "No id"})).into_response();
+    }
+    let safe = id.replace('\'', "");
+    let q = format!(
+        "SELECT * FROM knowledge WHERE id = '{}'; \
+         SELECT out.id AS id, out.title AS title, out.kind AS kind, context FROM supports WHERE in = '{}'; \
+         SELECT out.id AS id, out.title AS title, out.kind AS kind, context FROM contradicts WHERE in = '{}'; \
+         SELECT out.id AS id, out.title AS title, out.kind AS kind, relation FROM related_to WHERE in = '{}'; \
+         SELECT in.id AS id, in.title AS title, in.kind AS kind, relation FROM related_to WHERE out = '{}'",
+        safe, safe, safe, safe, safe
+    );
+    match gq.raw_query(&q).await {
+        Ok(result) => {
+            let items = result.as_array();
+            let mut out = serde_json::Map::new();
+            let keys = ["entity", "supports", "contradicts", "related_out", "related_in"];
+            if let Some(arr) = items {
+                for (i, key) in keys.iter().enumerate() {
+                    if let Some(data) = arr.get(i) {
+                        out.insert(key.to_string(), data.clone());
+                    }
+                }
+            }
+            Json(serde_json::Value::Object(out)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

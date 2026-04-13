@@ -145,6 +145,57 @@ impl GraphRagServer {
             current_names = new_names;
         }
 
+        // Extended impact: imports edge (who imports the file containing this function)
+        if let Some(info) = func_info.first() {
+            let fp = info.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+            if !fp.is_empty() {
+                let import_q = "SELECT <-imports<-file AS importers FROM file WHERE path = $fp";
+                if let Ok(mut r) = ctx.db.query(import_q).bind(("fp", fp.to_string())).await {
+                    let rows: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                    let mut importers = Vec::new();
+                    for row in &rows {
+                        if let Some(arr) = row.get("importers").and_then(|v| v.as_array()) {
+                            for imp in arr {
+                                let p = imp.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+                                if p != fp && !importers.contains(&p.to_string()) {
+                                    importers.push(p.to_string());
+                                }
+                            }
+                        }
+                    }
+                    if !importers.is_empty() {
+                        output.push_str(&format!("### Files Importing This Module ({})\n", importers.len()));
+                        for p in &importers {
+                            output.push_str(&format!("- `{}`\n", p));
+                        }
+                        output.push('\n');
+                    }
+                }
+
+                // Type-level impact: if any class in this file is implemented/inherited
+                let type_q = "SELECT name, kind FROM class WHERE file_path = $fp";
+                if let Ok(mut r) = ctx.db.query(type_q).bind(("fp", fp.to_string())).await {
+                    let classes: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                    for cls in &classes {
+                        let cls_name = cls.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let impl_q = "SELECT in.name AS name, in.file_path AS file_path FROM implements WHERE out.name = $name";
+                        if let Ok(mut ir) = ctx.db.query(impl_q).bind(("name", cls_name.to_string())).await {
+                            let impls: Vec<serde_json::Value> = ir.take(0).unwrap_or_default();
+                            if !impls.is_empty() {
+                                output.push_str(&format!("### Types Implementing `{}` ({})\n", cls_name, impls.len()));
+                                for im in &impls {
+                                    let n = im.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let f = im.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                    output.push_str(&format!("- `{}` ({})\n", n, f));
+                                }
+                                output.push('\n');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         output
     }
 
