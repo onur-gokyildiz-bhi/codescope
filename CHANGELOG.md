@@ -4,6 +4,12 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-13
+
+### Fixed
+- Graph entity duplication: MCP auto-index pipeline now canonicalizes + strips `\\?\` from base path (matching CLI init behavior). Same file no longer gets different qualified_names from different index paths.
+- New `phase0_clean_stale()` wipes all code entities/edges before every re-index to prevent stale duplicates. Conversations, memory, and skills are preserved. Auto-index is now idempotent.
+
 ## [0.6.2] - 2026-04-13
 
 ### Added
