@@ -44,6 +44,14 @@ pub struct HttpCallParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct HttpAnalysisParams {
+    /// Mode: "calls" (find HTTP client calls) | "endpoint_callers" (find who calls a URL)
+    pub mode: String,
+    /// For "calls": optional HTTP method filter (GET, POST, ...). For "endpoint_callers": URL pattern.
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IndexSkillGraphParams {
     /// Folder path containing markdown skill files (relative to codebase root)
     pub path: String,
@@ -228,6 +236,16 @@ pub struct DeadCodeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RefactorParams {
+    /// Action: "rename" | "find_unused" | "safe_delete"
+    pub action: String,
+    /// Target name (function/class) — required for all actions
+    pub name: String,
+    /// For find_unused only: optional limit (default 50)
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct TeamPatternsParams {
     /// Focus area: "imports", "naming", "structure", or "all" (default)
     pub focus: Option<String>,
@@ -309,6 +327,52 @@ pub struct MemoryPinParams {
     pub name: String,
     /// Tier level: 0 = critical (always show), 1 = important, 2 = contextual (default)
     pub tier: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MemoryParams {
+    /// Action: "save" | "search" | "pin"
+    pub action: String,
+    /// For "save": memory content. For "search": query string. For "pin": memory name.
+    pub text: Option<String>,
+    /// For "search" only: max results (default 20)
+    pub limit: Option<usize>,
+    /// For "search" only: scope filter
+    pub scope: Option<String>,
+    /// For "pin" only: tier (0=critical, 1=important, 2=contextual)
+    pub tier: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct KnowledgeParams {
+    /// Action: "save" | "search" | "link" | "lint"
+    pub action: String,
+    /// For "save": title. For "search": query. For "link": from entity name.
+    pub title: Option<String>,
+    /// For "save": content body.
+    pub content: Option<String>,
+    /// For "save": kind (concept/entity/source/claim/decision).
+    pub kind: Option<String>,
+    /// For "save": confidence level (high/medium/low).
+    pub confidence: Option<String>,
+    /// For "save": optional source URL.
+    pub source_url: Option<String>,
+    /// For "save": tags array.
+    pub tags: Option<Vec<String>>,
+    /// For "search": max results (default 20).
+    pub limit: Option<usize>,
+    /// For "link": from entity name.
+    pub from_entity: Option<String>,
+    /// For "link": to entity name.
+    pub to_entity: Option<String>,
+    /// For "link": relation type (implemented_by, supports, contradicts, related_to, uses).
+    pub relation: Option<String>,
+    /// For "link": optional context string.
+    pub context: Option<String>,
+    /// For "search": a query is passed via `title`; also can pass via this field.
+    pub query: Option<String>,
+    /// For "lint": which check to run (orphans, low_confidence, contradictions, unlinked_code, stale, all).
+    pub check: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
