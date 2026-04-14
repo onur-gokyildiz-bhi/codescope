@@ -4,14 +4,11 @@
 
 **The brain your AI coding assistant is missing.**
 
-Most AI code tools embed your code as vectors and hope nearest-neighbor finds the
-right answer. Codescope builds an actual **knowledge graph** — entities, calls,
-imports, type hierarchies — so AI agents can *traverse* your code instead of guessing.
+A graph-first code intelligence engine. Your agents stop reading files and start traversing a knowledge graph — 99%+ cheaper, deterministic, sub-millisecond.
 
-A **GraphRAG engine** — not just embeddings, not just search.
-Rust-native, fully local, 57 MCP tools, 59 supported formats, 99%+ token savings.
+Rust-native · Fully local · 32 MCP tools · LSP bridge · 57 languages
 
-[Install](#install) · [How It Works](#how-it-works) · [Tools](#tools) · [Benchmarks](BENCHMARKS.md) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Why Graph-First?](#why-graph-first) · [Benchmarks](#benchmarks) · [Docs](docs/) · [Release Notes](https://github.com/onur-gokyildiz-bhi/codescope/releases)
 
 <img src="assets/demo-twitter.gif" alt="Codescope Demo" width="720">
 
@@ -19,388 +16,421 @@ Rust-native, fully local, 57 MCP tools, 59 supported formats, 99%+ token savings
 
 ---
 
-## Why?
+## Why This Exists
 
-AI coding assistants burn **148,000 tokens** reading files to find a function and its callers.
+AI coding assistants are stuck in 2023's playbook: embed every file as a vector, nearest-neighbor a chunk, pray it's relevant. When you ask *"if I change `User::email`, what breaks?"* — they read 40 files and burn 150,000 tokens guessing.
 
-Codescope does it in **542 tokens**. Same answer. **99.6% cheaper.**
+That's not a code intelligence problem. That's an **architecture** problem. Vectors can't do graph traversal. Fuzzy search can't tell you who calls whom.
 
-| Question | Traditional | Codescope | Saving |
-|----------|:----------:|:---------:|:------:|
-| Find function + callers | 148K tokens | 542 tokens | **99.6%** |
-| List all structs | 1.4M tokens | 1.2K tokens | **99.9%** |
-| Impact of changing X? | 142K tokens | 278 tokens | **99.8%** |
-| Largest functions | 454K tokens | 289 tokens | **99.9%** |
+Codescope solves it the right way: we parse your code into a **knowledge graph** — functions, calls, imports, type hierarchies, decisions, all of it — and let agents **walk the graph** instead of flipping through files.
 
-> *Benchmarked on 7 projects across 5 languages. See [BENCHMARKS.md](BENCHMARKS.md).*
+```
+Question: "Who calls parse_config transitively within 3 hops?"
+
+Traditional RAG:        Codescope:
+─────────────────       ─────────────────
+148,000 tokens          542 tokens
+~12 seconds             0.8 ms
+Fuzzy text match        Deterministic edge walk
+Guess confidence        Actual answer
+```
+
+---
+
+## The 60-Second Pitch
+
+```bash
+# 1. Install (one command)
+curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
+
+# 2. In your project
+cd your-project
+codescope init
+
+# That's it.
+# Claude Code, Cursor, Codex, or any MCP-compatible agent now has
+# 32 codebase tools wired up automatically.
+```
+
+Your agent can now:
+- **`search(mode="neighborhood", query="parse_config")`** — callers, callees, siblings, file context, in one call
+- **`impact_analysis("User::email", depth=3)`** — transitive blast radius in 2.5 ms
+- **`knowledge(action="search", query="status:done")`** — remember what was already shipped across sessions
+- **`code_health(mode="hotspots")`** — high-churn + high-complexity code combined in one query
+- **`refactor(action="safe_delete", name="foo")`** — check if a function has zero callers before removing it
+
+---
+
+## Why Graph-First?
+
+Most AI code tools (Cursor, Windsurf, Continue) index by embedding every file as vectors. That's **embeddings-first**. It's fine for "find something that *means* X" but catastrophic for questions like:
+
+- *"What functions transitively depend on `parse_config`?"*
+- *"If I change `User::email`, what tests break?"*
+- *"Show me the full call graph 3 hops out from `main`."*
+- *"Who implements this trait?"*
+
+These are **graph traversal questions**. Vector search gives you fuzzy matches. Codescope gives you an exact answer by walking indexed edges.
+
+```
+  EMBEDDINGS-FIRST                 GRAPH-FIRST (codescope)
+  ─────────────────                ─────────────────────────
+  parse → embed → vector DB        parse → entities + edges → SurrealDB
+                                                              + embeddings (fallback)
+  query: nearest neighbor          query: traverse edges + (optional) NN
+  best at: semantic similarity     best at: structural reasoning
+  blind to: call relationships     sees: who calls whom, blast radius,
+           type hierarchies                type hierarchies, dependencies
+```
+
+Embeddings stay as a **secondary index** for natural-language queries where structure doesn't help. But the **primary index is the graph** — the same way developers actually walk through code.
 
 ---
 
 ## Install
 
-**One command. No dependencies.**
+| Platform | Command |
+|----------|---------|
+| **Linux / macOS (ARM64)** | `curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh \| bash` |
+| **Windows** | `irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.ps1 \| iex` |
+| **Build from source** | `cargo install --git https://github.com/onur-gokyildiz-bhi/codescope` |
 
-```bash
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
+**Already installed?** `codescope --version` to check. Update with the same install command.
 
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.ps1 | iex
-```
+Pre-built binaries for:
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu` (NVIDIA DGX Spark, Apple Silicon via Rosetta, Graviton)
+- `aarch64-apple-darwin` (Apple Silicon native)
+- `x86_64-pc-windows-msvc`
 
-Then in any project:
+---
+
+## Quick Start
+
+### Option 1 — MCP mode (default, works with Claude Code)
 
 ```bash
 cd your-project
-codescope init    # indexes codebase + creates .mcp.json
+codescope init
+# Creates .mcp.json + indexes your code. That's it.
+# Restart Claude Code / Cursor / Zed / Codex — codescope is now available.
 ```
 
-That's it. Open Claude Code and you have 57 code intelligence tools.
-
-<details>
-<summary><b>Build from source</b></summary>
+### Option 2 — Daemon mode (MCP + Web UI in one process)
 
 ```bash
-git clone https://github.com/onur-gokyildiz-bhi/codescope
-cd codescope
-cargo build --release
-cp target/release/codescope ~/.local/bin/
-cp target/release/codescope-mcp ~/.local/bin/
+codescope init --daemon          # port 9877
+# Web UI: http://localhost:9877/
+# MCP:    http://localhost:9877/mcp
+# Solves all DB lock conflicts. One process serves everything.
 ```
 
-Requires Rust 1.82+ and a C/C++ compiler.
+### Option 3 — LSP mode (any editor with LSP support)
 
-</details>
+Add codescope as an LSP server in your editor (VS Code, Zed, Neovim, Helix, IntelliJ):
 
-See [docs/quickstart.md](docs/quickstart.md) for a step-by-step walkthrough with expected output at every stage, and [docs/troubleshooting.md](docs/troubleshooting.md) if you hit install or indexing issues.
-
----
-
-## How It Works
-
-```
-Your Code  ──→  tree-sitter  ──→  SurrealDB Graph  ──→  52 MCP Tools  ──→  AI Agent
-  .rs .ts       parse AST          entities +            search, trace,     Claude Code
-  .py .go       47 languages       relations             analyze, remember  Cursor, Zed
-  .dart .cs                        + embeddings                             Codex CLI
+```bash
+codescope lsp
+# or: codescope-lsp (standalone binary)
 ```
 
-**Index** any codebase in seconds. **Query** the graph instead of reading files. **Remember** decisions across sessions.
+Your editor's **Go to Definition**, **Find References**, **Hover**, and **Workspace Symbols** are now graph-backed. Sub-millisecond response. No extension needed.
 
-### Why graph-first?
+### Manual commands (for scripting)
 
-Most AI code-context tools (Cursor, Windsurf, Continue) are **embeddings-first**:
-they chunk your code, embed it as vectors, and do nearest-neighbor lookups.
-Vectors are great for "find code that *means* X", but they can't answer:
-
-> *"What functions transitively depend on `parse_config`?"*
-> *"If I change `User::email`, what breaks?"*
-> *"Show me the call graph 3 hops out from `main`."*
-
-These are **graph traversal questions**. Embeddings give you a fuzzy match;
-codescope gives you a deterministic answer in milliseconds — because the
-graph already knows.
-
-```
-  EMBEDDINGS-FIRST                  GRAPH-FIRST (codescope)
-  ─────────────────                 ─────────────────────────
-  parse → embed → vector DB         parse → entities + edges → graph DB
-                                                                + embeddings (fallback)
-  query: nearest neighbor           query: traverse edges + nearest neighbor
-  best at: semantic similarity      best at: structural reasoning
-  blind to: call relationships      handles: who calls whom, blast radius,
-            type hierarchies                  inheritance, dependencies
-```
-
-Codescope keeps embeddings as a **secondary index** for the cases where
-structure doesn't help (`semantic_search` for "config parsing functions"),
-but the **primary index is the graph** — which is what developers actually
-walk through their code.
-
-### The Three Pillars
-
-**1. Code Intelligence** — Graph-powered search, call tracing, impact analysis
-
-```
-> Who calls parse_source?
-  → 3 callers: index_codebase (lib.rs:145), cmd_index (main.rs:380), test_parse (tests.rs:52)
-  Query time: 2.5ms | Tokens used: 116
-```
-
-**2. AI Memory** — Decisions, problems, solutions persist across sessions
-
-```
-> Opening src/graph/builder.rs...
-  Past Decisions:
-  - [PINNED] Use UPSERT SET for entity insertion (prevents duplicates)
-  - Switch from RocksDB to SurrealKV (zero lock contention)
-  Known Issues:
-  - Batch insert timeout on graphs >50K entities
-```
-
-**3. Project Intelligence** — Auto-detects stack, architecture, conventions
-
-```
-## Project Profile
-- Stack: Rust (primary), TypeScript (secondary) — Axum, SurrealDB
-- Architecture: Workspace monorepo (5 crates)
-- Convention: snake_case
-- Scale: 2,279 functions, 763 classes, 1,107 files
+```bash
+codescope index .                       # Index current project
+codescope search "parse" --mode fuzzy   # Find functions
+codescope stats                         # Graph overview
+codescope review main..HEAD             # Impact analysis of a PR
+codescope migrate                       # Upgrade DB schema
+codescope web . --host 0.0.0.0          # 3D web UI, LAN accessible
 ```
 
 ---
 
-## Tools
-
-### 57 MCP tools in 9 categories:
+## 32 MCP Tools in 9 Categories
 
 <table>
-<tr>
-<td width="50%">
+<tr><td width="50%" valign="top">
 
 **Code Search & Navigation**
-| Tool | What it does |
-|------|-------------|
-| `search_functions` | Fuzzy search by name |
-| `find_function` | Exact match with body |
-| `find_callers` | Who calls this? |
-| `find_callees` | What does this call? |
-| `impact_analysis` | Blast radius (N hops) |
-| `file_entities` | All symbols in a file |
-| `find_dead_code` | Zero-caller functions |
-
-</td>
-<td width="50%">
-
-**Obsidian-like Exploration**
-| Tool | What it does |
-|------|-------------|
-| `explore` | Full entity neighborhood |
-| `context_bundle` | File overview + history |
-| `backlinks` | Incoming references |
-| `related` | Cross-type search |
-| `type_hierarchy` | Inheritance chains |
-| `export_obsidian` | Export as vault |
-
-</td>
-</tr>
-<tr>
-<td>
-
-**AI Memory & Context**
-| Tool | What it does |
-|------|-------------|
-| `capture_insight` | Record decisions in real-time |
-| `memory_save` | Persistent notes |
-| `memory_search` | Search past decisions |
-| `memory_pin` | Pin critical facts |
-| `conversation_search` | Search session history |
-| `conversation_timeline` | Entity change over time |
-
-</td>
-<td>
-
-**Git & Temporal Analysis**
-| Tool | What it does |
-|------|-------------|
-| `hotspot_detection` | High-risk code |
-| `file_churn` | Most changed files |
-| `change_coupling` | Files that change together |
-| `contributor_map` | Who knows what |
-| `review_diff` | Graph-aware diff review |
-| `suggest_reviewers` | Best reviewer for a PR |
-
-</td>
-</tr>
-<tr>
-<td>
+- `search(mode)` — fuzzy / exact / file / cross_type / neighborhood / backlinks
+- `find_callers` / `find_callees` — 1-hop call graph
+- `impact_analysis` — transitive BFS blast radius
+- `type_hierarchy` — inheritance chains
+- `context_bundle` — file overview with delta-mode caching
 
 **Code Quality**
-| Tool | What it does |
-|------|-------------|
-| `detect_code_smells` | God functions, cycles, dupes |
-| `custom_lint` | Your own SurrealQL rules |
-| `team_patterns` | Convention detection |
-| `edit_preflight` | Check before editing |
-| `api_changelog` | What changed since last index |
+- `lint(mode)` — dead_code / smells / custom SurrealQL rules
+- `refactor(action)` — rename / find_unused / safe_delete
+- `edit_preflight` — check edit against team patterns
 
-</td>
-<td>
+</td><td width="50%" valign="top">
+
+**Knowledge Management (cross-session, cross-agent)**
+- `knowledge(action)` — save / search / link / lint
+- `knowledge` scopes: `project` / `global` / `both`
+- `memory(action)` — save / search / pin
+- `capture_insight` — record decisions in real-time
+- `manage_adr` — Architecture Decision Records
+
+**Git & Temporal**
+- `code_health(mode)` — hotspots / churn / coupling / review_diff
+- `sync_git_history` — pipe git log into the graph
+- `contributors(mode)` — map / reviewers / patterns
+- `conversations(action)` — index / search / timeline
+
+</td></tr>
+<tr><td valign="top">
 
 **Semantic Search**
-| Tool | What it does |
-|------|-------------|
-| `embed_functions` | Generate embeddings |
-| `semantic_search` | Search by meaning |
-| `suggest_structure` | Scaffold new projects |
-| `ask` | Natural language → query |
+- `semantic_search` — embedding-based, for natural language
+- `ask` — decomposes questions into structured queries
+- `embed_functions` — generate embeddings on demand
 
-</td>
-</tr>
+**HTTP / API Analysis**
+- `http_analysis(mode)` — calls / endpoint_callers
+
+</td><td valign="top">
+
+**Skills / Project**
+- `skills(action)` — index / traverse / generate
+- `project(action)` — init / list
+- `index_codebase` — full or incremental
+- `export_obsidian` — export as wiki
+- `retrieve_archived` — fetch large tool outputs
+
+</td></tr>
 </table>
 
-Plus: `rename_symbol`, `safe_delete`, `find_unused`, `find_http_calls`, `find_endpoint_callers`, `sync_git_history`, `index_codebase`, `index_conversations`, `index_skill_graph`, `traverse_skill_graph`, `generate_skill_notes`, `manage_adr`, `community_detection`, `raw_query`, `graph_stats`, `supported_languages`, `init_project`, `list_projects`, `knowledge_save`, `knowledge_search`, `knowledge_link`, `knowledge_lint`, `retrieve_archived`
+Plus: `raw_query` (escape hatch), `graph_stats`, `supported_languages`, `suggest_structure`, `community_detection`, `api_changelog`.
+
+---
+
+## What Makes Codescope Different
+
+### 1. Graph-first, not embeddings-first
+Most competitors are vector databases wearing a codebase hat. Codescope is a **knowledge graph** with embeddings as a secondary index.
+
+### 2. Token efficiency that shows on the bill
+Real numbers from 7 projects across 5 languages:
+
+| Question | Traditional RAG | Codescope | Saved |
+|----------|:---------------:|:---------:|:-----:|
+| Find function + callers | 148K tokens | 542 tokens | **99.6%** |
+| List all structs | 1.4M tokens | 1.2K tokens | **99.9%** |
+| Impact of changing X | 142K tokens | 278 tokens | **99.8%** |
+| Largest functions | 454K tokens | 289 tokens | **99.9%** |
+
+[Full methodology →](BENCHMARKS.md)
+
+### 3. Delta-mode context bundling
+Second call to `context_bundle` on the same file returns only the structural diff — not the whole map. 97% token savings on repeat visits.
+
+### 4. File watcher auto re-index
+Drop into your editor, write code, the graph updates in the background. No manual re-index. Debounced 2s batches. Hash-checked skip.
+
+### 5. Multi-agent memory
+Claude Code, Cursor, Codex, Zed — all agents connected to codescope see the same memory. Decisions captured by one persist for the next.
+
+```
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│ Claude Code │  │   Cursor    │  │  Codex CLI  │
+└──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+       │                │                │
+       └────────────────┼────────────────┘
+                        │
+                ┌───────▼────────┐
+                │ Codescope MCP  │
+                │  (32 tools)    │
+                └───────┬────────┘
+                        │
+                ┌───────▼────────┐
+                │   SurrealDB    │
+                │ Code entities  │
+                │ Call graphs    │
+                │ Decisions      │
+                │ Embeddings     │
+                └────────────────┘
+```
+
+### 6. CUDA / GPU-aware
+First code intelligence tool to understand `__global__`, `__device__` qualifiers and kernel launch sites (`kernel<<<grid, block>>>`). If you're building GPU code, codescope actually knows what you're doing.
+
+### 7. One-command install, zero external services
+No SaaS. No API keys. No cloud. Binary installs, indexes locally, serves locally. Works offline.
 
 ---
 
 ## Supported Languages
 
-### 47 Programming Languages (tree-sitter)
+**47 programming languages via tree-sitter:**
+TypeScript · JavaScript · Python · **Rust** · Go · Java · C · C++ · C# · CUDA (`__global__` / `__device__` / kernel launches) · Ruby · PHP · Swift · Dart · Kotlin · Scala · Lua · Zig · Elixir · Haskell · OCaml · HTML · Julia · Bash · R · CSS · Erlang · Objective-C · HCL/Terraform · Nix · CMake · Makefile · Verilog · Fortran · GLSL · GraphQL · D · Solidity · GDScript · Elm · Groovy · Pascal · Ada · Common Lisp · Scheme · Racket · XML/SVG · Protobuf
 
-TypeScript · JavaScript · Python · Rust · Go · Java · C · C++ · C# · Ruby · PHP · Swift · Dart · Kotlin* · Scala · Lua · Zig · Elixir · Haskell · OCaml · HTML · Julia · Bash · R · CSS · Erlang · Objective-C · HCL/Terraform · Nix · CMake · Makefile · Verilog · Fortran · GLSL · GraphQL · D · Solidity · GDScript · Elm · Groovy · Pascal · Ada · Common Lisp · Scheme · Racket · XML/SVG · Protobuf
-
-### 10 Content Formats (custom parsers)
-
+**10 content formats via custom parsers:**
 JSON · YAML · TOML · Markdown · Dockerfile · SQL · Terraform · OpenAPI · Gradle · Protobuf · .env
-
-<sub>*Kotlin, Perl, Svelte, Vue, PowerShell pending tree-sitter 0.26 upgrade</sub>
-
----
-
-## Multi-Agent Memory
-
-Codescope is the **shared brain** for all your AI coding tools:
-
-```
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│ Claude Code  │   │   Cursor    │   │  Codex CLI  │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                  │
-       └──────────────────┼──────────────────┘
-                          │
-                 ┌────────▼────────┐
-                 │  Codescope MCP  │
-                 │   (57 tools)    │
-                 └────────┬────────┘
-                          │
-                 ┌────────▼────────┐
-                 │   SurrealDB     │
-                 │  Knowledge      │
-                 │    Graph        │
-                 │                 │
-                 │ Code entities   │
-                 │ Call graphs     │
-                 │ Decisions       │
-                 │ Problems        │
-                 │ Corrections     │
-                 │ Embeddings      │
-                 └─────────────────┘
-```
-
-- **Real-time capture**: `capture_insight` records decisions/problems/corrections during the session
-- **Proactive context**: Opening a file shows past decisions and known issues
-- **Session resume**: Next session starts with open problems and pinned decisions
-- **Feedback loop**: When the user corrects the AI, the correction is recorded
-- **Agent identity**: Every memory tagged with which AI agent wrote it
-
----
-
-## 3D Web UI
-
-Interactive knowledge graph visualization:
-
-```bash
-codescope web /path/to/project --port 9876
-```
-
-<img src="assets/demo.gif" alt="3D Web UI" width="720">
-
-Knowledge graph nodes (octahedrons) alongside code entities · Dashed edges for supports/contradicts/related_to · Knowledge panel with confidence, tags, linked entities · Unified search (code + knowledge) · Loading states · Node sidebar · File tree · Search autocomplete · Hotspot heatmap · Syntax highlighting · Minimap · Cluster view
 
 ---
 
 ## Benchmarks
 
-Tested on **7 projects** across **5 languages**:
+Tested on **7 real repositories** across 5 languages:
 
-| Project | Language | Files | Entities | Index Time | Token Savings |
-|---------|----------|------:|--------:|-----------:|:------------:|
-| tokio | Rust | 769 | 12,628 | 33s | 99.3-100% |
-| FastAPI | Python | 2,713 | 50,150 | 96s | 99.9-100% |
-| Gin | Go | 108 | 2,397 | 5s | 99.4-100% |
-| Zod | TypeScript | 465 | 21,165 | 84s | 99.8-100% |
-| Express | JavaScript | 158 | 450 | 2s | 99.8-100% |
-| ripgrep | Rust | 101 | 3,594 | 10s | 99.6-99.9% |
-| axum | Rust | 296 | 4,231 | 11s | 97.7-99.9% |
+| Project | Language | Files | Entities | Index | Query p50 |
+|---------|----------|------:|---------:|------:|----------:|
+| tokio | Rust | 769 | 12,628 | 33s | 2 ms |
+| FastAPI | Python | 2,713 | 50,150 | 96s | 4 ms |
+| Gin | Go | 108 | 2,397 | 5s | 0.8 ms |
+| Zod | TypeScript | 465 | 21,165 | 84s | 3 ms |
+| Express | JavaScript | 158 | 450 | 2s | 0.3 ms |
+| ripgrep | Rust | 101 | 3,594 | 10s | 1 ms |
+| axum | Rust | 296 | 4,231 | 11s | 1 ms |
 
-Query latency: **0.2ms – 70ms** across all projects.
+**Multi-hop traversal:** 0.5–1.3 ms for 3-hop impact analysis on repos up to 50K entities. Graph traversal scales with edge count, not repo size.
 
-> Full results with competitive comparison: [BENCHMARKS.md](BENCHMARKS.md)
+Full methodology and competitive comparison: [BENCHMARKS.md](BENCHMARKS.md)
+
+---
+
+## vs Competitors
+
+### vs AI-native code editors
+
+| | **Codescope** | Cursor | Windsurf | Claude Code (built-in) | Continue.dev |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Architecture | **Graph-first** | Embeddings | Embeddings | File context | Embeddings |
+| Call graph traversal | **Native** | ❌ | ❌ | ❌ | ❌ |
+| Impact analysis (N-hop) | **Native** | ❌ | ❌ | ❌ | ❌ |
+| Type hierarchy queries | **Native** | ❌ | ❌ | ❌ | ❌ |
+| Cross-session memory | **Yes (shared)** | Limited | ❌ | Per-project files | ❌ |
+| Works with any agent | **Yes (MCP + LSP)** | Cursor only | Windsurf only | Claude only | Continue only |
+| Fully local | **Yes** | ❌ (cloud) | ❌ (cloud) | Yes | Yes |
+| CUDA/GPU code-aware | **Yes** | ❌ | ❌ | ❌ | ❌ |
+| Price | **Free (MIT)** | $20+/mo | $15+/mo | Included | Free |
+
+### vs dedicated code intelligence tools
+
+| | **Codescope** | Sourcegraph | Greptile | Aider |
+|---|:---:|:---:|:---:|:---:|
+| Graph database | SurrealDB | Partial (SCIP) | Yes (cloud) | ❌ |
+| MCP protocol | **32 tools** | ❌ | API only | ❌ |
+| LSP bridge | **Yes** | Yes (per-lang) | ❌ | ❌ |
+| AI memory | **Yes** | ❌ | ❌ | ❌ |
+| Self-hosted | **Yes** | Paid tier | ❌ | Yes |
+| Price | **Free (MIT)** | $$$ | SaaS | Free |
+
+---
+
+## Architecture
+
+```
+Your Code
+    ↓
+tree-sitter parsers (47 langs + 10 formats)
+    ↓
+SurrealDB knowledge graph
+    │
+    ├── Entities: function, class, file, import, package, config, doc, infra, knowledge
+    ├── Relations: calls, contains, imports, implements, inherits, supports,
+    │              contradicts, related_to, launches (CUDA kernels)
+    └── Secondary: fastembed-rs vector embeddings for semantic_search
+    ↓
+3 interfaces:
+    ├── MCP (stdio or HTTP daemon) ─── Claude Code, Cursor, Codex, Zed
+    ├── LSP (stdio)                 ─── VS Code, Neovim, Helix, IntelliJ
+    └── Web UI (HTTP port 9876/9877) ── 3D graph, Obsidian-like navigation
+```
+
+---
+
+## Roadmap
+
+**Recently shipped (v0.7.0 → v0.7.6):**
+- ✅ Knowledge graph visualization (3D web UI)
+- ✅ Delta-mode context bundling (97% token save on repeats)
+- ✅ Graph-ranked search (caller-count PPR)
+- ✅ Multi-edge impact analysis (calls + imports + implements)
+- ✅ File watcher auto re-index
+- ✅ Daemon mode (single process for MCP + Web UI)
+- ✅ Tool consolidation (57 → 32, -44%)
+- ✅ CUDA / GPU code semantic support
+- ✅ LSP bridge (any editor)
+- ✅ Schema migration system
+- ✅ Cross-project shared knowledge graph
+- ✅ Diff-aware PR review (`codescope review main..HEAD`)
+
+**Next (v0.8.x):**
+- 🔜 VSCode extension (built on LSP)
+- 🔜 Continuous Obsidian/Notion sync
+- 🔜 Opt-in telemetry (drop unused tools based on real usage)
+- 🔜 Windows MSI installer
+
+[Full roadmap in the knowledge graph](https://github.com/onur-gokyildiz-bhi/codescope/tree/main/docs) — `knowledge(action="search", query="status:planned")` when connected.
+
+---
+
+## Documentation
+
+- [Quickstart](docs/quickstart.md) — step-by-step walkthrough
+- [LLM Usage Guide](docs/llm-usage-guide.md) — tool selection patterns for AI agents
+- [Troubleshooting](docs/troubleshooting.md) — common issues + fixes
+- [Benchmarks](BENCHMARKS.md) — methodology and numbers
+- [Contributing](CONTRIBUTING.md) — dev setup, test conventions
+- [Architecture deep-dive](ARCHITECTURE.md) — graph schema and internals
+- [Security](SECURITY.md) — threat model and disclosure policy
 
 ---
 
 ## Configuration
 
 | Setting | Default | Override |
-|---------|---------|---------|
-| Database | `~/.codescope/db/{repo}/` | `--db-path` |
+|---------|---------|----------|
+| DB path | `~/.codescope/db/<repo>/` | `--db-path` or `CODESCOPE_DB_PATH` |
 | Web UI port | `9876` | `--port` |
 | Daemon port | `9877` | `--port` |
 | Embeddings | FastEmbed (local) | `--provider ollama\|openai` |
-| Context file | `~/.codescope/projects/{repo}/CONTEXT.md` | — |
-
-Environment variables:
-- `RUST_LOG` — Log level (error/warn/info/debug)
-- `OPENAI_API_KEY` — For OpenAI embeddings
-- `RUST_MIN_STACK` — Thread stack size for large projects (default 8MB)
-
----
-
-## Comparison
-
-### vs AI-native code editors
-
-| Feature | Codescope | Cursor | Windsurf | Claude Code | Continue.dev |
-|---------|:---------:|:------:|:--------:|:-----------:|:------------:|
-| Architecture | **Graph-first** | Embeddings | Embeddings | Built-in context | Embeddings |
-| Call graph traversal | **Native** | No | No | No | No |
-| Impact analysis (N-hop) | **Native** | No | No | No | No |
-| Type hierarchy queries | **Native** | No | No | No | No |
-| Semantic search | BQ + Cosine | Cosine | Cosine | — | Cosine |
-| Cross-repo queries | **Yes** | Limited | Limited | No | No |
-| MCP tools exposed | **57** | — | — | Native | — |
-| Persistent memory | **Yes** | Limited | No | Skill files | No |
-| Fully local | **Yes** | No (cloud) | No (cloud) | Local | Yes |
-| Works with any AI agent | **Yes** (MCP) | Cursor only | Windsurf only | Claude only | Continue only |
-
-### vs code-intelligence tools
-
-| Feature | Codescope | Greptile | Sourcegraph | Aider |
-|---------|:---------:|:--------:|:-----------:|:-----:|
-| Graph database | SurrealDB | Yes (cloud) | Partial (SCIP) | No |
-| MCP protocol | **57 tools** | API only | No | No |
-| Call graph | Yes | Yes | SCIP | Repo-map only |
-| AI memory | **Yes** | No | No | No |
-| Dead code detection | **Yes** | No | No | No |
-| Git history analysis | **Yes** | No | No | No |
-| Fully local | **Yes** | No | No | Yes |
-| Languages | 57 formats | N/A | 30+ | 130+ |
-| Pricing | **Free (MIT)** | Paid SaaS | Paid SaaS | Free |
-
----
-
-## Self-Update
-
-```bash
-# Check for updates automatically (session start hook)
-# Or manually:
-/cs-update
-```
+| Log level | `info` | `RUST_LOG=debug` |
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing conventions, and PR checklist.
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup.
 
 ```bash
-cargo test --workspace          # Run all tests
-cargo clippy -- -D warnings     # Lint
+cargo test --workspace          # All tests
+cargo clippy -- -D warnings     # Lint (strict)
 cargo run -p codescope-bench    # Benchmarks
+cargo fmt --all                 # Format (required before commit)
 ```
+
+CI auto-formats on push to main. You still should run `cargo fmt --all` locally.
+
+---
+
+## Credits
+
+- **Graph traversal:** SurrealDB
+- **Parsing:** tree-sitter + its 47 language grammars
+- **Embeddings:** FastEmbed-rs
+- **MCP protocol:** rmcp
+- **LSP server:** tower-lsp
+- **3D visualization:** Three.js + 3d-force-graph + SolidJS
+
+Inspired by:
+- [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — the wiki IS the product
+- [Graph of Skills (ICLR 2026)](https://github.com/davidliuk/graph-of-skills) — PPR over typed edges
+- [Relational Transformer (ICLR 2026)](https://github.com/snap-stanford/relational-transformer) — structure as attention mask
 
 ---
 
 ## License
 
 MIT — [Onur Gokyildiz](https://github.com/onur-gokyildiz-bhi)
+
+<div align="center">
+
+**If codescope saves you an afternoon of context-switching, [star the repo](https://github.com/onur-gokyildiz-bhi/codescope). That's what keeps this project going.**
+
+</div>
