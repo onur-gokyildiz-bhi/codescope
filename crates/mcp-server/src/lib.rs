@@ -120,6 +120,22 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
         tokio::spawn(async move {
             pipeline.run_full().await;
         });
+
+        // Start file watcher for incremental re-index on code changes
+        let watcher_db = db.clone();
+        let watcher_repo = repo_name.clone();
+        let watcher_path = path.clone();
+        tokio::spawn(async move {
+            // Wait for initial index to settle before watching
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            match watcher::start_watcher(&watcher_path) {
+                Ok(rx) => {
+                    watcher::spawn_reindex_task(rx, watcher_db, watcher_repo, watcher_path);
+                    tracing::info!("File watcher active — auto re-index on file changes");
+                }
+                Err(e) => tracing::warn!("File watcher failed to start: {}", e),
+            }
+        });
     }
 
     // Spawn embedded web UI on port 9876 (same DB, no lock conflict)
