@@ -5,7 +5,13 @@ use std::path::PathBuf;
 
 use crate::db::connect_db;
 
-pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf>) -> Result<()> {
+pub async fn run(
+    project_path: PathBuf,
+    repo_name: &str,
+    db_path: Option<PathBuf>,
+    use_daemon: bool,
+    daemon_port: u16,
+) -> Result<()> {
     use std::time::Instant;
 
     let project_path =
@@ -27,24 +33,60 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
 
     println!("🔧 Initializing Codescope for '{}'...\n", repo_name);
 
-    // Step 1: Find codescope-mcp binary
-    let mcp_binary = find_mcp_binary();
-    if mcp_binary.is_none() {
-        eprintln!("⚠ codescope-mcp binary not found. Run 'codescope install' first,");
-        eprintln!("  or build with: cargo build --release -p codescope-mcp");
-    }
-
-    // Step 2: Create .mcp.json
+    // Step 1: Detect or start daemon, OR find stdio binary
     let mcp_json_path = project_path.join(".mcp.json");
-    let mcp_cmd = mcp_binary
-        .as_deref()
-        .unwrap_or_else(|| std::path::Path::new("codescope-mcp"));
-
     let project_path_str = project_path.to_string_lossy().replace('\\', "\\\\");
-    let mcp_cmd_str = mcp_cmd.to_string_lossy().replace('\\', "\\\\");
 
-    let mcp_json = format!(
-        r#"{{
+    let daemon_running = is_daemon_running(daemon_port);
+
+    let mcp_json = if use_daemon || daemon_running {
+        // Daemon mode — HTTP MCP config
+        if !daemon_running {
+            println!("🚀 Starting codescope daemon on port {}...", daemon_port);
+            if let Err(e) = crate::commands::daemon::start(daemon_port) {
+                eprintln!("⚠ Failed to start daemon: {e}. Falling back to stdio mode.");
+                return run_stdio_init(project_path, repo_name, db_path).await;
+            }
+            // Wait for daemon to be ready
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                if is_daemon_running(daemon_port) {
+                    break;
+                }
+            }
+        } else {
+            println!(
+                "✓ Daemon already running on port {} — using HTTP MCP config",
+                daemon_port
+            );
+        }
+
+        format!(
+            r#"{{
+  "mcpServers": {{
+    "codescope": {{
+      "type": "http",
+      "url": "http://127.0.0.1:{}/mcp"
+    }}
+  }}
+}}
+"#,
+            daemon_port
+        )
+    } else {
+        // Stdio mode (default)
+        let mcp_binary = find_mcp_binary();
+        if mcp_binary.is_none() {
+            eprintln!("⚠ codescope-mcp binary not found. Run 'codescope install' first,");
+            eprintln!("  or build with: cargo build --release -p codescope-mcp");
+        }
+        let mcp_cmd = mcp_binary
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("codescope-mcp"));
+        let mcp_cmd_str = mcp_cmd.to_string_lossy().replace('\\', "\\\\");
+
+        format!(
+            r#"{{
   "mcpServers": {{
     "codescope": {{
       "command": "{}",
@@ -53,8 +95,9 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
   }}
 }}
 "#,
-        mcp_cmd_str, project_path_str, repo_name
-    );
+            mcp_cmd_str, project_path_str, repo_name
+        )
+    };
 
     if mcp_json_path.exists() {
         println!("📄 .mcp.json already exists — updating...");
@@ -188,14 +231,42 @@ pub async fn run(project_path: PathBuf, repo_name: &str, db_path: Option<PathBuf
 
     // Step 5: Summary
     println!("\n✅ Codescope initialized!\n");
-    println!("   Next time you open this project in Claude Code,");
-    println!("   Codescope starts automatically with 52 MCP tools.\n");
-    println!("   Manual commands:");
+    if use_daemon || is_daemon_running(daemon_port) {
+        println!("   🚀 Daemon mode — MCP + Web UI share one process (no lock conflicts)");
+        println!("   Web UI: http://localhost:{}/", daemon_port);
+        println!("   MCP:    http://localhost:{}/mcp", daemon_port);
+        println!("   Stop:   codescope stop --port {}", daemon_port);
+    } else {
+        println!("   Next time you open this project in Claude Code,");
+        println!("   Codescope starts automatically with 57 MCP tools.");
+        println!("   Tip: use --daemon flag to avoid lock conflicts between web UI and MCP.");
+    }
+    println!("\n   Manual commands:");
     println!("     codescope search <query> --repo {}", repo_name);
     println!("     codescope stats --repo {}", repo_name);
-    println!("     codescope-web --repo {} --port 8080", repo_name);
 
     Ok(())
+}
+
+/// Check if a codescope daemon is running on the given port.
+fn is_daemon_running(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{}", port).parse().unwrap(),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok()
+}
+
+/// Fallback: stdio mode init if daemon start fails.
+async fn run_stdio_init(
+    project_path: PathBuf,
+    repo_name: String,
+    db_path: Option<PathBuf>,
+) -> Result<()> {
+    // Re-call run() with daemon=false, but the outer run() already wrote .mcp.json…
+    // This fallback is only for the case daemon was requested but failed to start.
+    // We recursively call run() with use_daemon=false.
+    Box::pin(run(project_path, &repo_name, db_path, false, 9877)).await
 }
 
 /// Find the codescope-mcp binary — check PATH, common locations, and sibling dir.

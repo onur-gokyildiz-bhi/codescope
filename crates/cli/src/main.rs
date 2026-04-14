@@ -85,10 +85,15 @@ async fn main() -> Result<()> {
         Commands::Languages => {
             commands::languages::run();
         }
-        Commands::Init { path } => {
+        Commands::Init {
+            path,
+            daemon,
+            daemon_port,
+        } => {
             let project_path = path
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            commands::init::run(project_path, &global_repo, cli.db_path).await?;
+            commands::init::run(project_path, &global_repo, cli.db_path, daemon, daemon_port)
+                .await?;
         }
         Commands::Install => {
             commands::install::run()?;

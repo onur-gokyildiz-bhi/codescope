@@ -89,7 +89,15 @@ pub enum Commands {
     Languages,
 
     /// Initialize Codescope in current project (creates .mcp.json + first index)
-    Init { path: Option<PathBuf> },
+    Init {
+        path: Option<PathBuf>,
+        /// Use daemon mode: start background daemon, HTTP .mcp.json (no DB lock conflicts)
+        #[arg(long)]
+        daemon: bool,
+        /// Daemon port (only with --daemon, default 9877)
+        #[arg(long, default_value = "9877")]
+        daemon_port: u16,
+    },
 
     /// Diagnose and fix common setup issues
     Doctor {
