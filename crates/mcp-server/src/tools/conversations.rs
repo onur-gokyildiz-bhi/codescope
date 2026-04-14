@@ -11,9 +11,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = conversations_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Index Claude Code conversation transcripts into the knowledge graph
-    #[tool(
-        description = "Index conversation history into the knowledge graph."
-    )]
+    #[tool(description = "Index conversation history into the knowledge graph.")]
     async fn index_conversations(
         &self,
         Parameters(params): Parameters<IndexConversationsParams>,
@@ -185,9 +183,7 @@ impl GraphRagServer {
     }
 
     /// Search conversation history — find past decisions, problems, and solutions
-    #[tool(
-        description = "Search conversations for decisions, problems, solutions."
-    )]
+    #[tool(description = "Search conversations for decisions, problems, solutions.")]
     async fn conversation_search(
         &self,
         Parameters(params): Parameters<ConversationSearchParams>,
@@ -286,9 +282,7 @@ impl GraphRagServer {
     }
 
     /// Search conversation history by time — find what was discussed about an entity recently
-    #[tool(
-        description = "Timeline of conversation activity for a code entity."
-    )]
+    #[tool(description = "Timeline of conversation activity for a code entity.")]
     async fn conversation_timeline(
         &self,
         Parameters(params): Parameters<ConversationTimelineParams>,

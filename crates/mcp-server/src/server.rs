@@ -128,12 +128,16 @@ impl GraphRagServer {
     }
 
     /// Accessor for the delta-mode context cache.
-    pub(crate) fn context_cache(&self) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
+    pub(crate) fn context_cache(
+        &self,
+    ) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
         &self.context_cache
     }
 
     /// Accessor for the result archive (large output storage).
-    pub(crate) fn result_archive(&self) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
+    pub(crate) fn result_archive(
+        &self,
+    ) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
         &self.result_archive
     }
 

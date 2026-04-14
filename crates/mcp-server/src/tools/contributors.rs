@@ -10,9 +10,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = contributors_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Get contributor expertise map — who knows which parts of the codebase
-    #[tool(
-        description = "Contributor expertise map: who knows which files best."
-    )]
+    #[tool(description = "Contributor expertise map: who knows which files best.")]
     async fn contributor_map(&self) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -46,9 +44,7 @@ impl GraphRagServer {
     }
 
     /// Suggest reviewers for changed files based on git history
-    #[tool(
-        description = "Suggest reviewers for changed files by contributor expertise."
-    )]
+    #[tool(description = "Suggest reviewers for changed files by contributor expertise.")]
     async fn suggest_reviewers(&self, Parameters(params): Parameters<DiffReviewParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

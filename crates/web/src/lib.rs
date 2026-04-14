@@ -315,10 +315,19 @@ async fn api_search(
         for row in flatten_result(&know_results) {
             let mut obj = serde_json::Map::new();
             let title = row.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-            let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("concept");
+            let kind = row
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("concept");
             obj.insert("name".into(), serde_json::json!(title));
-            obj.insert("id".into(), row.get("id").cloned().unwrap_or(serde_json::json!(title)));
-            obj.insert("kind".into(), serde_json::json!(format!("knowledge:{}", kind)));
+            obj.insert(
+                "id".into(),
+                row.get("id").cloned().unwrap_or(serde_json::json!(title)),
+            );
+            obj.insert(
+                "kind".into(),
+                serde_json::json!(format!("knowledge:{}", kind)),
+            );
             if let Some(conf) = row.get("confidence") {
                 obj.insert("confidence".into(), conf.clone());
             }
@@ -467,16 +476,31 @@ async fn api_graph(
                     for row in flatten_result(&know_result) {
                         let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("");
                         let title = row.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                        let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("concept");
-                        let conf = row.get("confidence").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let kind = row
+                            .get("kind")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("concept");
+                        let conf = row
+                            .get("confidence")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                         let tags_val = row.get("tags").and_then(|v| v.as_array()).map(|a| {
-                            a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
+                            a.iter()
+                                .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                                .collect::<Vec<_>>()
                         });
                         let content_val = row.get("content").and_then(|v| v.as_str()).map(|s| {
-                            if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() }
+                            if s.len() > 200 {
+                                format!("{}…", &s[..200])
+                            } else {
+                                s.to_string()
+                            }
                         });
-                        let src_url = row.get("source_url").and_then(|v| v.as_str())
-                            .filter(|s| !s.is_empty()).map(|s| s.to_string());
+                        let src_url = row
+                            .get("source_url")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string());
                         nodes.push(GraphNode {
                             id: id.to_string(),
                             name: title.to_string(),
@@ -500,7 +524,10 @@ async fn api_graph(
                             for row in batch.as_array().unwrap_or(&vec![]) {
                                 let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
                                 let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
-                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("related_to");
+                                let kind = row
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("related_to");
                                 if !src.is_empty() && !tgt.is_empty() {
                                     edges.push(GraphEdge {
                                         source: src.to_string(),
@@ -982,7 +1009,13 @@ async fn api_knowledge_detail(
         Ok(result) => {
             let items = result.as_array();
             let mut out = serde_json::Map::new();
-            let keys = ["entity", "supports", "contradicts", "related_out", "related_in"];
+            let keys = [
+                "entity",
+                "supports",
+                "contradicts",
+                "related_out",
+                "related_in",
+            ];
             if let Some(arr) = items {
                 for (i, key) in keys.iter().enumerate() {
                     if let Some(data) = arr.get(i) {

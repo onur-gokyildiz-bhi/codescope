@@ -12,9 +12,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = skills_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Index a folder of markdown skill/knowledge files into the graph
-    #[tool(
-        description = "Index markdown skill files into graph with wikilinks."
-    )]
+    #[tool(description = "Index markdown skill files into graph with wikilinks.")]
     async fn index_skill_graph(
         &self,
         Parameters(params): Parameters<IndexSkillGraphParams>,
@@ -120,9 +118,7 @@ impl GraphRagServer {
     }
 
     /// Navigate the skill/knowledge graph with progressive disclosure
-    #[tool(
-        description = "Navigate skill graph with progressive detail levels 1-4."
-    )]
+    #[tool(description = "Navigate skill graph with progressive detail levels 1-4.")]
     async fn traverse_skill_graph(
         &self,
         Parameters(params): Parameters<TraverseSkillGraphParams>,
@@ -222,9 +218,7 @@ impl GraphRagServer {
     }
 
     /// Auto-generate skill notes from conversation history
-    #[tool(
-        description = "Auto-generate skill notes from conversation history."
-    )]
+    #[tool(description = "Auto-generate skill notes from conversation history.")]
     async fn generate_skill_notes(
         &self,
         Parameters(params): Parameters<GenerateSkillNotesParams>,

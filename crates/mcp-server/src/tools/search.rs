@@ -71,8 +71,16 @@ impl GraphRagServer {
                 let mut ranked: Vec<(usize, &codescope_core::graph::query::SearchResult)> =
                     results.iter().enumerate().take(limit).collect();
                 ranked.sort_by(|a, b| {
-                    let ca = a.1.name.as_deref().and_then(|n| caller_counts.get(n)).unwrap_or(&0);
-                    let cb = b.1.name.as_deref().and_then(|n| caller_counts.get(n)).unwrap_or(&0);
+                    let ca =
+                        a.1.name
+                            .as_deref()
+                            .and_then(|n| caller_counts.get(n))
+                            .unwrap_or(&0);
+                    let cb =
+                        b.1.name
+                            .as_deref()
+                            .and_then(|n| caller_counts.get(n))
+                            .unwrap_or(&0);
                     cb.cmp(ca)
                 });
 
@@ -103,7 +111,9 @@ impl GraphRagServer {
     }
 
     /// Find a function by exact name
-    #[tool(description = "Exact function lookup by name. Returns signature, file path, line numbers.")]
+    #[tool(
+        description = "Exact function lookup by name. Returns signature, file path, line numbers."
+    )]
     async fn find_function(&self, Parameters(params): Parameters<FindFunctionParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -124,9 +134,7 @@ impl GraphRagServer {
     }
 
     /// List all code entities (functions, classes) in a specific file
-    #[tool(
-        description = "List all functions and classes in a file."
-    )]
+    #[tool(description = "List all functions and classes in a file.")]
     async fn file_entities(&self, Parameters(params): Parameters<FileEntitiesParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -202,9 +210,7 @@ impl GraphRagServer {
     }
 
     /// Get statistics about the indexed code graph
-    #[tool(
-        description = "Code graph statistics: files, functions, classes, relationships count."
-    )]
+    #[tool(description = "Code graph statistics: files, functions, classes, relationships count.")]
     async fn graph_stats(&self) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -220,9 +226,7 @@ impl GraphRagServer {
     }
 
     /// Execute a raw SurrealQL query against the code graph
-    #[tool(
-        description = "Raw SurrealQL query. Backtick `function`. Prefer dedicated tools first."
-    )]
+    #[tool(description = "Raw SurrealQL query. Backtick `function`. Prefer dedicated tools first.")]
     async fn raw_query(&self, Parameters(params): Parameters<RawQueryParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

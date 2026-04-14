@@ -12,9 +12,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = analytics_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Show recently indexed entities grouped by file
-    #[tool(
-        description = "Recent changes to functions and classes since last index."
-    )]
+    #[tool(description = "Recent changes to functions and classes since last index.")]
     async fn api_changelog(&self, Parameters(_params): Parameters<ApiChangelogParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -94,9 +92,7 @@ impl GraphRagServer {
     }
 
     /// Detect code communities and architectural boundaries
-    #[tool(
-        description = "Detect code communities, bridge modules, central nodes."
-    )]
+    #[tool(description = "Detect code communities, bridge modules, central nodes.")]
     async fn community_detection(
         &self,
         Parameters(params): Parameters<CommunityDetectionParams>,
@@ -188,9 +184,7 @@ impl GraphRagServer {
     }
 
     /// Export the knowledge graph as an Obsidian-compatible vault with wikilinks
-    #[tool(
-        description = "Export code graph as Obsidian vault with wikilinks."
-    )]
+    #[tool(description = "Export code graph as Obsidian vault with wikilinks.")]
     async fn export_obsidian(
         &self,
         Parameters(params): Parameters<ExportObsidianParams>,
@@ -370,9 +364,7 @@ impl GraphRagServer {
     }
 
     /// Record a decision, problem, solution, correction, or learning insight in real-time
-    #[tool(
-        description = "Record insight: decision, problem, solution, correction, learning."
-    )]
+    #[tool(description = "Record insight: decision, problem, solution, correction, learning.")]
     async fn capture_insight(
         &self,
         Parameters(params): Parameters<CaptureInsightParams>,
@@ -518,9 +510,7 @@ impl GraphRagServer {
     }
 
     /// Suggest a project directory structure for new/empty projects, or return the project profile if already indexed.
-    #[tool(
-        description = "Suggest directory structure for a new project."
-    )]
+    #[tool(description = "Suggest directory structure for a new project.")]
     async fn suggest_structure(
         &self,
         Parameters(params): Parameters<SuggestStructureParams>,

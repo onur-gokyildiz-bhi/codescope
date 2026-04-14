@@ -11,9 +11,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = http_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Find HTTP client calls in the codebase
-    #[tool(
-        description = "Find HTTP client calls (reqwest/fetch/axios). Filter by method."
-    )]
+    #[tool(description = "Find HTTP client calls (reqwest/fetch/axios). Filter by method.")]
     async fn find_http_calls(&self, Parameters(params): Parameters<HttpCallParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -40,9 +38,7 @@ impl GraphRagServer {
     }
 
     /// Find which functions call a specific HTTP endpoint
-    #[tool(
-        description = "Find code calling a specific HTTP endpoint by URL pattern."
-    )]
+    #[tool(description = "Find code calling a specific HTTP endpoint by URL pattern.")]
     async fn find_endpoint_callers(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

@@ -12,9 +12,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = quality_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Find potentially dead code — functions with zero callers
-    #[tool(
-        description = "Find functions never called by any other function."
-    )]
+    #[tool(description = "Find functions never called by any other function.")]
     async fn find_dead_code(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -96,9 +94,7 @@ impl GraphRagServer {
     }
 
     /// Detect code smells: god functions, high fan-in/out, dense files
-    #[tool(
-        description = "Detect god functions, high fan-in, circular deps, long params."
-    )]
+    #[tool(description = "Detect god functions, high fan-in, circular deps, long params.")]
     async fn detect_code_smells(&self, Parameters(params): Parameters<CodeSmellParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -239,9 +235,7 @@ impl GraphRagServer {
     }
 
     /// Run a custom SurrealQL lint rule and format results as violations
-    #[tool(
-        description = "Run custom SurrealQL query as a lint rule."
-    )]
+    #[tool(description = "Run custom SurrealQL query as a lint rule.")]
     async fn custom_lint(&self, Parameters(params): Parameters<CustomLintParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -289,9 +283,7 @@ impl GraphRagServer {
     }
 
     /// Detect team coding patterns from the codebase
-    #[tool(
-        description = "Detect team coding patterns: naming, imports, structure."
-    )]
+    #[tool(description = "Detect team coding patterns: naming, imports, structure.")]
     async fn team_patterns(&self, Parameters(params): Parameters<TeamPatternsParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -429,9 +421,7 @@ impl GraphRagServer {
     }
 
     /// Pre-flight check before editing a file — validates against team patterns
-    #[tool(
-        description = "Check if edit aligns with team coding patterns."
-    )]
+    #[tool(description = "Check if edit aligns with team coding patterns.")]
     async fn edit_preflight(&self, Parameters(params): Parameters<EditPreflightParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

@@ -329,9 +329,7 @@ impl GraphRagServer {
     }
 
     /// Search across ALL entity types — universal knowledge graph search
-    #[tool(
-        description = "Search all entity types: code, configs, docs, packages, infrastructure."
-    )]
+    #[tool(description = "Search all entity types: code, configs, docs, packages, infrastructure.")]
     async fn related(&self, Parameters(params): Parameters<RelatedParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -381,9 +379,7 @@ impl GraphRagServer {
     }
 
     /// Find all entities that reference/link to a given entity — Obsidian-like backlinks
-    #[tool(
-        description = "All backlinks to an entity: callers, importers, containers, dependents."
-    )]
+    #[tool(description = "All backlinks to an entity: callers, importers, containers, dependents.")]
     async fn backlinks(&self, Parameters(params): Parameters<BacklinksParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

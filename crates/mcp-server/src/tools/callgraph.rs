@@ -160,7 +160,10 @@ impl GraphRagServer {
                         }
                     }
                     if !importers.is_empty() {
-                        output.push_str(&format!("### Files Importing This Module ({})\n", importers.len()));
+                        output.push_str(&format!(
+                            "### Files Importing This Module ({})\n",
+                            importers.len()
+                        ));
                         for p in &importers {
                             output.push_str(&format!("- `{}`\n", p));
                         }
@@ -175,13 +178,23 @@ impl GraphRagServer {
                     for cls in &classes {
                         let cls_name = cls.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                         let impl_q = "SELECT in.name AS name, in.file_path AS file_path FROM implements WHERE out.name = $name";
-                        if let Ok(mut ir) = ctx.db.query(impl_q).bind(("name", cls_name.to_string())).await {
+                        if let Ok(mut ir) = ctx
+                            .db
+                            .query(impl_q)
+                            .bind(("name", cls_name.to_string()))
+                            .await
+                        {
                             let impls: Vec<serde_json::Value> = ir.take(0).unwrap_or_default();
                             if !impls.is_empty() {
-                                output.push_str(&format!("### Types Implementing `{}` ({})\n", cls_name, impls.len()));
+                                output.push_str(&format!(
+                                    "### Types Implementing `{}` ({})\n",
+                                    cls_name,
+                                    impls.len()
+                                ));
                                 for im in &impls {
                                     let n = im.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                    let f = im.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let f =
+                                        im.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
                                     output.push_str(&format!("- `{}` ({})\n", n, f));
                                 }
                                 output.push('\n');
@@ -196,9 +209,7 @@ impl GraphRagServer {
     }
 
     /// Show inheritance chain for a class/struct/trait/interface
-    #[tool(
-        description = "Type inheritance graph: parents, subtypes, interfaces, implementors."
-    )]
+    #[tool(description = "Type inheritance graph: parents, subtypes, interfaces, implementors.")]
     async fn type_hierarchy(&self, Parameters(params): Parameters<TypeHierarchyParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

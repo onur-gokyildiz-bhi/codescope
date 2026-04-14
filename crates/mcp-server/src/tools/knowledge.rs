@@ -61,9 +61,7 @@ fn default_lint_check() -> String {
 
 #[tool_router(router = knowledge_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    #[tool(
-        description = "Save knowledge entity: concept, entity, source, claim, decision."
-    )]
+    #[tool(description = "Save knowledge entity: concept, entity, source, claim, decision.")]
     async fn knowledge_save(&self, Parameters(params): Parameters<KnowledgeSaveParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -120,9 +118,7 @@ impl GraphRagServer {
         }
     }
 
-    #[tool(
-        description = "Search knowledge graph: concepts, entities, sources, claims."
-    )]
+    #[tool(description = "Search knowledge graph: concepts, entities, sources, claims.")]
     async fn knowledge_search(
         &self,
         Parameters(params): Parameters<KnowledgeSearchParams>,
@@ -183,9 +179,7 @@ impl GraphRagServer {
         }
     }
 
-    #[tool(
-        description = "Create typed edge between two knowledge or code entities."
-    )]
+    #[tool(description = "Create typed edge between two knowledge or code entities.")]
     async fn knowledge_link(&self, Parameters(params): Parameters<KnowledgeLinkParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -249,9 +243,7 @@ impl GraphRagServer {
         )
     }
 
-    #[tool(
-        description = "Knowledge graph health check: orphans, missing links, stale claims."
-    )]
+    #[tool(description = "Knowledge graph health check: orphans, missing links, stale claims.")]
     async fn knowledge_lint(&self, Parameters(params): Parameters<KnowledgeLintParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

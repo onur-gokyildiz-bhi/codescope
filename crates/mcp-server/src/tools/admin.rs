@@ -11,9 +11,7 @@ use crate::server::{GraphRagServer, ProjectCtx};
 #[tool_router(router = admin_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Initialize a project for this session (daemon mode). Opens the DB and optionally indexes the codebase.
-    #[tool(
-        description = "Initialize project for daemon mode. Required before other tools."
-    )]
+    #[tool(description = "Initialize project for daemon mode. Required before other tools.")]
     async fn init_project(&self, Parameters(params): Parameters<InitProjectParams>) -> String {
         if self.is_stdio_mode() {
             return "Project already initialized (stdio mode).".into();
@@ -117,9 +115,7 @@ impl GraphRagServer {
     }
 
     /// List all projects currently open in the daemon
-    #[tool(
-        description = "List open projects in daemon mode."
-    )]
+    #[tool(description = "List open projects in daemon mode.")]
     async fn list_projects(&self) -> String {
         if self.is_stdio_mode() {
             let ctx = self.project_lock().read().await;
@@ -142,9 +138,7 @@ impl GraphRagServer {
     }
 
     /// Index or re-index the codebase into the graph database
-    #[tool(
-        description = "Index source files into the knowledge graph."
-    )]
+    #[tool(description = "Index source files into the knowledge graph.")]
     async fn index_codebase(&self, Parameters(params): Parameters<IndexParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

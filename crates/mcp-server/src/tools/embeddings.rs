@@ -10,9 +10,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = embeddings_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Generate embeddings for all functions in the graph
-    #[tool(
-        description = "Generate vector embeddings for unembedded functions."
-    )]
+    #[tool(description = "Generate vector embeddings for unembedded functions.")]
     async fn embed_functions(&self, Parameters(params): Parameters<EmbedParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -71,9 +69,7 @@ impl GraphRagServer {
     }
 
     /// Search for semantically similar code using vector embeddings
-    #[tool(
-        description = "Search code by meaning via vector similarity, not just name."
-    )]
+    #[tool(description = "Search code by meaning via vector similarity, not just name.")]
     async fn semantic_search(
         &self,
         Parameters(params): Parameters<SemanticSearchParams>,

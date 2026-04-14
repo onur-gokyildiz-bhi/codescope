@@ -392,7 +392,10 @@ pub fn parse_question(question: &str) -> ParsedQuestion {
     let mut knowledge_terms: Vec<String> = search_terms.clone();
     for w in &words {
         let clean = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
-        if !clean.is_empty() && is_knowledge_term(clean) && !knowledge_terms.contains(&clean.to_string()) {
+        if !clean.is_empty()
+            && is_knowledge_term(clean)
+            && !knowledge_terms.contains(&clean.to_string())
+        {
             knowledge_terms.push(clean.to_string());
         }
     }
