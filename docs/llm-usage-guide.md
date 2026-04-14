@@ -141,3 +141,38 @@ The web visualization (`codescope web <path> --auto-index`) shows code and knowl
 - **Knowledge edges**: Dashed lines (supports, contradicts, related_to)
 - **Ctrl+K**: Search both code and knowledge
 - **Click**: Node details panel with callers, callees, tags, confidence, linked entities
+
+## Work Tracking Protocol
+
+All completed work is tracked in the knowledge graph with status tags. **Before implementing anything**, search the graph first:
+
+```
+knowledge_search("web UI")       → might find status:done, skip reimplementation
+knowledge_search("impact analysis") → might find status:planned, pick it up
+```
+
+### Status Tags
+
+| Tag | Meaning |
+|-----|---------|
+| `status:done` | Completed and shipped — do NOT reimplement |
+| `status:in-progress` | Someone is working on it — coordinate first |
+| `status:planned` | On the roadmap — safe to pick up |
+| `status:blocked` | Waiting on dependency |
+| `shipped:YYYY-MM-DD` | When it shipped |
+| `vX.Y.Z` | Which release |
+
+### After Completing Work
+
+Always save to the knowledge graph:
+
+```
+knowledge_save(
+  title: "Feature Name",
+  content: "What was done, where (file paths), how it works",
+  kind: "decision",
+  tags: ["status:done", "v0.7.1", "component-area", "shipped:2026-04-14"]
+)
+```
+
+This prevents future sessions from redoing work and gives context about what already exists.
