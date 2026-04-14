@@ -62,10 +62,7 @@ fn default_lint_check() -> String {
 #[tool_router(router = knowledge_router, vis = "pub(crate)")]
 impl GraphRagServer {
     #[tool(
-        description = "Save a knowledge entity to the graph. Use for concepts, people, orgs, \
-        technologies, sources, claims, contradictions, or any non-code knowledge. \
-        These entities live alongside code entities and can be cross-linked via `knowledge_link`. \
-        Use after ingesting a source or during research to file findings."
+        description = "Save knowledge entity: concept, entity, source, claim, decision."
     )]
     async fn knowledge_save(&self, Parameters(params): Parameters<KnowledgeSaveParams>) -> String {
         let ctx = match self.ctx().await {
@@ -124,11 +121,7 @@ impl GraphRagServer {
     }
 
     #[tool(
-        description = "Search the knowledge graph for concepts, entities, sources, claims. \
-        Searches both title and content. Optionally filter by kind. \
-        Use this to find existing knowledge before ingesting new sources \
-        (to detect duplicates and contradictions) or to answer questions \
-        from the knowledge base."
+        description = "Search knowledge graph: concepts, entities, sources, claims."
     )]
     async fn knowledge_search(
         &self,
@@ -191,10 +184,7 @@ impl GraphRagServer {
     }
 
     #[tool(
-        description = "Create a typed edge between two entities in the graph. \
-        Works across knowledge AND code entities — e.g., link a concept to a function, \
-        a source to a claim, or flag a contradiction between two claims. \
-        Relation types: supports, contradicts, related_to, implemented_by, uses, extends."
+        description = "Create typed edge between two knowledge or code entities."
     )]
     async fn knowledge_link(&self, Parameters(params): Parameters<KnowledgeLinkParams>) -> String {
         let ctx = match self.ctx().await {
@@ -260,10 +250,7 @@ impl GraphRagServer {
     }
 
     #[tool(
-        description = "Health check the knowledge graph. Finds orphan nodes (no edges), \
-        unresolved contradictions, low-confidence clusters, code entities with no \
-        knowledge context, and stale sources. Returns a structured report with \
-        severity levels and suggested actions."
+        description = "Knowledge graph health check: orphans, missing links, stale claims."
     )]
     async fn knowledge_lint(&self, Parameters(params): Parameters<KnowledgeLintParams>) -> String {
         let ctx = match self.ctx().await {

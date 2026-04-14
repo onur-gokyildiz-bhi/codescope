@@ -11,9 +11,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Save a persistent memory note that survives across sessions
     #[tool(
-        description = "Save a persistent memory note that survives across sessions and is shared between all agents \
-        (Claude Code, Cursor, etc.) connected to this project. Use for recording: preferences, conventions, \
-        important context, architectural notes, TODOs. Memories are searchable via conversation_search."
+        description = "Save persistent memory note shared across sessions and agents."
     )]
     async fn memory_save(
         &self,
@@ -56,8 +54,7 @@ impl GraphRagServer {
 
     /// Search shared memories and conversation history
     #[tool(
-        description = "Search shared memories, decisions, and conversation history across all sessions. \
-        Returns memories saved by any agent, plus auto-extracted decisions/problems/solutions."
+        description = "Search shared memories, decisions, and conversation history."
     )]
     async fn memory_search(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
@@ -142,9 +139,7 @@ impl GraphRagServer {
 
     /// Pin or adjust the tier of a decision/problem/solution memory
     #[tool(
-        description = "Pin or adjust the priority tier of a decision, problem, or solution. \
-        Tier 0 = critical (always shown, marked [PINNED]), 1 = important, 2 = contextual (default). \
-        Matches by partial name across decision, problem, and solution tables."
+        description = "Pin or adjust priority tier of a decision/problem/solution."
     )]
     async fn memory_pin(&self, Parameters(params): Parameters<MemoryPinParams>) -> String {
         let ctx = match self.ctx().await {

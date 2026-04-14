@@ -13,7 +13,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Sync git commit history into the graph database for temporal analysis
     #[tool(
-        description = "Sync git commit history into the graph database. Enables temporal queries like hotspot detection, change coupling, and code evolution tracking."
+        description = "Sync git commits into graph. Enables hotspots and change coupling."
     )]
     async fn sync_git_history(&self, Parameters(params): Parameters<SyncHistoryParams>) -> String {
         let ctx = match self.ctx().await {
@@ -46,7 +46,7 @@ impl GraphRagServer {
 
     /// Detect code hotspots — files/functions with high complexity AND high churn
     #[tool(
-        description = "Detect code hotspots: functions with high complexity and high change frequency. These are high-risk areas that may need refactoring."
+        description = "High complexity + high churn functions. Refactoring candidates."
     )]
     async fn hotspot_detection(&self, Parameters(params): Parameters<HotspotParams>) -> String {
         let ctx = match self.ctx().await {
@@ -86,7 +86,7 @@ impl GraphRagServer {
 
     /// Get file churn — most frequently changed files in git history
     #[tool(
-        description = "Get the most frequently changed files in git history. High-churn files may indicate instability or active development areas."
+        description = "Most frequently changed files in git history."
     )]
     async fn file_churn(&self, Parameters(params): Parameters<ChurnParams>) -> String {
         let ctx = match self.ctx().await {
@@ -117,7 +117,7 @@ impl GraphRagServer {
 
     /// Get change coupling — files that are frequently changed together
     #[tool(
-        description = "Find files that are frequently changed together in commits. High coupling suggests hidden dependencies or that files should be colocated."
+        description = "Files frequently changed together. Reveals hidden dependencies."
     )]
     async fn change_coupling(&self, Parameters(params): Parameters<CouplingParams>) -> String {
         let ctx = match self.ctx().await {
@@ -148,7 +148,7 @@ impl GraphRagServer {
 
     /// Review a git diff with graph context — analyze which functions and relationships are affected
     #[tool(
-        description = "Review a git diff with graph context. Shows which functions, classes, and call relationships are affected by changes between two git refs."
+        description = "Review git diff with graph context: affected functions and calls."
     )]
     async fn review_diff(&self, Parameters(params): Parameters<DiffReviewParams>) -> String {
         let ctx = match self.ctx().await {

@@ -12,10 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Index Claude Code conversation transcripts into the knowledge graph
     #[tool(
-        description = "Index Claude Code conversation history into the knowledge graph. \
-        Extracts decisions, problems, solutions, and discussion topics from JSONL transcripts. \
-        Links them to code entities (functions, classes, files) mentioned in conversations. \
-        After indexing, use conversation_search to query past decisions and problem-solving history."
+        description = "Index conversation history into the knowledge graph."
     )]
     async fn index_conversations(
         &self,
@@ -189,9 +186,7 @@ impl GraphRagServer {
 
     /// Search conversation history — find past decisions, problems, and solutions
     #[tool(
-        description = "Search conversation history for decisions, problems, solutions, and discussion topics. \
-        Finds what was discussed about specific code entities, what decisions were made, and how problems were solved. \
-        Like Obsidian search across your AI conversation notes. Index conversations first with index_conversations."
+        description = "Search conversations for decisions, problems, solutions."
     )]
     async fn conversation_search(
         &self,
@@ -292,9 +287,7 @@ impl GraphRagServer {
 
     /// Search conversation history by time — find what was discussed about an entity recently
     #[tool(
-        description = "Search conversation history over time for a specific code entity. \
-        Shows decisions, problems, and solutions related to a function/class/file, ordered by time. \
-        Use to answer 'what did we discuss about X last week?' or 'when was this function last changed?'."
+        description = "Timeline of conversation activity for a code entity."
     )]
     async fn conversation_timeline(
         &self,

@@ -12,7 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Find all references to a symbol for rename planning
     #[tool(
-        description = "Find all references to a symbol (function/class) across the codebase. Shows definitions, call sites, and imports. Use this to plan a rename — it shows every location that would need to change."
+        description = "Find all references to a symbol: definitions, call sites, imports."
     )]
     async fn rename_symbol(&self, Parameters(params): Parameters<RenameSymbolParams>) -> String {
         let ctx = match self.ctx().await {
@@ -64,7 +64,7 @@ impl GraphRagServer {
 
     /// Find unused symbols (functions with zero references)
     #[tool(
-        description = "Find unused symbols — functions that are never called by any other function. Filters out known entry points (main, test functions, handlers, constructors). Useful for codebase cleanup and reducing maintenance burden."
+        description = "Find unused functions with zero callers. Filters entry points."
     )]
     async fn find_unused(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
         let ctx = match self.ctx().await {
@@ -109,7 +109,7 @@ impl GraphRagServer {
 
     /// Check if a symbol can be safely deleted
     #[tool(
-        description = "Check if a symbol (function/class) can be safely deleted. Returns whether it has zero callers and zero importers. If not safe, shows what still references it."
+        description = "Check if a symbol can be safely deleted (zero callers/importers)."
     )]
     async fn safe_delete(&self, Parameters(params): Parameters<SafeDeleteParams>) -> String {
         let ctx = match self.ctx().await {

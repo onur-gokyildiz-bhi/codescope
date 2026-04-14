@@ -10,11 +10,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = adr_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Manage Architecture Decision Records
-    #[tool(description = "Manage Architecture Decision Records (ADRs). Actions: \
-        'list' — show all recorded decisions, \
-        'create' — record a new architectural decision with title and body, \
-        'get' — retrieve a specific ADR by ID. \
-        ADRs are stored in the graph and linked to conversation history.")]
+    #[tool(description = "Manage Architecture Decision Records. Actions: list, get, create, update.")]
     async fn manage_adr(&self, Parameters(params): Parameters<ManageAdrParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

@@ -13,9 +13,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Explore an entity's full graph neighborhood — like Obsidian's local graph view
     #[tool(
-        description = "Explore the full neighborhood of any entity (function, class, config, doc, package, file). \
-        Shows all connections: callers, callees, sibling functions, containing file, related configs/docs. \
-        Use this to deeply understand how any piece of code or config fits into the system."
+        description = "Full neighborhood of an entity: callers, callees, siblings, file context."
     )]
     async fn explore(&self, Parameters(params): Parameters<ExploreParams>) -> String {
         let ctx = match self.ctx().await {
@@ -109,8 +107,7 @@ impl GraphRagServer {
 
     /// Get full context for a file — like opening an Obsidian note with all linked content
     #[tool(
-        description = "Get complete context for a file: all functions (with external callers), classes, imports, configs, docs, and packages. \
-        Shows cross-file connections. Use this to understand a file's role in the system before reading or modifying it."
+        description = "File context: functions, callers, classes, imports, decisions. Use before Read."
     )]
     async fn context_bundle(&self, Parameters(params): Parameters<ContextBundleParams>) -> String {
         let ctx = match self.ctx().await {
@@ -333,9 +330,7 @@ impl GraphRagServer {
 
     /// Search across ALL entity types — universal knowledge graph search
     #[tool(
-        description = "Search across the entire knowledge graph: code, configs, docs, packages, infrastructure. \
-        Unlike search_functions which only searches functions, this searches everything. \
-        Use this when you need to find all mentions of a concept across code AND non-code files."
+        description = "Search all entity types: code, configs, docs, packages, infrastructure."
     )]
     async fn related(&self, Parameters(params): Parameters<RelatedParams>) -> String {
         let ctx = match self.ctx().await {
@@ -387,9 +382,7 @@ impl GraphRagServer {
 
     /// Find all entities that reference/link to a given entity — Obsidian-like backlinks
     #[tool(
-        description = "Find all backlinks to an entity: who calls it, who imports it, what file contains it, what depends on it. \
-        Like Obsidian's backlinks panel — shows everything that points TO this entity. \
-        Use this to understand the impact of changing something."
+        description = "All backlinks to an entity: callers, importers, containers, dependents."
     )]
     async fn backlinks(&self, Parameters(params): Parameters<BacklinksParams>) -> String {
         let ctx = match self.ctx().await {

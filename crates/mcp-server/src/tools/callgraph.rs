@@ -12,12 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Analyze the impact of changing a function — what else could be affected
     #[tool(
-        description = "TRANSITIVE blast radius of changing a function. Walks the call graph backwards \
-        via BFS to a configurable `depth` (default 3, max 5), showing direct callers, then their callers, \
-        and so on. Use this to answer 'what breaks if I change this function?' and to scope a refactor. \
-        Sub-millisecond on real codebases (graph-first traversal walks indexed edges, not text scans). \
-        For just the immediate (1-hop) callers use `find_callers`. For type-level inheritance impact \
-        use `type_hierarchy` instead."
+        description = "Transitive blast radius via BFS (depth 1-5). Shows callers, importers, implementors."
     )]
     async fn impact_analysis(
         &self,
@@ -201,10 +196,7 @@ impl GraphRagServer {
 
     /// Show inheritance chain for a class/struct/trait/interface
     #[tool(
-        description = "Inheritance and implementation graph for a type (class, struct, trait, interface). \
-        Returns four edge sets: parent types it extends, subtypes that extend it, interfaces it implements, \
-        and implementors of it. Use this to understand polymorphism, find all impls of a trait, or scope \
-        the impact of changing a type's API. For function-level (not type-level) impact use `impact_analysis`."
+        description = "Type inheritance graph: parents, subtypes, interfaces, implementors."
     )]
     async fn type_hierarchy(&self, Parameters(params): Parameters<TypeHierarchyParams>) -> String {
         let ctx = match self.ctx().await {

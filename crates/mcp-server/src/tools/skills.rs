@@ -13,7 +13,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Index a folder of markdown skill/knowledge files into the graph
     #[tool(
-        description = "Index a folder of markdown skill/knowledge files into the graph. Parses YAML frontmatter (description, type, created) and [[wikilinks]] to create a navigable skill graph. Works alongside the code graph — existing tools (explore, backlinks, search) work with skill entities too."
+        description = "Index markdown skill files into graph with wikilinks."
     )]
     async fn index_skill_graph(
         &self,
@@ -121,7 +121,7 @@ impl GraphRagServer {
 
     /// Navigate the skill/knowledge graph with progressive disclosure
     #[tool(
-        description = "Navigate the skill/knowledge graph with progressive disclosure. Start from any skill note and explore connected knowledge. Detail levels: 1=names+descriptions, 2=+links (default), 3=+sections, 4=+full content. Use this to traverse arscontexta-style skill graphs."
+        description = "Navigate skill graph with progressive detail levels 1-4."
     )]
     async fn traverse_skill_graph(
         &self,
@@ -223,7 +223,7 @@ impl GraphRagServer {
 
     /// Auto-generate skill notes from conversation history
     #[tool(
-        description = "Auto-generate markdown skill notes from conversation history. Extracts decisions, problems, and solutions from indexed conversations and creates arscontexta-compatible skill files with [[wikilinks]] and YAML frontmatter. Creates an index.md MOC file."
+        description = "Auto-generate skill notes from conversation history."
     )]
     async fn generate_skill_notes(
         &self,

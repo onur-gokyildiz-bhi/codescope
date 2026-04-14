@@ -11,7 +11,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Get contributor expertise map — who knows which parts of the codebase
     #[tool(
-        description = "Get a contributor expertise map showing who has the most knowledge about which files. Useful for finding the right reviewer for a change."
+        description = "Contributor expertise map: who knows which files best."
     )]
     async fn contributor_map(&self) -> String {
         let ctx = match self.ctx().await {
@@ -47,7 +47,7 @@ impl GraphRagServer {
 
     /// Suggest reviewers for changed files based on git history
     #[tool(
-        description = "Suggest code reviewers for a set of changed files based on who has the most expertise with those files."
+        description = "Suggest reviewers for changed files by contributor expertise."
     )]
     async fn suggest_reviewers(&self, Parameters(params): Parameters<DiffReviewParams>) -> String {
         let ctx = match self.ctx().await {

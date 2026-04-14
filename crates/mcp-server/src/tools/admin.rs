@@ -12,7 +12,7 @@ use crate::server::{GraphRagServer, ProjectCtx};
 impl GraphRagServer {
     /// Initialize a project for this session (daemon mode). Opens the DB and optionally indexes the codebase.
     #[tool(
-        description = "Initialize a project for this session. Required in daemon mode before using other tools. Pass the repo name and codebase path."
+        description = "Initialize project for daemon mode. Required before other tools."
     )]
     async fn init_project(&self, Parameters(params): Parameters<InitProjectParams>) -> String {
         if self.is_stdio_mode() {
@@ -118,7 +118,7 @@ impl GraphRagServer {
 
     /// List all projects currently open in the daemon
     #[tool(
-        description = "List all projects currently open in the daemon. Only available in daemon mode."
+        description = "List open projects in daemon mode."
     )]
     async fn list_projects(&self) -> String {
         if self.is_stdio_mode() {
@@ -143,7 +143,7 @@ impl GraphRagServer {
 
     /// Index or re-index the codebase into the graph database
     #[tool(
-        description = "Index the codebase into the knowledge graph. Parses source files and extracts entities and relationships."
+        description = "Index source files into the knowledge graph."
     )]
     async fn index_codebase(&self, Parameters(params): Parameters<IndexParams>) -> String {
         let ctx = match self.ctx().await {

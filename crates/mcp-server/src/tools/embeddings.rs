@@ -11,9 +11,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Generate embeddings for all functions in the graph
     #[tool(
-        description = "Generate vector embeddings for all functions that don't have them yet. \
-        Uses local FastEmbed by default (no external service needed). \
-        Required before using semantic_search. Providers: 'fastembed' (local, default), 'ollama', 'openai'."
+        description = "Generate vector embeddings for unembedded functions."
     )]
     async fn embed_functions(&self, Parameters(params): Parameters<EmbedParams>) -> String {
         let ctx = match self.ctx().await {
@@ -74,9 +72,7 @@ impl GraphRagServer {
 
     /// Search for semantically similar code using vector embeddings
     #[tool(
-        description = "Search for code by meaning, not just name. Finds semantically similar functions \
-        using vector embeddings. Run embed_functions first to generate embeddings. \
-        Example: 'parse configuration file' finds all config-parsing functions regardless of naming."
+        description = "Search code by meaning via vector similarity, not just name."
     )]
     async fn semantic_search(
         &self,

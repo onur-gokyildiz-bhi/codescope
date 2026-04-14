@@ -13,9 +13,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Find potentially dead code — functions with zero callers
     #[tool(
-        description = "Find dead code: functions that are never called by any other function. \
-        Filters out known entry points (main, test functions, handlers, constructors). \
-        Useful for codebase cleanup and reducing maintenance burden."
+        description = "Find functions never called by any other function."
     )]
     async fn find_dead_code(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
         let ctx = match self.ctx().await {
@@ -99,8 +97,7 @@ impl GraphRagServer {
 
     /// Detect code smells: god functions, high fan-in/out, dense files
     #[tool(
-        description = "Detect code smells in the codebase: god functions (>200 lines), high fan-in (called by many), \
-        high fan-out (calls many), and dense files (many functions). Use for codebase health assessment."
+        description = "Detect god functions, high fan-in, circular deps, long params."
     )]
     async fn detect_code_smells(&self, Parameters(params): Parameters<CodeSmellParams>) -> String {
         let ctx = match self.ctx().await {
@@ -243,9 +240,7 @@ impl GraphRagServer {
 
     /// Run a custom SurrealQL lint rule and format results as violations
     #[tool(
-        description = "Run a custom SurrealQL query as a lint rule. Provide a query that returns violations \
-        and a description of what the rule checks. Results are formatted as a violation report. \
-        Example rule: SELECT name, file_path FROM `function` WHERE end_line - start_line > 100"
+        description = "Run custom SurrealQL query as a lint rule."
     )]
     async fn custom_lint(&self, Parameters(params): Parameters<CustomLintParams>) -> String {
         let ctx = match self.ctx().await {
@@ -295,9 +290,7 @@ impl GraphRagServer {
 
     /// Detect team coding patterns from the codebase
     #[tool(
-        description = "Detect team coding patterns: naming conventions, import styles, file structure patterns, \
-        and common architectural patterns. Analyzes the actual codebase to learn how the team codes. \
-        Use this to understand conventions before writing new code."
+        description = "Detect team coding patterns: naming, imports, structure."
     )]
     async fn team_patterns(&self, Parameters(params): Parameters<TeamPatternsParams>) -> String {
         let ctx = match self.ctx().await {
@@ -437,9 +430,7 @@ impl GraphRagServer {
 
     /// Pre-flight check before editing a file — validates against team patterns
     #[tool(
-        description = "Check if a planned edit aligns with team coding patterns. \
-        Call before writing code to avoid introducing inconsistencies. \
-        Returns warnings if naming, structure, or style deviates from the codebase norm."
+        description = "Check if edit aligns with team coding patterns."
     )]
     async fn edit_preflight(&self, Parameters(params): Parameters<EditPreflightParams>) -> String {
         let ctx = match self.ctx().await {

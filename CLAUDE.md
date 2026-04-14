@@ -2,6 +2,17 @@
 
 Rust-native code intelligence engine with SurrealDB knowledge graphs.
 
+## CRITICAL: Use Codescope MCP Tools, Not Read/Grep
+
+This rule survives context compaction. Even if you forget everything else, remember this:
+- `context_bundle(file)` before Read
+- `find_callers(name)` before Grep
+- `search_functions(query)` before Glob
+- `impact_analysis(name)` before manual tracing
+- `knowledge_search(topic)` before implementing anything
+
+Read is ONLY for reading function bodies after codescope gave you the exact file:line.
+
 ## Quick Commands
 
 ```bash

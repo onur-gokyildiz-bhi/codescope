@@ -14,10 +14,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Search for functions by name or pattern in the code graph
     #[tool(
-        description = "Fuzzy/substring search for functions by name. Case-insensitive. \
-        Returns matching functions with file paths and line numbers. \
-        Use this when you know roughly what the function is called but not the exact name. \
-        If you know the exact name, prefer `find_function` instead (cheaper, single result)."
+        description = "Fuzzy search functions by name. Returns matches with file paths and line numbers."
     )]
     async fn search_functions(&self, Parameters(params): Parameters<SearchParams>) -> String {
         let ctx = match self.ctx().await {
@@ -106,11 +103,7 @@ impl GraphRagServer {
     }
 
     /// Find a function by exact name
-    #[tool(description = "Lookup a function by its EXACT name (case-sensitive). \
-        Returns full info including signature, file path, line numbers, and qualified name. \
-        Use this when you know the precise function name. \
-        For fuzzy/partial matches use `search_functions`. \
-        For full neighborhood (callers + callees + siblings) use `explore`.")]
+    #[tool(description = "Exact function lookup by name. Returns signature, file path, line numbers.")]
     async fn find_function(&self, Parameters(params): Parameters<FindFunctionParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -132,7 +125,7 @@ impl GraphRagServer {
 
     /// List all code entities (functions, classes) in a specific file
     #[tool(
-        description = "List all functions and classes in a file. Provides an overview of the file's structure."
+        description = "List all functions and classes in a file."
     )]
     async fn file_entities(&self, Parameters(params): Parameters<FileEntitiesParams>) -> String {
         let ctx = match self.ctx().await {
@@ -166,10 +159,7 @@ impl GraphRagServer {
 
     /// Find all functions that call the specified function (callers / incoming calls)
     #[tool(
-        description = "Find DIRECT (1-hop) callers of a function — who calls it from one level up. \
-        Use this for the immediate question 'who uses this function?'. \
-        For TRANSITIVE callers across multiple hops (full blast radius of a change) \
-        use `impact_analysis` instead — same data, BFS to configurable depth."
+        description = "Find direct callers of a function (1-hop). For transitive use impact_analysis."
     )]
     async fn find_callers(&self, Parameters(params): Parameters<FindCallersParams>) -> String {
         let ctx = match self.ctx().await {
@@ -191,9 +181,7 @@ impl GraphRagServer {
 
     /// Find all functions called by the specified function (callees / outgoing calls)
     #[tool(
-        description = "Find DIRECT (1-hop) callees of a function — what it calls one level down. \
-        Use this to understand a function's immediate dependencies. \
-        Mirror of `find_callers`. For full neighborhood (both directions plus context) use `explore`."
+        description = "Find direct callees of a function (1-hop). For full neighborhood use explore."
     )]
     async fn find_callees(&self, Parameters(params): Parameters<FindCalleesParams>) -> String {
         let ctx = match self.ctx().await {
@@ -215,7 +203,7 @@ impl GraphRagServer {
 
     /// Get statistics about the indexed code graph
     #[tool(
-        description = "Get statistics about the code graph: number of files, functions, classes, and relationships indexed."
+        description = "Code graph statistics: files, functions, classes, relationships count."
     )]
     async fn graph_stats(&self) -> String {
         let ctx = match self.ctx().await {
@@ -233,13 +221,7 @@ impl GraphRagServer {
 
     /// Execute a raw SurrealQL query against the code graph
     #[tool(
-        description = "ESCAPE HATCH: execute a raw SurrealQL query against the code graph database. \
-        Prefer the dedicated tools first (search_functions, find_function, find_callers, impact_analysis, \
-        explore, type_hierarchy, etc.) — they are cheaper and harder to get wrong. \
-        Use raw_query only when no dedicated tool fits, e.g., custom aggregations or multi-edge joins. \
-        SurrealQL note: `function` is a reserved word, always backtick it (`\\`function\\``). \
-        For multi-hop traversal use the native syntax `<-calls<-\\`function\\`<-calls<-\\`function\\`.name`, \
-        NOT nested subqueries (slow scan instead of indexed graph walk)."
+        description = "Raw SurrealQL query. Backtick `function`. Prefer dedicated tools first."
     )]
     async fn raw_query(&self, Parameters(params): Parameters<RawQueryParams>) -> String {
         let ctx = match self.ctx().await {
@@ -256,7 +238,7 @@ impl GraphRagServer {
         }
     }
 
-    #[tool(description = "List all programming languages supported by the code graph parser.")]
+    #[tool(description = "List supported programming languages.")]
     async fn supported_languages(&self) -> String {
         let parser = codescope_core::parser::CodeParser::new();
         let languages = parser.supported_languages();

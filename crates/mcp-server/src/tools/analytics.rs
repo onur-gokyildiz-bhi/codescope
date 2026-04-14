@@ -13,8 +13,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Show recently indexed entities grouped by file
     #[tool(
-        description = "Show recently changed, added, or modified functions and classes since last index. \
-        Useful before code review or after re-indexing."
+        description = "Recent changes to functions and classes since last index."
     )]
     async fn api_changelog(&self, Parameters(_params): Parameters<ApiChangelogParams>) -> String {
         let ctx = match self.ctx().await {
@@ -96,11 +95,7 @@ impl GraphRagServer {
 
     /// Detect code communities and architectural boundaries
     #[tool(
-        description = "Detect code communities, bridge modules, and central nodes in the codebase graph. \
-        'clusters' — find groups of tightly-connected files, \
-        'bridges' — find modules that connect separate clusters (high betweenness), \
-        'central' — find the most connected/important entities (PageRank-like), \
-        'all' — run all analyses."
+        description = "Detect code communities, bridge modules, central nodes."
     )]
     async fn community_detection(
         &self,
@@ -194,9 +189,7 @@ impl GraphRagServer {
 
     /// Export the knowledge graph as an Obsidian-compatible vault with wikilinks
     #[tool(
-        description = "Export indexed functions and classes as an Obsidian vault with wikilinks. \
-        Creates an index.md listing all entities and individual markdown files for the top 50 \
-        most-connected functions (with callers/callees). Output defaults to ~/.codescope/exports/{repo}/."
+        description = "Export code graph as Obsidian vault with wikilinks."
     )]
     async fn export_obsidian(
         &self,
@@ -378,11 +371,7 @@ impl GraphRagServer {
 
     /// Record a decision, problem, solution, correction, or learning insight in real-time
     #[tool(
-        description = "Record an insight into the knowledge graph in real-time. Types: decision, problem, solution, correction, learning. \
-        Call this after making a decision, encountering a problem, finding a solution, or when the user corrects you (correction). \
-        Corrections are especially important — they record what went wrong and the correct approach. \
-        The agent field identifies which AI tool recorded this (claude-code, cursor, codex-cli, etc). \
-        The insight is stored with timestamp, repo, scope, and optional entity links."
+        description = "Record insight: decision, problem, solution, correction, learning."
     )]
     async fn capture_insight(
         &self,
@@ -530,10 +519,7 @@ impl GraphRagServer {
 
     /// Suggest a project directory structure for new/empty projects, or return the project profile if already indexed.
     #[tool(
-        description = "Suggest a directory structure for a new project based on language and description. \
-        If the project is already indexed (has entities), returns the Project Profile instead. \
-        For empty/new projects, reads README.md or DESIGN.md if available and suggests a \
-        language-appropriate directory layout."
+        description = "Suggest directory structure for a new project."
     )]
     async fn suggest_structure(
         &self,

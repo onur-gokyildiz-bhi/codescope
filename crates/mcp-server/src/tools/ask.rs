@@ -15,9 +15,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Translate a natural language question to a SurrealQL query and execute it
     #[tool(
-        description = "Ask a question about the codebase in natural language. Understands intent and extracts search terms intelligently. \
-        Examples: 'find functions related to binary quantize', 'what calls parse_file?', 'how many classes?', \
-        'functions in main.rs', 'largest functions', 'who calls embed_functions?'"
+        description = "Natural language question about the codebase. Auto-extracts search terms."
     )]
     async fn ask(&self, Parameters(params): Parameters<NaturalLanguageQueryParams>) -> String {
         let ctx = match self.ctx().await {
