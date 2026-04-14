@@ -24,6 +24,10 @@ cargo run -p codescope -- web <path> --port 9876 --auto-index
 cargo run -p codescope-bench -- <path> --json
 ```
 
+## Before Every Commit
+
+Run `cargo fmt --all` before committing Rust code. CI will auto-fix if forgotten, but it creates an extra commit.
+
 ## SurrealQL Note
 
 `function` is a reserved word — always use backticks: `` `function` ``

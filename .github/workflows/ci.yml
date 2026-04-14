@@ -9,10 +9,55 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  fmt-and-fix:
+    name: Format Check & Auto-fix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run cargo fmt
+        run: cargo fmt --all
+
+      - name: Check for formatting changes
+        id: fmt-check
+        run: |
+          if git diff --quiet; then
+            echo "formatted=false" >> $GITHUB_OUTPUT
+          else
+            echo "formatted=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Auto-commit formatting fixes
+        if: steps.fmt-check.outputs.formatted == 'true' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: auto-format via cargo fmt [skip ci]"
+          git push
+
+      - name: Fail on PR with unformatted code
+        if: steps.fmt-check.outputs.formatted == 'true' && github.event_name == 'pull_request'
+        run: |
+          echo "::error::Code is not formatted. Run 'cargo fmt --all' locally."
+          cargo fmt --all -- --check
+          exit 1
+
   check:
     name: Check (${{ matrix.os }})
+    needs: fmt-and-fix
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,6 +66,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -37,12 +84,11 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install pkg-config
-          # OpenSSL vendored via git2's vendored-openssl feature — no brew openssl needed
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Build frontend
         run: |
@@ -71,14 +117,3 @@ jobs:
 
       - name: Build release binaries
         run: cargo build --release -p codescope -p codescope-mcp
-
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
-
