@@ -136,7 +136,7 @@ impl GraphRagServer {
             .unwrap_or_default();
 
         let query = format!(
-            "SELECT title, kind, content, confidence, source_url, tags, created_at \
+            "SELECT title, kind, content, confidence, source_url, tags, created_at, updated_at \
              FROM knowledge \
              WHERE (string::contains(string::lowercase(title), string::lowercase($query)) \
                 OR string::contains(string::lowercase(content), string::lowercase($query))) \
