@@ -1,5 +1,4 @@
-//! Code quality tools: find_dead_code, detect_code_smells, custom_lint,
-//! team_patterns, edit_preflight.
+//! Code quality tools: lint (dead_code|smells|custom), team_patterns, edit_preflight.
 
 use codescope_core::graph::query::GraphQuery;
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,274 +10,19 @@ use crate::server::GraphRagServer;
 
 #[tool_router(router = quality_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    /// Find potentially dead code — functions with zero callers
-    #[tool(description = "Find functions never called by any other function.")]
-    async fn find_dead_code(&self, Parameters(params): Parameters<DeadCodeParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-        let min_lines = params.min_lines.unwrap_or(3);
-        let limit = params.limit.unwrap_or(50);
-
-        let query = format!(
-            "SELECT name, file_path, start_line, end_line, signature, \
-                    math::max(end_line - start_line, 0) AS size \
-             FROM `function` \
-             WHERE count(<-calls) = 0 \
-               AND end_line > start_line \
-               AND math::max(end_line - start_line, 0) >= {} \
-               AND name != 'main' \
-               AND !(name ~ '^test') \
-               AND !(name ~ '_test$') \
-               AND !(name ~ 'handler') \
-               AND !(name ~ '^new$') \
-               AND !(name ~ '^default$') \
-               AND !(name ~ '^from$') \
-               AND !(name ~ '^into$') \
-               AND !(name ~ '^drop$') \
-               AND !(name ~ '^fmt$') \
-               AND !(name ~ '^serialize$') \
-               AND !(name ~ '^deserialize$') \
-               AND !(signature ~ 'override') \
-               AND !(signature ~ 'virtual') \
-               AND !(signature ~ 'abstract') \
-               AND !(signature ~ '@Override') \
-               AND !(name ~ '^Execute') \
-               AND !(name ~ '^On[A-Z]') \
-               AND !(name ~ '^Handle[A-Z]') \
-               AND !(name ~ 'Async$') \
-             ORDER BY end_line - start_line DESC \
-             LIMIT {}",
-            min_lines, limit
-        );
-
-        match ctx.db.query(&query).await {
-            Ok(mut response) => {
-                let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-                if results.is_empty() {
-                    return "No dead code found (all functions have callers or are entry points)."
-                        .into();
-                }
-
-                let mut output = format!(
-                    "## Dead Code: {} potentially unused functions\n\n",
-                    results.len()
-                );
-                output.push_str("| # | Function | File | Lines | Size |\n");
-                output.push_str("|---|----------|------|-------|------|\n");
-
-                for (i, r) in results.iter().enumerate() {
-                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let start = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let size = r.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!(
-                        "| {} | **{}** | {} | L{} | {} lines |\n",
-                        i + 1,
-                        name,
-                        fp,
-                        start,
-                        size
-                    ));
-                }
-
-                output.push_str(&format!(
-                    "\n*Filtered: min {} lines, excluded main/test/handler/trait impls.*",
-                    min_lines
-                ));
-                output
-            }
-            Err(e) => format!("Error finding dead code: {}", e),
-        }
-    }
-
-    /// Detect code smells: god functions, high fan-in/out, dense files
-    #[tool(description = "Detect god functions, high fan-in, circular deps, long params.")]
-    async fn detect_code_smells(&self, Parameters(params): Parameters<CodeSmellParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-        let limit = params.limit.unwrap_or(10);
-        let mut output = "## Code Smell Report\n\n".to_string();
-
-        let god_q = format!(
-            "SELECT name, file_path, math::max(end_line - start_line, 0) AS lines \
-             FROM `function` WHERE end_line - start_line > 200 ORDER BY end_line - start_line DESC LIMIT {}",
-            limit
-        );
-        if let Ok(mut r) = ctx.db.query(&god_q).await {
-            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!(
-                "### God Functions (>200 lines): {}\n",
-                results.len()
-            ));
-            if results.is_empty() {
-                output.push_str("None found.\n\n");
-            } else {
-                output.push_str("| Function | File | Lines |\n|----------|------|-------|\n");
-                for r in &results {
-                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let lines = r.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, lines));
-                }
-                output.push('\n');
-            }
-        }
-
-        let fanin_q = format!(
-            "SELECT out.name AS name, out.file_path AS file_path, count() AS caller_count \
-             FROM calls GROUP BY out.name, out.file_path ORDER BY caller_count DESC LIMIT {}",
-            limit
-        );
-        if let Ok(mut r) = ctx.db.query(&fanin_q).await {
-            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!(
-                "### High Fan-In (most callers): {}\n",
-                results.len()
-            ));
-            if !results.is_empty() {
-                output.push_str("| Function | File | Callers |\n|----------|------|---------|\n");
-                for r in &results {
-                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let count = r.get("caller_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
-                }
-                output.push('\n');
-            }
-        }
-
-        let fanout_q = format!(
-            "SELECT in.name AS name, in.file_path AS file_path, count() AS callee_count \
-             FROM calls GROUP BY in.name, in.file_path ORDER BY callee_count DESC LIMIT {}",
-            limit
-        );
-        if let Ok(mut r) = ctx.db.query(&fanout_q).await {
-            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!(
-                "### High Fan-Out (most callees): {}\n",
-                results.len()
-            ));
-            if !results.is_empty() {
-                output.push_str("| Function | File | Callees |\n|----------|------|---------|\n");
-                for r in &results {
-                    let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let count = r.get("callee_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
-                }
-                output.push('\n');
-            }
-        }
-
-        let dense_q = format!(
-            "SELECT file_path, count() AS func_count FROM `function` GROUP BY file_path ORDER BY func_count DESC LIMIT {}",
-            limit
-        );
-        if let Ok(mut r) = ctx.db.query(&dense_q).await {
-            let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-            output.push_str(&format!(
-                "### Dense Files (most functions): {}\n",
-                results.len()
-            ));
-            if !results.is_empty() {
-                output.push_str("| File | Functions |\n|------|-----------|\n");
-                for r in &results {
-                    let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                    let count = r.get("func_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    output.push_str(&format!("| {} | {} |\n", fp, count));
-                }
-                output.push('\n');
-            }
-        }
-
-        let gq = GraphQuery::new(ctx.db.clone());
-        let cycles = gq
-            .detect_circular_deps(&ctx.repo_name)
-            .await
-            .unwrap_or_default();
-        if !cycles.is_empty() {
-            output.push_str(&format!("\n### Circular Dependencies ({})\n", cycles.len()));
-            for c in &cycles {
-                let a = c.get("file_a").and_then(|v| v.as_str()).unwrap_or("?");
-                let b = c.get("file_b").and_then(|v| v.as_str()).unwrap_or("?");
-                output.push_str(&format!("- {} <-> {}\n", a, b));
-            }
-        }
-
-        let dupes = gq
-            .find_duplicate_functions(&ctx.repo_name)
-            .await
-            .unwrap_or_default();
-        if !dupes.is_empty() {
-            output.push_str(&format!("\n### Duplicate Functions ({})\n", dupes.len()));
-            for d in &dupes {
-                let names = d
-                    .get("names")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                let cnt = d.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
-                output.push_str(&format!("- {} identical copies: {}\n", cnt, names));
-            }
-        }
-
-        output
-    }
-
-    /// Run a custom SurrealQL lint rule and format results as violations
-    #[tool(description = "Run custom SurrealQL query as a lint rule.")]
-    async fn custom_lint(&self, Parameters(params): Parameters<CustomLintParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-
-        let mut output = format!("## Custom Lint: {}\n\n", params.description);
-        output.push_str(&format!("**Rule query:** `{}`\n\n", params.rule));
-
-        match ctx.db.query(&params.rule).await {
-            Ok(mut response) => {
-                let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
-                if results.is_empty() {
-                    output.push_str("No violations found.\n");
-                } else {
-                    output.push_str(&format!("**{} violations found:**\n\n", results.len()));
-                    for (i, r) in results.iter().enumerate() {
-                        output.push_str(&format!("{}. ", i + 1));
-                        if let Some(obj) = r.as_object() {
-                            let parts: Vec<String> = obj
-                                .iter()
-                                .filter(|(k, _)| k.as_str() != "id")
-                                .map(|(k, v)| {
-                                    let val = match v.as_str() {
-                                        Some(s) => s.to_string(),
-                                        None => v.to_string(),
-                                    };
-                                    format!("**{}**: {}", k, val)
-                                })
-                                .collect();
-                            output.push_str(&parts.join(" | "));
-                        } else {
-                            output.push_str(&r.to_string());
-                        }
-                        output.push('\n');
-                    }
-                }
-                output
-            }
-            Err(e) => {
-                output.push_str(&format!("Query error: {}\n", e));
-                output
-            }
+    /// Lint: run a built-in or custom quality check.
+    #[tool(
+        description = "Lint: mode=dead_code|smells|custom. dead_code: zero-caller functions. smells: god functions, cycles. custom: run SurrealQL rule."
+    )]
+    async fn lint(&self, Parameters(params): Parameters<LintParams>) -> String {
+        match params.mode.as_str() {
+            "dead_code" => lint_dead_code(self, &params).await,
+            "smells" => lint_smells(self, &params).await,
+            "custom" => lint_custom(self, &params).await,
+            other => format!(
+                "Unknown lint mode '{}'. Use 'dead_code', 'smells', or 'custom'.",
+                other
+            ),
         }
     }
 
@@ -552,5 +296,277 @@ impl GraphRagServer {
         }
 
         output
+    }
+}
+
+// === Lint mode helpers (not registered as tools) ===
+
+async fn lint_dead_code(server: &GraphRagServer, params: &LintParams) -> String {
+    let ctx = match server.ctx().await {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let min_lines = params.min_lines.unwrap_or(3);
+    let limit = params.limit.unwrap_or(50);
+
+    let query = format!(
+        "SELECT name, file_path, start_line, end_line, signature, \
+                math::max(end_line - start_line, 0) AS size \
+         FROM `function` \
+         WHERE count(<-calls) = 0 \
+           AND end_line > start_line \
+           AND math::max(end_line - start_line, 0) >= {} \
+           AND name != 'main' \
+           AND !(name ~ '^test') \
+           AND !(name ~ '_test$') \
+           AND !(name ~ 'handler') \
+           AND !(name ~ '^new$') \
+           AND !(name ~ '^default$') \
+           AND !(name ~ '^from$') \
+           AND !(name ~ '^into$') \
+           AND !(name ~ '^drop$') \
+           AND !(name ~ '^fmt$') \
+           AND !(name ~ '^serialize$') \
+           AND !(name ~ '^deserialize$') \
+           AND !(signature ~ 'override') \
+           AND !(signature ~ 'virtual') \
+           AND !(signature ~ 'abstract') \
+           AND !(signature ~ '@Override') \
+           AND !(name ~ '^Execute') \
+           AND !(name ~ '^On[A-Z]') \
+           AND !(name ~ '^Handle[A-Z]') \
+           AND !(name ~ 'Async$') \
+         ORDER BY end_line - start_line DESC \
+         LIMIT {}",
+        min_lines, limit
+    );
+
+    match ctx.db.query(&query).await {
+        Ok(mut response) => {
+            let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+            if results.is_empty() {
+                return "No dead code found (all functions have callers or are entry points)."
+                    .into();
+            }
+
+            let mut output = format!(
+                "## Dead Code: {} potentially unused functions\n\n",
+                results.len()
+            );
+            output.push_str("| # | Function | File | Lines | Size |\n");
+            output.push_str("|---|----------|------|-------|------|\n");
+
+            for (i, r) in results.iter().enumerate() {
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let start = r.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
+                let size = r.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!(
+                    "| {} | **{}** | {} | L{} | {} lines |\n",
+                    i + 1,
+                    name,
+                    fp,
+                    start,
+                    size
+                ));
+            }
+
+            output.push_str(&format!(
+                "\n*Filtered: min {} lines, excluded main/test/handler/trait impls.*",
+                min_lines
+            ));
+            output
+        }
+        Err(e) => format!("Error finding dead code: {}", e),
+    }
+}
+
+async fn lint_smells(server: &GraphRagServer, params: &LintParams) -> String {
+    let ctx = match server.ctx().await {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let limit = params.limit.unwrap_or(10);
+    let mut output = "## Code Smell Report\n\n".to_string();
+
+    let god_q = format!(
+        "SELECT name, file_path, math::max(end_line - start_line, 0) AS lines \
+         FROM `function` WHERE end_line - start_line > 200 ORDER BY end_line - start_line DESC LIMIT {}",
+        limit
+    );
+    if let Ok(mut r) = ctx.db.query(&god_q).await {
+        let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+        output.push_str(&format!(
+            "### God Functions (>200 lines): {}\n",
+            results.len()
+        ));
+        if results.is_empty() {
+            output.push_str("None found.\n\n");
+        } else {
+            output.push_str("| Function | File | Lines |\n|----------|------|-------|\n");
+            for r in &results {
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let lines = r.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, lines));
+            }
+            output.push('\n');
+        }
+    }
+
+    let fanin_q = format!(
+        "SELECT out.name AS name, out.file_path AS file_path, count() AS caller_count \
+         FROM calls GROUP BY out.name, out.file_path ORDER BY caller_count DESC LIMIT {}",
+        limit
+    );
+    if let Ok(mut r) = ctx.db.query(&fanin_q).await {
+        let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+        output.push_str(&format!(
+            "### High Fan-In (most callers): {}\n",
+            results.len()
+        ));
+        if !results.is_empty() {
+            output.push_str("| Function | File | Callers |\n|----------|------|---------|\n");
+            for r in &results {
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let count = r.get("caller_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
+            }
+            output.push('\n');
+        }
+    }
+
+    let fanout_q = format!(
+        "SELECT in.name AS name, in.file_path AS file_path, count() AS callee_count \
+         FROM calls GROUP BY in.name, in.file_path ORDER BY callee_count DESC LIMIT {}",
+        limit
+    );
+    if let Ok(mut r) = ctx.db.query(&fanout_q).await {
+        let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+        output.push_str(&format!(
+            "### High Fan-Out (most callees): {}\n",
+            results.len()
+        ));
+        if !results.is_empty() {
+            output.push_str("| Function | File | Callees |\n|----------|------|---------|\n");
+            for r in &results {
+                let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let count = r.get("callee_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!("| **{}** | {} | {} |\n", name, fp, count));
+            }
+            output.push('\n');
+        }
+    }
+
+    let dense_q = format!(
+        "SELECT file_path, count() AS func_count FROM `function` GROUP BY file_path ORDER BY func_count DESC LIMIT {}",
+        limit
+    );
+    if let Ok(mut r) = ctx.db.query(&dense_q).await {
+        let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+        output.push_str(&format!(
+            "### Dense Files (most functions): {}\n",
+            results.len()
+        ));
+        if !results.is_empty() {
+            output.push_str("| File | Functions |\n|------|-----------|\n");
+            for r in &results {
+                let fp = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let count = r.get("func_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                output.push_str(&format!("| {} | {} |\n", fp, count));
+            }
+            output.push('\n');
+        }
+    }
+
+    let gq = GraphQuery::new(ctx.db.clone());
+    let cycles = gq
+        .detect_circular_deps(&ctx.repo_name)
+        .await
+        .unwrap_or_default();
+    if !cycles.is_empty() {
+        output.push_str(&format!("\n### Circular Dependencies ({})\n", cycles.len()));
+        for c in &cycles {
+            let a = c.get("file_a").and_then(|v| v.as_str()).unwrap_or("?");
+            let b = c.get("file_b").and_then(|v| v.as_str()).unwrap_or("?");
+            output.push_str(&format!("- {} <-> {}\n", a, b));
+        }
+    }
+
+    let dupes = gq
+        .find_duplicate_functions(&ctx.repo_name)
+        .await
+        .unwrap_or_default();
+    if !dupes.is_empty() {
+        output.push_str(&format!("\n### Duplicate Functions ({})\n", dupes.len()));
+        for d in &dupes {
+            let names = d
+                .get("names")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let cnt = d.get("cnt").and_then(|v| v.as_u64()).unwrap_or(0);
+            output.push_str(&format!("- {} identical copies: {}\n", cnt, names));
+        }
+    }
+
+    output
+}
+
+async fn lint_custom(server: &GraphRagServer, params: &LintParams) -> String {
+    let ctx = match server.ctx().await {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    let rule = match params.query.as_deref() {
+        Some(q) if !q.trim().is_empty() => q,
+        _ => return "Missing 'query' (SurrealQL) for mode=custom.".into(),
+    };
+    let description = params.description.as_deref().unwrap_or("custom rule");
+
+    let mut output = format!("## Custom Lint: {}\n\n", description);
+    output.push_str(&format!("**Rule query:** `{}`\n\n", rule));
+
+    match ctx.db.query(rule).await {
+        Ok(mut response) => {
+            let results: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
+            if results.is_empty() {
+                output.push_str("No violations found.\n");
+            } else {
+                output.push_str(&format!("**{} violations found:**\n\n", results.len()));
+                for (i, r) in results.iter().enumerate() {
+                    output.push_str(&format!("{}. ", i + 1));
+                    if let Some(obj) = r.as_object() {
+                        let parts: Vec<String> = obj
+                            .iter()
+                            .filter(|(k, _)| k.as_str() != "id")
+                            .map(|(k, v)| {
+                                let val = match v.as_str() {
+                                    Some(s) => s.to_string(),
+                                    None => v.to_string(),
+                                };
+                                format!("**{}**: {}", k, val)
+                            })
+                            .collect();
+                        output.push_str(&parts.join(" | "));
+                    } else {
+                        output.push_str(&r.to_string());
+                    }
+                    output.push('\n');
+                }
+            }
+            output
+        }
+        Err(e) => {
+            output.push_str(&format!("Query error: {}\n", e));
+            output
+        }
     }
 }

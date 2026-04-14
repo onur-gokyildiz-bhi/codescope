@@ -1,4 +1,4 @@
-//! Conversation memory tools: index_conversations, conversation_search, conversation_timeline.
+//! Conversation memory tool: single `conversations` tool with action dispatch.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
@@ -10,18 +10,46 @@ use crate::server::GraphRagServer;
 
 #[tool_router(router = conversations_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    /// Index Claude Code conversation transcripts into the knowledge graph
-    #[tool(description = "Index conversation history into the knowledge graph.")]
-    async fn index_conversations(
-        &self,
-        Parameters(params): Parameters<IndexConversationsParams>,
-    ) -> String {
+    /// Unified conversations tool: index transcripts, search decisions/problems, or timeline for an entity.
+    #[tool(
+        description = "Conversations: action=index|search|timeline. index: ingest transcripts. search: find decisions/problems. timeline: activity for an entity."
+    )]
+    async fn conversations(&self, Parameters(params): Parameters<ConversationsParams>) -> String {
+        match params.action.as_str() {
+            "index" => self.conversations_index(params.path).await,
+            "search" => {
+                let query = match params.query {
+                    Some(q) => q,
+                    None => return "Error: 'search' action requires 'query'".to_string(),
+                };
+                self.conversations_search(query, params.limit).await
+            }
+            "timeline" => {
+                let name = match params.query {
+                    Some(q) => q,
+                    None => {
+                        return "Error: 'timeline' action requires 'query' (entity name)"
+                            .to_string()
+                    }
+                };
+                self.conversations_timeline(name, params.limit).await
+            }
+            other => format!(
+                "Error: unknown action '{}'. Expected: index | search | timeline",
+                other
+            ),
+        }
+    }
+}
+
+impl GraphRagServer {
+    async fn conversations_index(&self, project_dir_override: Option<String>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
 
-        let project_dir = if let Some(dir) = params.project_dir {
+        let project_dir = if let Some(dir) = project_dir_override {
             std::path::PathBuf::from(dir)
         } else {
             let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -182,18 +210,13 @@ impl GraphRagServer {
         )
     }
 
-    /// Search conversation history — find past decisions, problems, and solutions
-    #[tool(description = "Search conversations for decisions, problems, solutions.")]
-    async fn conversation_search(
-        &self,
-        Parameters(params): Parameters<ConversationSearchParams>,
-    ) -> String {
+    async fn conversations_search(&self, query: String, limit: Option<usize>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
-        let limit = params.limit.unwrap_or(20) as u32;
-        let filter_type = params.entity_type.as_deref().unwrap_or("all");
+        let limit = limit.unwrap_or(20) as u32;
+        let filter_type = "all";
 
         let tables: Vec<&str> = match filter_type {
             "decision" => vec!["decision"],
@@ -206,7 +229,7 @@ impl GraphRagServer {
         let mut all_results = Vec::new();
 
         for table in &tables {
-            let query = format!(
+            let q = format!(
                 "SELECT name, kind, body, file_path, start_line, '{}' AS type \
                  FROM {} WHERE string::contains(string::lowercase(name), string::lowercase($kw)) \
                  OR string::contains(string::lowercase(body), string::lowercase($kw)) \
@@ -216,8 +239,8 @@ impl GraphRagServer {
 
             if let Ok(mut response) = ctx
                 .db
-                .query(&query)
-                .bind(("kw", params.query.clone()))
+                .query(&q)
+                .bind(("kw", query.clone()))
                 .bind(("lim", limit))
                 .await
             {
@@ -226,35 +249,28 @@ impl GraphRagServer {
             }
         }
 
-        if filter_type == "all" || filter_type == "decision" {
-            let link_query = "SELECT <-decided_about<-decision.{name, body} AS linked_decisions \
-                 FROM `function` WHERE name = $kw LIMIT 1;"
-                .to_string();
-            if let Ok(mut resp) = ctx
-                .db
-                .query(&link_query)
-                .bind(("kw", params.query.clone()))
-                .await
-            {
-                let linked: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
-                if !linked.is_empty() {
-                    all_results.push(serde_json::json!({
-                        "type": "linked_decisions",
-                        "for_entity": params.query,
-                        "data": linked
-                    }));
-                }
+        let link_query = "SELECT <-decided_about<-decision.{name, body} AS linked_decisions \
+             FROM `function` WHERE name = $kw LIMIT 1;"
+            .to_string();
+        if let Ok(mut resp) = ctx.db.query(&link_query).bind(("kw", query.clone())).await {
+            let linked: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
+            if !linked.is_empty() {
+                all_results.push(serde_json::json!({
+                    "type": "linked_decisions",
+                    "for_entity": query,
+                    "data": linked
+                }));
             }
         }
 
         if all_results.is_empty() {
             return format!(
-                "No conversation history found for '{}'. Run index_conversations first.",
-                params.query
+                "No conversation history found for '{}'. Run conversations(action=\"index\") first.",
+                query
             );
         }
 
-        let mut output = format!("## Conversation History: '{}'\n\n", params.query);
+        let mut output = format!("## Conversation History: '{}'\n\n", query);
 
         for item in &all_results {
             let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("?");
@@ -281,19 +297,12 @@ impl GraphRagServer {
         output
     }
 
-    /// Search conversation history by time — find what was discussed about an entity recently
-    #[tool(description = "Timeline of conversation activity for a code entity.")]
-    async fn conversation_timeline(
-        &self,
-        Parameters(params): Parameters<ConversationTimelineParams>,
-    ) -> String {
+    async fn conversations_timeline(&self, name: String, limit: Option<usize>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
-        let limit = params.limit.unwrap_or(20) as u32;
-        let _days_back = params.days_back.unwrap_or(30);
-        let name = params.entity_name.clone();
+        let limit = limit.unwrap_or(20) as u32;
 
         let tables = ["decision", "problem", "solution", "conv_topic"];
         let mut all_results: Vec<serde_json::Value> = Vec::new();
@@ -334,7 +343,7 @@ impl GraphRagServer {
 
         if all_results.is_empty() {
             return format!(
-                "No conversation history found for '{}'. Run index_conversations first.",
+                "No conversation history found for '{}'. Run conversations(action=\"index\") first.",
                 name
             );
         }

@@ -132,6 +132,20 @@ pub struct DiffReviewParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CodeHealthParams {
+    /// Mode: "hotspots" | "churn" | "coupling" | "review_diff"
+    pub mode: String,
+    /// For "churn" and "coupling": max results (default 20)
+    pub limit: Option<usize>,
+    /// For "review_diff": base git ref (required)
+    pub base_ref: Option<String>,
+    /// For "review_diff": head git ref (optional, defaults to HEAD)
+    pub head_ref: Option<String>,
+    /// For "hotspots": min complexity score
+    pub min_score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InitProjectParams {
     /// Repository/project name (used for DB isolation)
     pub repo: String,
@@ -139,6 +153,32 @@ pub struct InitProjectParams {
     pub path: String,
     /// Auto-index the codebase after initialization
     pub auto_index: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProjectParams {
+    /// Action: "init" | "list"
+    pub action: String,
+    /// For "init": repo name
+    pub repo: Option<String>,
+    /// For "init": codebase path
+    pub codebase_path: Option<String>,
+    /// For "init": auto-index after initialization (default false)
+    pub auto_index: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LintParams {
+    /// Mode: "dead_code" | "smells" | "custom"
+    pub mode: String,
+    /// For "custom": SurrealQL query returning violations
+    pub query: Option<String>,
+    /// For "custom": human-readable description of the rule
+    pub description: Option<String>,
+    /// For "dead_code" and "smells": min function size in lines (default 3)
+    pub min_lines: Option<u32>,
+    /// For "dead_code" and "smells": max results (default 50)
+    pub limit: Option<usize>,
 }
 
 // === Obsidian-like exploration tools ===
@@ -403,4 +443,28 @@ pub struct SuggestStructureParams {
 pub struct RetrieveArchivedParams {
     /// Retrieval ID from an archived result (e.g. "impact_analysis_0")
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ConversationsParams {
+    /// Action: "index" | "search" | "timeline"
+    pub action: String,
+    /// For "search": query string. For "timeline": entity name.
+    pub query: Option<String>,
+    /// For "search" and "timeline": max results (default 20)
+    pub limit: Option<usize>,
+    /// For "index": optional jsonl file path
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SkillsParams {
+    /// Action: "index" | "traverse" | "generate"
+    pub action: String,
+    /// For "index": folder path. For "traverse": skill name.
+    pub path: Option<String>,
+    /// For "traverse": detail level 1-4 (default 2)
+    pub detail: Option<u32>,
+    /// For "index": clear before indexing
+    pub clean: Option<bool>,
 }

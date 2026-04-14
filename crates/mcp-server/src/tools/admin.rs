@@ -1,4 +1,4 @@
-//! Admin tools: init_project, list_projects, index_codebase.
+//! Admin tools: project (init|list), index_codebase.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
@@ -10,130 +10,145 @@ use crate::server::{GraphRagServer, ProjectCtx};
 
 #[tool_router(router = admin_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    /// Initialize a project for this session (daemon mode). Opens the DB and optionally indexes the codebase.
-    #[tool(description = "Initialize project for daemon mode. Required before other tools.")]
-    async fn init_project(&self, Parameters(params): Parameters<InitProjectParams>) -> String {
-        if self.is_stdio_mode() {
-            return "Project already initialized (stdio mode).".into();
-        }
-        let daemon = match self.daemon() {
-            Some(d) => d.clone(),
-            None => {
-                return "Daemon state not available.".into();
-            }
-        };
+    /// Project management: init (open a project in daemon mode) or list (show open projects).
+    #[tool(
+        description = "Project management: action=init|list. init: open a project (daemon mode). list: show open projects."
+    )]
+    async fn project(&self, Parameters(params): Parameters<ProjectParams>) -> String {
+        match params.action.as_str() {
+            "init" => {
+                let repo = match params.repo {
+                    Some(r) => r,
+                    None => return "Missing 'repo' for action=init.".into(),
+                };
+                let path = match params.codebase_path {
+                    Some(p) => p,
+                    None => return "Missing 'codebase_path' for action=init.".into(),
+                };
 
-        let db = match daemon.get_db(&params.repo).await {
-            Ok(db) => db,
-            Err(e) => return format!("Failed to open DB for '{}': {}", params.repo, e),
-        };
-
-        let codebase_path = PathBuf::from(&params.path);
-        let repo_name = params.repo.clone();
-
-        *self.project_lock().write().await = Some(ProjectCtx {
-            db: db.clone(),
-            repo_name: repo_name.clone(),
-            codebase_path: codebase_path.clone(),
-        });
-
-        if params.auto_index.unwrap_or(false) {
-            let index_repo = repo_name.clone();
-            let index_path = codebase_path.clone();
-            tokio::spawn(async move {
-                tracing::info!("Background indexing {}...", index_path.display());
-                let builder = codescope_core::graph::builder::GraphBuilder::new(db);
-
-                let parse_path = index_path.clone();
-                let parse_repo = index_repo.clone();
-                let results = tokio::task::spawn_blocking(move || {
-                    use rayon::prelude::*;
-                    let parser = codescope_core::parser::CodeParser::new();
-                    let walker = ignore::WalkBuilder::new(&parse_path)
-                        .hidden(true)
-                        .git_ignore(true)
-                        .build();
-
-                    let files: Vec<std::path::PathBuf> = walker
-                        .flatten()
-                        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-                        .filter(|e| {
-                            let fp = e.path();
-                            let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            let fname = fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                            (parser.supports_extension(ext) || parser.supports_filename(fname))
-                                && !codescope_core::parser::should_skip_file(fp)
-                        })
-                        .map(|e| e.into_path())
-                        .collect();
-
-                    tracing::info!("Found {} files to parse", files.len());
-
-                    files
-                        .par_iter()
-                        .filter_map(|file_path| {
-                            let rel_path = file_path
-                                .strip_prefix(&parse_path)
-                                .unwrap_or(file_path)
-                                .to_string_lossy()
-                                .to_string()
-                                .replace('\\', "/");
-                            let content = std::fs::read_to_string(file_path).ok()?;
-                            parser
-                                .parse_source(
-                                    std::path::Path::new(&rel_path),
-                                    &content,
-                                    &parse_repo,
-                                )
-                                .ok()
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await
-                .unwrap_or_default();
-
-                let mut file_count = 0;
-                for (entities, relations) in results {
-                    if let Err(e) = builder.insert_entities(&entities).await {
-                        tracing::warn!("Entity insert failed: {e}");
+                if self.is_stdio_mode() {
+                    return "Project already initialized (stdio mode).".into();
+                }
+                let daemon = match self.daemon() {
+                    Some(d) => d.clone(),
+                    None => {
+                        return "Daemon state not available.".into();
                     }
-                    if let Err(e) = builder.insert_relations(&relations).await {
-                        tracing::warn!("Relation insert failed: {e}");
-                    }
-                    file_count += 1;
+                };
+
+                let db = match daemon.get_db(&repo).await {
+                    Ok(db) => db,
+                    Err(e) => return format!("Failed to open DB for '{}': {}", repo, e),
+                };
+
+                let codebase_path = PathBuf::from(&path);
+                let repo_name = repo.clone();
+
+                *self.project_lock().write().await = Some(ProjectCtx {
+                    db: db.clone(),
+                    repo_name: repo_name.clone(),
+                    codebase_path: codebase_path.clone(),
+                });
+
+                if params.auto_index.unwrap_or(false) {
+                    let index_repo = repo_name.clone();
+                    let index_path = codebase_path.clone();
+                    tokio::spawn(async move {
+                        tracing::info!("Background indexing {}...", index_path.display());
+                        let builder = codescope_core::graph::builder::GraphBuilder::new(db);
+
+                        let parse_path = index_path.clone();
+                        let parse_repo = index_repo.clone();
+                        let results = tokio::task::spawn_blocking(move || {
+                            use rayon::prelude::*;
+                            let parser = codescope_core::parser::CodeParser::new();
+                            let walker = ignore::WalkBuilder::new(&parse_path)
+                                .hidden(true)
+                                .git_ignore(true)
+                                .build();
+
+                            let files: Vec<std::path::PathBuf> = walker
+                                .flatten()
+                                .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+                                .filter(|e| {
+                                    let fp = e.path();
+                                    let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
+                                    let fname =
+                                        fp.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                                    (parser.supports_extension(ext)
+                                        || parser.supports_filename(fname))
+                                        && !codescope_core::parser::should_skip_file(fp)
+                                })
+                                .map(|e| e.into_path())
+                                .collect();
+
+                            tracing::info!("Found {} files to parse", files.len());
+
+                            files
+                                .par_iter()
+                                .filter_map(|file_path| {
+                                    let rel_path = file_path
+                                        .strip_prefix(&parse_path)
+                                        .unwrap_or(file_path)
+                                        .to_string_lossy()
+                                        .to_string()
+                                        .replace('\\', "/");
+                                    let content = std::fs::read_to_string(file_path).ok()?;
+                                    parser
+                                        .parse_source(
+                                            std::path::Path::new(&rel_path),
+                                            &content,
+                                            &parse_repo,
+                                        )
+                                        .ok()
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .await
+                        .unwrap_or_default();
+
+                        let mut file_count = 0;
+                        for (entities, relations) in results {
+                            if let Err(e) = builder.insert_entities(&entities).await {
+                                tracing::warn!("Entity insert failed: {e}");
+                            }
+                            if let Err(e) = builder.insert_relations(&relations).await {
+                                tracing::warn!("Relation insert failed: {e}");
+                            }
+                            file_count += 1;
+                        }
+
+                        tracing::info!("Background indexing complete: {} files", file_count);
+                    });
                 }
 
-                tracing::info!("Background indexing complete: {} files", file_count);
-            });
-        }
-
-        format!(
-            "Project '{}' initialized at {}. DB ready.",
-            repo_name,
-            codebase_path.display()
-        )
-    }
-
-    /// List all projects currently open in the daemon
-    #[tool(description = "List open projects in daemon mode.")]
-    async fn list_projects(&self) -> String {
-        if self.is_stdio_mode() {
-            let ctx = self.project_lock().read().await;
-            return match &*ctx {
-                Some(c) => format!("Stdio mode — project: {}", c.repo_name),
-                None => "No project initialized.".into(),
-            };
-        }
-        match self.daemon() {
-            Some(d) => {
-                let repos = d.active_repos().await;
-                if repos.is_empty() {
-                    "No projects open. Call init_project first.".into()
-                } else {
-                    format!("Open projects: {}", repos.join(", "))
+                format!(
+                    "Project '{}' initialized at {}. DB ready.",
+                    repo_name,
+                    codebase_path.display()
+                )
+            }
+            "list" => {
+                if self.is_stdio_mode() {
+                    let ctx = self.project_lock().read().await;
+                    return match &*ctx {
+                        Some(c) => format!("Stdio mode — project: {}", c.repo_name),
+                        None => "No project initialized.".into(),
+                    };
+                }
+                match self.daemon() {
+                    Some(d) => {
+                        let repos = d.active_repos().await;
+                        if repos.is_empty() {
+                            "No projects open. Call project(action=init) first.".into()
+                        } else {
+                            format!("Open projects: {}", repos.join(", "))
+                        }
+                    }
+                    None => "Daemon state not available.".into(),
                 }
             }
-            None => "Daemon state not available.".into(),
+            other => format!("Unknown action '{}'. Use 'init' or 'list'.", other),
         }
     }
 

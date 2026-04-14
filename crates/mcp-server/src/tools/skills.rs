@@ -1,5 +1,4 @@
-//! Skill / knowledge graph tools: index_skill_graph, traverse_skill_graph,
-//! generate_skill_notes.
+//! Skill / knowledge graph tool: single `skills` tool with action dispatch.
 
 use codescope_core::graph::query::GraphQuery;
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,23 +10,54 @@ use crate::server::GraphRagServer;
 
 #[tool_router(router = skills_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    /// Index a folder of markdown skill/knowledge files into the graph
-    #[tool(description = "Index markdown skill files into graph with wikilinks.")]
-    async fn index_skill_graph(
-        &self,
-        Parameters(params): Parameters<IndexSkillGraphParams>,
-    ) -> String {
+    /// Unified skills tool: index markdown folder, traverse with progressive detail, or auto-generate notes.
+    #[tool(
+        description = "Skills/knowledge graph: action=index|traverse|generate. index: parse markdown folder. traverse: navigate with detail 1-4. generate: auto-generate notes from conversations."
+    )]
+    async fn skills(&self, Parameters(params): Parameters<SkillsParams>) -> String {
+        match params.action.as_str() {
+            "index" => {
+                let path = match params.path {
+                    Some(p) => p,
+                    None => {
+                        return "Error: 'index' action requires 'path' (folder of markdown files)"
+                            .to_string()
+                    }
+                };
+                self.skills_index(path, params.clean.unwrap_or(false)).await
+            }
+            "traverse" => {
+                let name = match params.path {
+                    Some(p) => p,
+                    None => {
+                        return "Error: 'traverse' action requires 'path' (skill name)".to_string()
+                    }
+                };
+                let detail = params.detail.unwrap_or(2) as usize;
+                self.skills_traverse(name, detail).await
+            }
+            "generate" => self.skills_generate(params.path).await,
+            other => format!(
+                "Error: unknown action '{}'. Expected: index | traverse | generate",
+                other
+            ),
+        }
+    }
+}
+
+impl GraphRagServer {
+    async fn skills_index(&self, path: String, clean: bool) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
-        let target_path = ctx.codebase_path.join(&params.path);
+        let target_path = ctx.codebase_path.join(&path);
 
         if !target_path.is_dir() {
             return format!("Path '{}' is not a directory", target_path.display());
         }
 
-        if params.clean.unwrap_or(false) {
+        if clean {
             let _ = ctx
                 .db
                 .query("DELETE FROM skill; DELETE FROM links_to;")
@@ -117,21 +147,15 @@ impl GraphRagServer {
         output
     }
 
-    /// Navigate the skill/knowledge graph with progressive disclosure
-    #[tool(description = "Navigate skill graph with progressive detail levels 1-4.")]
-    async fn traverse_skill_graph(
-        &self,
-        Parameters(params): Parameters<TraverseSkillGraphParams>,
-    ) -> String {
+    async fn skills_traverse(&self, name: String, detail: usize) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
         let gq = GraphQuery::new(ctx.db);
-        let depth = params.depth.unwrap_or(1);
-        let detail = params.detail_level.unwrap_or(2);
+        let depth = 1usize;
 
-        match gq.traverse_skill_graph(&params.name, depth, detail).await {
+        match gq.traverse_skill_graph(&name, depth, detail).await {
             Ok(result) => {
                 if result.get("error").is_some() {
                     return result["error"].as_str().unwrap_or("Not found").to_string();
@@ -140,7 +164,7 @@ impl GraphRagServer {
                 let mut output = String::new();
 
                 if let Some(skill) = result.get("skill") {
-                    let name = skill.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let sname = skill.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                     let desc = skill
                         .get("description")
                         .and_then(|v| v.as_str())
@@ -149,7 +173,7 @@ impl GraphRagServer {
                         .get("node_type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("skill");
-                    output.push_str(&format!("# {} [{}]\n\n", name, ntype));
+                    output.push_str(&format!("# {} [{}]\n\n", sname, ntype));
                     if !desc.is_empty() {
                         output.push_str(&format!("{}\n\n", desc));
                     }
@@ -159,18 +183,18 @@ impl GraphRagServer {
                     if !links.is_empty() {
                         output.push_str("## Links To\n\n");
                         for link in links {
-                            let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                            let lname = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                             let desc = link
                                 .get("description")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let ctx = link.get("context").and_then(|v| v.as_str()).unwrap_or("");
-                            output.push_str(&format!("- [[{}]]", name));
+                            let ctx_s = link.get("context").and_then(|v| v.as_str()).unwrap_or("");
+                            output.push_str(&format!("- [[{}]]", lname));
                             if !desc.is_empty() {
                                 output.push_str(&format!(" — {}", desc));
                             }
-                            if !ctx.is_empty() {
-                                output.push_str(&format!("\n  > {}", ctx));
+                            if !ctx_s.is_empty() {
+                                output.push_str(&format!("\n  > {}", ctx_s));
                             }
                             output.push('\n');
                         }
@@ -182,12 +206,12 @@ impl GraphRagServer {
                     if !links.is_empty() {
                         output.push_str("## Linked From\n\n");
                         for link in links {
-                            let name = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                            let lname = link.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                             let desc = link
                                 .get("description")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            output.push_str(&format!("- [[{}]]", name));
+                            output.push_str(&format!("- [[{}]]", lname));
                             if !desc.is_empty() {
                                 output.push_str(&format!(" — {}", desc));
                             }
@@ -201,14 +225,14 @@ impl GraphRagServer {
                     if !sections.is_empty() {
                         output.push_str("## Sections\n\n");
                         for sec in sections {
-                            let name = sec.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            output.push_str(&format!("- {}\n", name));
+                            let sname = sec.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                            output.push_str(&format!("- {}\n", sname));
                         }
                     }
                 }
 
                 if output.is_empty() {
-                    format!("No skill node found matching '{}'", params.name)
+                    format!("No skill node found matching '{}'", name)
                 } else {
                     output
                 }
@@ -217,19 +241,14 @@ impl GraphRagServer {
         }
     }
 
-    /// Auto-generate skill notes from conversation history
-    #[tool(description = "Auto-generate skill notes from conversation history.")]
-    async fn generate_skill_notes(
-        &self,
-        Parameters(params): Parameters<GenerateSkillNotesParams>,
-    ) -> String {
+    async fn skills_generate(&self, output_dir_override: Option<String>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
         let output_dir = ctx
             .codebase_path
-            .join(params.output_dir.as_deref().unwrap_or("skills"));
+            .join(output_dir_override.as_deref().unwrap_or("skills"));
 
         let mut response = match ctx
             .db
@@ -276,7 +295,8 @@ impl GraphRagServer {
         }
 
         if segments.is_empty() {
-            return "No conversation segments found. Run index_conversations first.".into();
+            return "No conversation segments found. Run conversations(action=\"index\") first."
+                .into();
         }
 
         let code_refs: Vec<String> = match ctx
