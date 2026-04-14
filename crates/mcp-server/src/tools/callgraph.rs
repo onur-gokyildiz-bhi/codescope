@@ -5,6 +5,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
+use crate::helpers::maybe_archive;
 use crate::params::*;
 use crate::server::GraphRagServer;
 
@@ -191,7 +192,7 @@ impl GraphRagServer {
             }
         }
 
-        output
+        maybe_archive(self.result_archive(), "impact_analysis", output).await
     }
 
     /// Show inheritance chain for a class/struct/trait/interface

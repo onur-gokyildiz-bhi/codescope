@@ -45,6 +45,10 @@ pub struct ParsedQuestion {
     pub intent: Intent,
     pub search_terms: Vec<String>,
     pub file_path: Option<String>,
+    /// Extracted module/crate scope (e.g., "cuda", "mcp-server", "web", "core")
+    pub domain: Option<String>,
+    /// Terms that should also search the knowledge graph
+    pub knowledge_terms: Vec<String>,
 }
 
 // ─── Keyword sets ────────────────────────────────────────────────────
@@ -134,6 +138,69 @@ fn is_size_keyword(w: &str) -> bool {
             | "uzun"
             | "karmaşık"
             | "karmasik"
+    )
+}
+
+/// Detect a module/crate domain scope from the question words.
+fn detect_domain(words: &[&str]) -> Option<String> {
+    const KNOWN_DOMAINS: &[&str] = &[
+        "cuda", "mcp", "web", "core", "kernel", "graph", "parser", "server",
+    ];
+    for w in words {
+        let clean = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_');
+        let lower = clean.to_lowercase();
+        if KNOWN_DOMAINS.contains(&lower.as_str()) {
+            return Some(lower);
+        }
+        // Also match compound names like "mcp-server", "codescope-core"
+        for domain in KNOWN_DOMAINS {
+            if lower.contains(domain) && lower.len() > domain.len() {
+                return Some(lower);
+            }
+        }
+    }
+    None
+}
+
+/// Returns true if the word looks like a knowledge/concept term
+/// (architecture decisions, patterns, strategies, etc.)
+fn is_knowledge_term(w: &str) -> bool {
+    matches!(
+        w,
+        "pattern"
+            | "patterns"
+            | "architecture"
+            | "decision"
+            | "decisions"
+            | "strategy"
+            | "strategies"
+            | "approach"
+            | "approaches"
+            | "design"
+            | "tradeoff"
+            | "tradeoffs"
+            | "trade-off"
+            | "trade-offs"
+            | "convention"
+            | "conventions"
+            | "principle"
+            | "principles"
+            | "rationale"
+            | "motivation"
+            | "constraint"
+            | "constraints"
+            | "guideline"
+            | "guidelines"
+            | "best-practice"
+            | "best-practices"
+            | "anti-pattern"
+            | "anti-patterns"
+            | "concept"
+            | "concepts"
+            | "insight"
+            | "insights"
+            | "lesson"
+            | "lessons"
     )
 }
 
@@ -318,10 +385,24 @@ pub fn parse_question(question: &str) -> ParsedQuestion {
     // Extract search terms
     let search_terms = extract_terms(&words, &file_path);
 
+    // Detect domain scope
+    let domain = detect_domain(&words);
+
+    // Build knowledge terms: search_terms + any concept-like words
+    let mut knowledge_terms: Vec<String> = search_terms.clone();
+    for w in &words {
+        let clean = w.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+        if !clean.is_empty() && is_knowledge_term(clean) && !knowledge_terms.contains(&clean.to_string()) {
+            knowledge_terms.push(clean.to_string());
+        }
+    }
+
     ParsedQuestion {
         intent,
         search_terms,
         file_path,
+        domain,
+        knowledge_terms,
     }
 }
 

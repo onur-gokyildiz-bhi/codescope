@@ -244,4 +244,19 @@ impl GraphRagServer {
         let languages = parser.supported_languages();
         format!("Supported languages: {}", languages.join(", "))
     }
+
+    /// Retrieve full output of an archived large result by ID
+    #[tool(
+        description = "Retrieve full output of an archived large result. Use when a tool returned a summary with a retrieval ID."
+    )]
+    async fn retrieve_archived(
+        &self,
+        Parameters(params): Parameters<RetrieveArchivedParams>,
+    ) -> String {
+        let archive = self.result_archive().read().await;
+        match archive.get(&params.id) {
+            Some(content) => content.clone(),
+            None => format!("No archived result found with ID '{}'", params.id),
+        }
+    }
 }

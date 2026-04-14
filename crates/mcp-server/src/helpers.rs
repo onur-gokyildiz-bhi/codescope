@@ -1,7 +1,37 @@
 use std::path::Path;
+use std::sync::Arc;
 use surrealdb::engine::local::Db;
 use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
+
+/// Archive large tool outputs and return a summary with retrieval ID.
+/// If the output is under the threshold (4096 chars), returns it unchanged.
+/// Otherwise, stores the full output in the archive and returns the first 20 lines
+/// plus a retrieval ID that can be used with `retrieve_archived`.
+pub(crate) async fn maybe_archive(
+    archive: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    tool_name: &str,
+    output: String,
+) -> String {
+    const THRESHOLD: usize = 4096;
+    if output.len() <= THRESHOLD {
+        return output;
+    }
+
+    let id = format!("{}_{}", tool_name, archive.read().await.len());
+    let summary_lines: Vec<&str> = output.lines().take(20).collect();
+    let total_lines = output.lines().count();
+    let remaining = total_lines.saturating_sub(20);
+    let summary = format!(
+        "{}\n\n… ({} more lines archived)\n**Retrieval ID:** `{}`\nUse `retrieve_archived(\"{}\")` to get the full output.",
+        summary_lines.join("\n"),
+        remaining,
+        id,
+        id,
+    );
+    archive.write().await.insert(id, output);
+    summary
+}
 
 /// Derive a module scope from a file path for querying past decisions/problems.
 /// e.g. "crates/core/src/graph/builder.rs" -> "core::graph"

@@ -140,12 +140,38 @@ impl GraphRagServer {
 
                 all_results.truncate(30);
 
+                // Knowledge graph results
+                let know_safe = parsed.knowledge_terms.join(" ").replace('\'', "");
+                let know_q = format!(
+                    "SELECT id, title AS name, kind, confidence, tags FROM knowledge \
+                     WHERE title CONTAINS '{}' OR content CONTAINS '{}' LIMIT 10",
+                    know_safe, know_safe
+                );
+                let mut knowledge_section = String::new();
+                if let Ok(mut r) = ctx.db.query(&know_q).await {
+                    let know_rows: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
+                    if !know_rows.is_empty() {
+                        knowledge_section = format!(
+                            "\n\n**Knowledge graph ({}):**\n{}",
+                            know_rows.len(),
+                            serde_json::to_string_pretty(&know_rows).unwrap_or_default()
+                        );
+                    }
+                }
+
                 let terms_str = parsed.search_terms.join(", ");
+                let domain_str = parsed
+                    .domain
+                    .as_deref()
+                    .map(|d| format!(" (domain: {})", d))
+                    .unwrap_or_default();
                 format!(
-                    "**Search terms:** [{}]\n**Results ({}):**\n{}",
+                    "**Search terms:** [{}]{}\n**Code results ({}):**\n{}{}",
                     terms_str,
+                    domain_str,
                     all_results.len(),
-                    serde_json::to_string_pretty(&all_results).unwrap_or_default()
+                    serde_json::to_string_pretty(&all_results).unwrap_or_default(),
+                    knowledge_section
                 )
             }
 

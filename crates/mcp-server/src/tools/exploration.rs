@@ -5,7 +5,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
-use crate::helpers::derive_scope_from_file_path;
+use crate::helpers::{derive_scope_from_file_path, maybe_archive};
 use crate::params::*;
 use crate::server::GraphRagServer;
 
@@ -99,7 +99,7 @@ impl GraphRagServer {
                     output.push('\n');
                 }
 
-                output
+                maybe_archive(self.result_archive(), "explore", output).await
             }
             Err(e) => format!("Error exploring '{}': {}", params.name, e),
         }

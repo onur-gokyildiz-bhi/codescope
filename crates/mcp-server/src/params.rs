@@ -334,3 +334,9 @@ pub struct SuggestStructureParams {
     /// Primary language (auto-detected if not specified)
     pub language: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RetrieveArchivedParams {
+    /// Retrieval ID from an archived result (e.g. "impact_analysis_0")
+    pub id: String,
+}

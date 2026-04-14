@@ -36,6 +36,10 @@ pub struct GraphRagServer {
     /// Delta-mode cache: stores last context_bundle output per file path.
     /// On repeat calls, returns only structural diff instead of full output.
     context_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    /// Result archive: stores large tool outputs with retrieval IDs.
+    /// When a tool output exceeds 4KB, the full result is archived here
+    /// and a summary + retrieval ID is returned instead.
+    result_archive: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -66,6 +70,7 @@ impl GraphRagServer {
             stdio_mode: true,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             tool_router: Self::merged_router(),
         }
     }
@@ -78,6 +83,7 @@ impl GraphRagServer {
             stdio_mode: false,
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             tool_router: Self::merged_router(),
         }
     }
@@ -124,6 +130,11 @@ impl GraphRagServer {
     /// Accessor for the delta-mode context cache.
     pub(crate) fn context_cache(&self) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
         &self.context_cache
+    }
+
+    /// Accessor for the result archive (large output storage).
+    pub(crate) fn result_archive(&self) -> &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>> {
+        &self.result_archive
     }
 
     /// Get the active project context, or return an error message
