@@ -1,6 +1,33 @@
 use anyhow::Result;
+use serde::Deserialize;
 use surrealdb::engine::local::Db;
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
+
+/// Current schema version. Bump when adding a new migration in `migrations.rs`.
+/// Version 0 = legacy DBs without meta:schema row.
+pub const SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Deserialize, SurrealValue)]
+struct SchemaMetaRow {
+    version: u32,
+}
+
+/// Read the current schema_version recorded in the `meta` table.
+/// Returns 0 if no `meta:schema` row exists (old / uninitialized DB).
+pub async fn get_schema_version(db: &Surreal<Db>) -> Result<u32> {
+    // Returns Option<SchemaMetaRow>
+    let row: Option<SchemaMetaRow> = db.select(("meta", "schema")).await?;
+    Ok(row.map(|r| r.version).unwrap_or(0))
+}
+
+/// Persist the schema_version to the `meta:schema` row (UPSERT).
+pub async fn set_schema_version(db: &Surreal<Db>, version: u32) -> Result<()> {
+    db.query("UPSERT meta:schema SET version = $v")
+        .bind(("v", version))
+        .await?;
+    Ok(())
+}
 
 /// Initialize the SurrealDB schema for the knowledge graph
 pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
@@ -370,9 +397,18 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE TABLE related_to TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS relation ON related_to TYPE option<string>;
         DEFINE FIELD IF NOT EXISTS context ON related_to TYPE option<string>;
+
+        -- === META TABLE (schema version + future runtime metadata) ===
+
+        DEFINE TABLE IF NOT EXISTS meta SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS version ON meta TYPE option<int>;
         ",
     )
     .await?;
 
+    // Note: the schema_version is NOT stamped here. `migrations::migrate_to_current`
+    // is responsible for walking a DB from its recorded version up to SCHEMA_VERSION
+    // and stamping the result. A legacy DB that has never seen this code path
+    // returns 0 from `get_schema_version`, which triggers the v0 → v1 migration.
     Ok(())
 }

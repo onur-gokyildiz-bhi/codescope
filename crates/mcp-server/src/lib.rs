@@ -81,6 +81,7 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
     };
     db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
+    codescope_core::graph::migrations::migrate_to_current(&db).await?;
 
     let _ = std::fs::OpenOptions::new()
         .append(true)

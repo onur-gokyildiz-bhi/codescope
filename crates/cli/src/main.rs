@@ -149,6 +149,17 @@ async fn main() -> Result<()> {
         Commands::Status { port } => {
             commands::daemon::status(port).await?;
         }
+        Commands::Review {
+            target,
+            max_callers,
+            coverage,
+        } => {
+            commands::review::run(target, max_callers, coverage, cli.db_path, &global_repo).await?;
+        }
+        Commands::Migrate { repo } => {
+            let repo_name = repo.unwrap_or_else(|| global_repo.clone());
+            commands::migrate::run(&repo_name, cli.db_path).await?;
+        }
     }
 
     Ok(())

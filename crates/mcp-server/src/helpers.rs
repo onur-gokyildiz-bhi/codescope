@@ -1,8 +1,30 @@
 use std::path::Path;
 use std::sync::Arc;
 use surrealdb::engine::local::Db;
+use surrealdb::engine::local::SurrealKv;
 use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
+
+/// Sentinel repo name used for entities stored in the cross-project global DB.
+pub const GLOBAL_REPO: &str = "_global";
+
+/// Connect to (or lazily create) the cross-project global knowledge DB.
+///
+/// This is a separate SurrealKV file at `~/.codescope/db/_global/` so it doesn't
+/// contend with per-project DB locks. The schema is initialised on each call —
+/// `init_schema` is idempotent.
+pub async fn connect_global_db() -> anyhow::Result<Surreal<Db>> {
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".codescope")
+        .join("db")
+        .join(GLOBAL_REPO);
+    std::fs::create_dir_all(&path)?;
+    let db = Surreal::new::<SurrealKv>(path.to_string_lossy().as_ref()).await?;
+    db.use_ns("codescope").use_db(GLOBAL_REPO).await?;
+    codescope_core::graph::schema::init_schema(&db).await?;
+    Ok(db)
+}
 
 /// Archive large tool outputs and return a summary with retrieval ID.
 /// If the output is under the threshold (4096 chars), returns it unchanged.

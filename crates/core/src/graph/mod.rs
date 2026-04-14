@@ -1,5 +1,6 @@
 pub mod builder;
 pub mod incremental;
+pub mod migrations;
 pub mod query;
 pub mod schema;
 

@@ -413,6 +413,8 @@ pub struct KnowledgeParams {
     pub query: Option<String>,
     /// For "lint": which check to run (orphans, low_confidence, contradictions, unlinked_code, stale, all).
     pub check: Option<String>,
+    /// Scope: "project" (default, per-repo) | "global" (cross-project shared) | "both" (search only: union).
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

@@ -164,6 +164,24 @@ pub enum Commands {
         #[arg(long, default_value = "9877")]
         port: u16,
     },
+
+    /// Review a git diff with graph context — impact analysis of changes
+    Review {
+        /// Git ref range (e.g. "main..HEAD"), commit SHA, or path to .diff file
+        target: String,
+        /// Max callers per function to show (default 10)
+        #[arg(long, default_value = "10")]
+        max_callers: usize,
+        /// Show functions with no tests
+        #[arg(long)]
+        coverage: bool,
+    },
+
+    /// Apply pending schema migrations to the repo DB
+    Migrate {
+        /// Override the repo name (defaults to current directory / --repo flag)
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

@@ -1,7 +1,7 @@
 //! Database connection helpers shared by all CLI commands.
 
 use anyhow::Result;
-use codescope_core::graph::schema;
+use codescope_core::graph::{migrations, schema};
 use std::path::{Path, PathBuf};
 
 /// Central DB path: ~/.codescope/db/<repo_name>/
@@ -141,6 +141,8 @@ pub async fn connect_db(
 
     db.use_ns("codescope").use_db(repo_name).await?;
     schema::init_schema(&db).await?;
+    // Auto-upgrade schema if DB was created by an older codescope version.
+    migrations::migrate_to_current(&db).await?;
 
     Ok(db)
 }
