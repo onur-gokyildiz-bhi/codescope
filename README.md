@@ -9,7 +9,7 @@ right answer. Codescope builds an actual **knowledge graph** — entities, calls
 imports, type hierarchies — so AI agents can *traverse* your code instead of guessing.
 
 A **GraphRAG engine** — not just embeddings, not just search.
-Rust-native, fully local, 56 MCP tools, 59 supported formats, 99%+ token savings.
+Rust-native, fully local, 57 MCP tools, 59 supported formats, 99%+ token savings.
 
 [Install](#install) · [How It Works](#how-it-works) · [Tools](#tools) · [Benchmarks](BENCHMARKS.md) · [Contributing](CONTRIBUTING.md)
 
@@ -55,7 +55,7 @@ cd your-project
 codescope init    # indexes codebase + creates .mcp.json
 ```
 
-That's it. Open Claude Code and you have 52 code intelligence tools.
+That's it. Open Claude Code and you have 57 code intelligence tools.
 
 <details>
 <summary><b>Build from source</b></summary>
@@ -152,7 +152,7 @@ walk through their code.
 
 ## Tools
 
-### 52 MCP tools in 8 categories:
+### 57 MCP tools in 9 categories:
 
 <table>
 <tr>
@@ -239,7 +239,7 @@ walk through their code.
 </tr>
 </table>
 
-Plus: `rename_symbol`, `safe_delete`, `find_unused`, `find_http_calls`, `find_endpoint_callers`, `sync_git_history`, `index_codebase`, `index_conversations`, `index_skill_graph`, `traverse_skill_graph`, `generate_skill_notes`, `manage_adr`, `community_detection`, `raw_query`, `graph_stats`, `supported_languages`, `init_project`, `list_projects`
+Plus: `rename_symbol`, `safe_delete`, `find_unused`, `find_http_calls`, `find_endpoint_callers`, `sync_git_history`, `index_codebase`, `index_conversations`, `index_skill_graph`, `traverse_skill_graph`, `generate_skill_notes`, `manage_adr`, `community_detection`, `raw_query`, `graph_stats`, `supported_languages`, `init_project`, `list_projects`, `knowledge_save`, `knowledge_search`, `knowledge_link`, `knowledge_lint`, `retrieve_archived`
 
 ---
 
@@ -270,7 +270,7 @@ Codescope is the **shared brain** for all your AI coding tools:
                           │
                  ┌────────▼────────┐
                  │  Codescope MCP  │
-                 │   (52 tools)    │
+                 │   (57 tools)    │
                  └────────┬────────┘
                           │
                  ┌────────▼────────┐
@@ -305,7 +305,7 @@ codescope web /path/to/project --port 9876
 
 <img src="assets/demo.gif" alt="3D Web UI" width="720">
 
-Node sidebar · File tree · Search autocomplete · Hotspot heatmap · Syntax highlighting · Conversation timeline · Minimap · Cluster view
+Knowledge graph nodes (octahedrons) alongside code entities · Dashed edges for supports/contradicts/related_to · Knowledge panel with confidence, tags, linked entities · Unified search (code + knowledge) · Loading states · Node sidebar · File tree · Search autocomplete · Hotspot heatmap · Syntax highlighting · Minimap · Cluster view
 
 ---
 
@@ -358,7 +358,7 @@ Environment variables:
 | Type hierarchy queries | **Native** | No | No | No | No |
 | Semantic search | BQ + Cosine | Cosine | Cosine | — | Cosine |
 | Cross-repo queries | **Yes** | Limited | Limited | No | No |
-| MCP tools exposed | **52** | — | — | Native | — |
+| MCP tools exposed | **57** | — | — | Native | — |
 | Persistent memory | **Yes** | Limited | No | Skill files | No |
 | Fully local | **Yes** | No (cloud) | No (cloud) | Local | Yes |
 | Works with any AI agent | **Yes** (MCP) | Cursor only | Windsurf only | Claude only | Continue only |
@@ -368,7 +368,7 @@ Environment variables:
 | Feature | Codescope | Greptile | Sourcegraph | Aider |
 |---------|:---------:|:--------:|:-----------:|:-----:|
 | Graph database | SurrealDB | Yes (cloud) | Partial (SCIP) | No |
-| MCP protocol | **52 tools** | API only | No | No |
+| MCP protocol | **57 tools** | API only | No | No |
 | Call graph | Yes | Yes | SCIP | Repo-map only |
 | AI memory | **Yes** | No | No | No |
 | Dead code detection | **Yes** | No | No | No |
