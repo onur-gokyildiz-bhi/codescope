@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use codescope_core::graph::schema;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Central DB path: ~/.codescope/db/<repo_name>/
 pub fn default_db_path(repo_name: &str) -> PathBuf {
@@ -26,7 +26,7 @@ fn is_codescope_running() -> bool {
 
 /// Try to remove a stale LOCK file if the owning process is dead.
 /// Returns true if lock was removed (safe to retry).
-fn try_remove_stale_lock(db_path: &PathBuf) -> bool {
+fn try_remove_stale_lock(db_path: &Path) -> bool {
     let lock_file = db_path.join("LOCK");
     if !lock_file.exists() {
         return false;
