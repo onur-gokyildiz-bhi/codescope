@@ -1,11 +1,159 @@
 #!/usr/bin/env pwsh
 # Codescope — AI Agent Setup Wizard (Windows)
-# Detects your CLI agent and installs codescope skills + MCP config.
+# Install or uninstall codescope skills, MCP config, and rules.
 #
-# Usage: irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.ps1 | iex
+# Usage:
+#   irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.ps1 | iex
+#   setup-claude.ps1 --uninstall
 
 $ErrorActionPreference = "Stop"
 $REPO_RAW = "https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main"
+
+# --- Mode: install or uninstall ---
+
+$uninstallMode = $false
+if ($args -contains "--uninstall" -or $args -contains "-u" -or $args -contains "uninstall") {
+    $uninstallMode = $true
+}
+
+# If codescope is already installed, ask the user
+if (-not $uninstallMode -and (Get-Command codescope -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "  Codescope is already installed." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "    1) Reinstall / Update"
+    Write-Host "    2) Uninstall"
+    Write-Host "    3) Cancel"
+    Write-Host ""
+    $modeChoice = Read-Host "  Select [1-3]"
+    switch ($modeChoice) {
+        "2" { $uninstallMode = $true }
+        "3" { Write-Host "  Cancelled."; exit 0 }
+    }
+}
+
+if ($uninstallMode) {
+    Write-Host ""
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host "  |   Codescope - Uninstall                  |" -ForegroundColor Red
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host ""
+
+    # 1. Remove binaries
+    Write-Host "  [1/6] Removing binaries..." -ForegroundColor Yellow
+    $binDir = "$env:USERPROFILE\.local\bin"
+    foreach ($bin in @("codescope.exe", "codescope-mcp.exe", "codescope-web.exe")) {
+        $path = "$binDir\$bin"
+        if (Test-Path $path) {
+            Remove-Item $path -Force -ErrorAction SilentlyContinue
+            Write-Host "         - $bin" -ForegroundColor Red
+        }
+    }
+
+    # 2. Remove skills
+    Write-Host "  [2/6] Removing skills..." -ForegroundColor Yellow
+    $skillsDir = "$env:USERPROFILE\.claude\skills"
+    $skillNames = @("codescope", "cs-search", "cs-index", "cs-stats", "cs-ask", "cs-impact", "cs-callers", "cs-file", "cs-query", "cs-update")
+    $removed = 0
+    foreach ($skill in $skillNames) {
+        $path = "$skillsDir\$skill"
+        if (Test-Path $path) {
+            Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+            $removed++
+        }
+    }
+    Write-Host "         - $removed skills removed" -ForegroundColor Red
+
+    # 3. Remove MCP config from ~/.claude.json
+    Write-Host "  [3/6] Removing MCP config..." -ForegroundColor Yellow
+    $claudeJson = "$env:USERPROFILE\.claude.json"
+    if (Test-Path $claudeJson) {
+        $content = Get-Content $claudeJson -Raw -ErrorAction SilentlyContinue
+        if ($content -match "codescope") {
+            try {
+                $config = $content | ConvertFrom-Json
+                if ($config.mcpServers -and $config.mcpServers.codescope) {
+                    $config.mcpServers.PSObject.Properties.Remove("codescope")
+                    $config | ConvertTo-Json -Depth 10 | Set-Content $claudeJson -Encoding UTF8
+                    Write-Host "         - codescope removed from ~/.claude.json" -ForegroundColor Red
+                }
+            } catch {
+                Write-Host "         ! Could not parse ~/.claude.json, remove codescope entry manually" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "         ~ No codescope entry in ~/.claude.json" -ForegroundColor Gray
+        }
+    }
+
+    # 4. Remove rules
+    Write-Host "  [4/6] Removing rules..." -ForegroundColor Yellow
+    $rulesFile = "$env:USERPROFILE\.claude\rules\codescope-mandatory.md"
+    if (Test-Path $rulesFile) {
+        Remove-Item $rulesFile -Force -ErrorAction SilentlyContinue
+        Write-Host "         - codescope-mandatory.md" -ForegroundColor Red
+    } else {
+        Write-Host "         ~ No rules file found" -ForegroundColor Gray
+    }
+
+    # 5. Remove marketplace plugin from settings.json
+    Write-Host "  [5/6] Removing marketplace plugin..." -ForegroundColor Yellow
+    $settingsFile = "$env:USERPROFILE\.claude\settings.json"
+    if (Test-Path $settingsFile) {
+        $settingsContent = Get-Content $settingsFile -Raw -ErrorAction SilentlyContinue
+        if ($settingsContent -match "codescope") {
+            try {
+                $settings = $settingsContent | ConvertFrom-Json
+                if ($settings.extraKnownMarketplaces -and $settings.extraKnownMarketplaces.codescope) {
+                    $settings.extraKnownMarketplaces.PSObject.Properties.Remove("codescope")
+                    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+                    Write-Host "         - codescope removed from marketplace plugins" -ForegroundColor Red
+                }
+                if ($settings.enabledPlugins) {
+                    $pluginKeys = @($settings.enabledPlugins.PSObject.Properties.Name | Where-Object { $_ -match "codescope" })
+                    foreach ($key in $pluginKeys) {
+                        $settings.enabledPlugins.PSObject.Properties.Remove($key)
+                    }
+                    if ($pluginKeys.Count -gt 0) {
+                        $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+                        Write-Host "         - $($pluginKeys.Count) plugin entries removed" -ForegroundColor Red
+                    }
+                }
+            } catch {
+                Write-Host "         ! Could not parse settings.json, remove codescope entries manually" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "         ~ No codescope in settings.json" -ForegroundColor Gray
+        }
+    }
+
+    # 6. Optionally remove database
+    Write-Host "  [6/6] Database cleanup..." -ForegroundColor Yellow
+    $dbDir = "$env:USERPROFILE\.codescope"
+    if (Test-Path $dbDir) {
+        Write-Host "         Database found at ~/.codescope" -ForegroundColor Yellow
+        $deleteDb = Read-Host "         Delete database? This removes all indexed data. [y/N]"
+        if ($deleteDb -eq "y" -or $deleteDb -eq "Y") {
+            Remove-Item $dbDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "         - ~/.codescope removed" -ForegroundColor Red
+        } else {
+            Write-Host "         ~ Database kept at ~/.codescope" -ForegroundColor Gray
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host "  |   Codescope uninstalled.                 |" -ForegroundColor Red
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Note: project-level .mcp.json files are not removed." -ForegroundColor Gray
+    Write-Host "  Delete them manually if needed." -ForegroundColor Gray
+    Write-Host ""
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════
+# INSTALL MODE (unchanged from here)
+# ═══════════════════════════════════════════════════════════════
 
 Write-Host ""
 Write-Host "  +==========================================+" -ForegroundColor Cyan
@@ -74,7 +222,6 @@ function Install-SkillsTo($dir, $label) {
         if (-not (Test-Path $skillDir)) { New-Item -ItemType Directory -Force -Path $skillDir | Out-Null }
         Invoke-WebRequest -Uri "$REPO_RAW/skills/$skill/SKILL.md" -OutFile "$skillDir\SKILL.md" -UseBasicParsing 2>$null
     }
-    # References
     $refDir1 = "$dir\codescope\references"
     $refDir2 = "$dir\cs-query\references"
     if (-not (Test-Path $refDir1)) { New-Item -ItemType Directory -Force -Path $refDir1 | Out-Null }
@@ -137,17 +284,14 @@ function Configure-McpJson($configFile, $label) {
     }
 }
 
-# Check for marketplace install — avoid double MCP registration
+# Check for marketplace install
 $marketplaceDetected = $false
 $settingsFile = "$env:USERPROFILE\.claude\settings.json"
 if (Test-Path $settingsFile) {
     $settingsContent = Get-Content $settingsFile -Raw -ErrorAction SilentlyContinue
     if ($settingsContent -match "extraKnownMarketplaces.*codescope") {
         $marketplaceDetected = $true
-        Write-Host "         ! Codescope marketplace plugin detected in settings.json" -ForegroundColor Yellow
-        Write-Host "         ! Skipping global MCP config to avoid double registration." -ForegroundColor Yellow
-        Write-Host "         ! MCP will be configured per-project via .mcp.json instead." -ForegroundColor Yellow
-        Write-Host ""
+        Write-Host "         ! Marketplace plugin detected — skipping global MCP config" -ForegroundColor Yellow
     }
 }
 
@@ -217,5 +361,6 @@ Write-Host "    cd C:\path\to\project"
 Write-Host "    codescope init            # index + create .mcp.json"
 Write-Host "    codescope doctor .        # verify everything works"
 Write-Host ""
-Write-Host "  Agents configured: $($agents -join ', ')" -ForegroundColor Cyan
+Write-Host "  To uninstall later:" -ForegroundColor Gray
+Write-Host "    setup-claude.ps1 --uninstall" -ForegroundColor Gray
 Write-Host ""

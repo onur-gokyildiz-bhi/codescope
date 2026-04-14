@@ -1,12 +1,155 @@
 #!/bin/bash
 # Codescope — AI Agent Integration Wizard
-# Detects your CLI agent and installs codescope skills + MCP config.
+# Install or uninstall codescope skills, MCP config, and rules.
 #
-# Usage: curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.sh | bash
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/setup-claude.sh | bash
+#   setup-claude.sh --uninstall
 
 set -euo pipefail
 
 REPO_RAW="https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main"
+
+# ─── Mode: install or uninstall ─────────────────────────────────
+
+UNINSTALL=false
+for arg in "$@"; do
+    case "$arg" in
+        --uninstall|-u|uninstall) UNINSTALL=true ;;
+    esac
+done
+
+# If codescope is already installed and no flag passed, ask
+if [ "$UNINSTALL" = false ] && command -v codescope &>/dev/null; then
+    echo ""
+    echo "  Codescope is already installed."
+    echo ""
+    echo "    1) Reinstall / Update"
+    echo "    2) Uninstall"
+    echo "    3) Cancel"
+    echo ""
+    if [ -t 0 ]; then
+        read -p "  Select [1-3]: " -n 1 -r mode_choice
+        echo ""
+        case "$mode_choice" in
+            2) UNINSTALL=true ;;
+            3) echo "  Cancelled."; exit 0 ;;
+        esac
+    fi
+fi
+
+if [ "$UNINSTALL" = true ]; then
+    echo ""
+    echo "  ╔══════════════════════════════════════════╗"
+    echo "  ║   Codescope — Uninstall                  ║"
+    echo "  ╚══════════════════════════════════════════╝"
+    echo ""
+
+    # 1. Remove binaries
+    echo "  [1/6] Removing binaries..."
+    BIN_DIR="$HOME/.local/bin"
+    for bin in codescope codescope-mcp codescope-web; do
+        if [ -f "$BIN_DIR/$bin" ]; then
+            rm -f "$BIN_DIR/$bin"
+            echo "         - $bin"
+        fi
+    done
+
+    # 2. Remove skills
+    echo "  [2/6] Removing skills..."
+    SKILLS_DIR="$HOME/.claude/skills"
+    REMOVED=0
+    for skill in codescope cs-search cs-index cs-stats cs-ask cs-impact cs-callers cs-file cs-query cs-update; do
+        if [ -d "$SKILLS_DIR/$skill" ]; then
+            rm -rf "$SKILLS_DIR/$skill"
+            REMOVED=$((REMOVED + 1))
+        fi
+    done
+    echo "         - $REMOVED skills removed"
+
+    # 3. Remove MCP config from ~/.claude.json
+    echo "  [3/6] Removing MCP config..."
+    CLAUDE_JSON="$HOME/.claude.json"
+    if [ -f "$CLAUDE_JSON" ] && grep -q "codescope" "$CLAUDE_JSON" 2>/dev/null; then
+        if command -v jq &>/dev/null; then
+            TMP=$(mktemp)
+            jq 'del(.mcpServers.codescope)' "$CLAUDE_JSON" > "$TMP" && mv "$TMP" "$CLAUDE_JSON"
+            echo "         - codescope removed from ~/.claude.json"
+        else
+            echo "         ! jq not found — remove codescope from ~/.claude.json manually"
+        fi
+    else
+        echo "         ~ No codescope entry in ~/.claude.json"
+    fi
+
+    # Also check ~/.codex.json
+    CODEX_JSON="$HOME/.codex.json"
+    if [ -f "$CODEX_JSON" ] && grep -q "codescope" "$CODEX_JSON" 2>/dev/null; then
+        if command -v jq &>/dev/null; then
+            TMP=$(mktemp)
+            jq 'del(.mcpServers.codescope)' "$CODEX_JSON" > "$TMP" && mv "$TMP" "$CODEX_JSON"
+            echo "         - codescope removed from ~/.codex.json"
+        fi
+    fi
+
+    # 4. Remove rules
+    echo "  [4/6] Removing rules..."
+    RULES_FILE="$HOME/.claude/rules/codescope-mandatory.md"
+    if [ -f "$RULES_FILE" ]; then
+        rm -f "$RULES_FILE"
+        echo "         - codescope-mandatory.md"
+    else
+        echo "         ~ No rules file found"
+    fi
+
+    # 5. Remove marketplace plugin from settings.json
+    echo "  [5/6] Removing marketplace plugin..."
+    SETTINGS_FILE="$HOME/.claude/settings.json"
+    if [ -f "$SETTINGS_FILE" ] && grep -q "codescope" "$SETTINGS_FILE" 2>/dev/null; then
+        if command -v jq &>/dev/null; then
+            TMP=$(mktemp)
+            jq 'del(.extraKnownMarketplaces.codescope) | del(.enabledPlugins["codescope"]) | if .enabledPlugins then .enabledPlugins |= with_entries(select(.key | test("codescope") | not)) else . end' "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
+            echo "         - codescope removed from marketplace and plugins"
+        else
+            echo "         ! jq not found — remove codescope from settings.json manually"
+        fi
+    else
+        echo "         ~ No codescope in settings.json"
+    fi
+
+    # 6. Optionally remove database
+    echo "  [6/6] Database cleanup..."
+    DB_DIR="$HOME/.codescope"
+    if [ -d "$DB_DIR" ]; then
+        echo "         Database found at ~/.codescope"
+        if [ -t 0 ]; then
+            read -p "         Delete database? This removes all indexed data. [y/N]: " -n 1 -r delete_db
+            echo ""
+        else
+            delete_db="n"
+        fi
+        if [ "$delete_db" = "y" ] || [ "$delete_db" = "Y" ]; then
+            rm -rf "$DB_DIR"
+            echo "         - ~/.codescope removed"
+        else
+            echo "         ~ Database kept at ~/.codescope"
+        fi
+    fi
+
+    echo ""
+    echo "  ╔══════════════════════════════════════════╗"
+    echo "  ║   Codescope uninstalled.                 ║"
+    echo "  ╚══════════════════════════════════════════╝"
+    echo ""
+    echo "  Note: project-level .mcp.json files are not removed."
+    echo "  Delete them manually if needed."
+    echo ""
+    exit 0
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# INSTALL MODE
+# ═══════════════════════════════════════════════════════════════
 
 echo ""
 echo "  ╔══════════════════════════════════════════╗"
@@ -91,7 +234,6 @@ install_skills_to() {
         mkdir -p "$dir/$skill"
         curl -fsSL "$REPO_RAW/skills/$skill/SKILL.md" -o "$dir/$skill/SKILL.md" 2>/dev/null
     done
-    # References
     mkdir -p "$dir/codescope/references" "$dir/cs-query/references"
     curl -fsSL "$REPO_RAW/$REFS_CODESCOPE" -o "$dir/codescope/references/TOOLS.md" 2>/dev/null
     curl -fsSL "$REPO_RAW/$REFS_QUERY" -o "$dir/cs-query/references/SURREALQL.md" 2>/dev/null
@@ -111,7 +253,6 @@ for agent in "${AGENTS[@]}"; do
             install_skills_to "$HOME/.opencode/skills/codescope" "OpenCode (~/.opencode/skills/codescope/)"
             ;;
         cursor|zed|gemini-cli)
-            # These agents read .mcp.json from project root — skills go to Claude's dir as fallback
             install_skills_to "$HOME/.claude/skills" "$agent (via ~/.claude/skills/ fallback)"
             ;;
     esac
@@ -136,7 +277,6 @@ configure_mcp_json() {
         mv "$TMP" "$config_file"
         echo "         ✓ $label — added codescope entry"
     else
-        # Create or overwrite
         mkdir -p "$(dirname "$config_file")"
         cat > "$config_file" << 'MCPEOF'
 {
@@ -152,18 +292,12 @@ MCPEOF
     fi
 }
 
-# Check for marketplace install — avoid double MCP registration
+# Check for marketplace install
 MARKETPLACE_DETECTED=false
 SETTINGS_FILE="$HOME/.claude/settings.json"
-if [ -f "$SETTINGS_FILE" ]; then
-    if grep -q "extraKnownMarketplaces.*codescope\|codescope.*extraKnownMarketplaces" "$SETTINGS_FILE" 2>/dev/null || \
-       grep -q '"codescope"' "$SETTINGS_FILE" 2>/dev/null && grep -q 'extraKnownMarketplaces' "$SETTINGS_FILE" 2>/dev/null; then
-        MARKETPLACE_DETECTED=true
-        echo "         ! Codescope marketplace plugin detected in settings.json"
-        echo "         ! Skipping global MCP config to avoid double registration."
-        echo "         ! MCP will be configured per-project via .mcp.json instead."
-        echo ""
-    fi
+if [ -f "$SETTINGS_FILE" ] && grep -q "codescope" "$SETTINGS_FILE" 2>/dev/null && grep -q "extraKnownMarketplaces" "$SETTINGS_FILE" 2>/dev/null; then
+    MARKETPLACE_DETECTED=true
+    echo "         ! Marketplace plugin detected — skipping global MCP config"
 fi
 
 for agent in "${AGENTS[@]}"; do
@@ -186,13 +320,12 @@ for agent in "${AGENTS[@]}"; do
             echo "         → Zed: add codescope to .zed/mcp.json in your project"
             ;;
         *)
-            # OpenCode, Gemini CLI — use project-level .mcp.json (codescope init handles this)
             echo "         → $agent: run 'codescope init' in each project"
             ;;
     esac
 done
 
-# ─── Step 5: Install rules (Claude Code specific) ────────────────
+# ─── Step 5: Install rules ──────────────────────────────────────
 
 echo "  [4/5] Installing mandatory rules..."
 
@@ -203,9 +336,6 @@ for agent in "${AGENTS[@]}"; do
             mkdir -p "$RULES_DIR"
             curl -fsSL "$REPO_RAW/.claude/rules/codescope-mandatory.md" -o "$RULES_DIR/codescope-mandatory.md" 2>/dev/null
             echo "         ✓ ~/.claude/rules/codescope-mandatory.md (alwaysApply)"
-            ;;
-        *)
-            # Other agents don't have a rules system yet
             ;;
     esac
 done
@@ -257,15 +387,6 @@ echo "    cd /path/to/project"
 echo "    codescope init            # index + create .mcp.json"
 echo "    codescope doctor .        # verify everything works"
 echo ""
-echo "  Available skills:"
-echo "    /codescope                — Main menu"
-echo "    /cs-search <pattern>      — Search functions"
-echo "    /cs-impact <function>     — Impact analysis"
-echo "    /cs-callers <function>    — Who calls this?"
-echo "    /cs-ask <question>        — Natural language (TR/EN)"
-echo "    /cs-stats                 — Codebase overview"
-echo "    /cs-query <surql>         — Raw SurrealQL"
-echo "    /cs-update                — Self-update"
-echo ""
-echo "  Agents configured: ${AGENTS[*]}"
+echo "  To uninstall later:"
+echo "    setup-claude.sh --uninstall"
 echo ""
