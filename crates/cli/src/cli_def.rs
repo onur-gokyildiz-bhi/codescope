@@ -117,6 +117,9 @@ pub enum Commands {
         path: PathBuf,
         #[arg(long, default_value = "9876")]
         port: u16,
+        /// Network address to bind (0.0.0.0 = LAN, 127.0.0.1 = localhost only)
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
         #[arg(long)]
         auto_index: bool,
     },

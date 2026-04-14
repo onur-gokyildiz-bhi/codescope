@@ -107,6 +107,7 @@ async fn main() -> Result<()> {
         Commands::Web {
             path,
             port,
+            host,
             auto_index,
         } => {
             // Derive repo from target path, not CWD
@@ -114,7 +115,7 @@ async fn main() -> Result<()> {
                 .canonicalize()
                 .ok()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
-            codescope_web::run_web(path, repo, port, auto_index, cli.db_path).await?;
+            codescope_web::run_web(path, repo, port, auto_index, cli.db_path, host).await?;
         }
         Commands::Serve { port, bind } => {
             commands::serve::run(&bind, port).await?;

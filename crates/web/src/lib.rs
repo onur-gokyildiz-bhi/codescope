@@ -96,6 +96,7 @@ pub async fn run_web(
     port: u16,
     auto_index: bool,
     db_path_override: Option<PathBuf>,
+    host: String,
 ) -> Result<()> {
     // Resolve repo name: --repo > directory name > "default"
     let repo_name = repo.unwrap_or_else(|| {
@@ -197,8 +198,18 @@ pub async fn run_web(
 
     let app = build_routes().with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port);
-    println!("Codescope Web UI: http://localhost:{}", port);
+    let addr = format!("{}:{}", host, port);
+    println!("Codescope Web UI: http://{}:{}", host, port);
+    if host == "0.0.0.0" {
+        // Show LAN IPs so other machines can connect
+        if let Ok(hostname) = std::process::Command::new("hostname").output() {
+            let name = String::from_utf8_lossy(&hostname.stdout).trim().to_string();
+            if !name.is_empty() {
+                println!("  LAN access: http://{}:{}", name, port);
+            }
+        }
+        println!("  (localhost-only: use --host 127.0.0.1)");
+    }
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
