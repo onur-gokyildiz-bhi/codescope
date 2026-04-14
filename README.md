@@ -293,32 +293,53 @@ Full methodology and competitive comparison: [BENCHMARKS.md](BENCHMARKS.md)
 
 ---
 
-## vs Competitors
+## What Codescope Is (and Isn't)
 
-### vs AI-native code editors
+**Codescope is not an editor. Not an agent. Not a SaaS.**
 
-| | **Codescope** | Cursor | Windsurf | Claude Code (built-in) | Continue.dev |
+It's a **context layer** — the brain behind whatever AI coding tool you already use. Claude Code, Cursor, Codex, Zed, VS Code, Neovim — plug codescope in via MCP or LSP and they all get the same graph-backed memory.
+
+```
+┌──────────────────────────────────────────────────────┐
+│   Editor / Agent (Claude Code, Cursor, Zed, ...)     │  ← you pick this
+├──────────────────────────────────────────────────────┤
+│   Context layer                                      │
+│   ┌──────────────────────┐   ┌──────────────────────┐│
+│   │ Built-in (embeddings)│   │ Codescope (graph)    ││  ← you can swap this
+│   └──────────────────────┘   └──────────────────────┘│
+├──────────────────────────────────────────────────────┤
+│   Your code                                          │
+└──────────────────────────────────────────────────────┘
+```
+
+So "vs Cursor" is the wrong framing. **Codescope vs Cursor's built-in embeddings RAG** is the right one.
+
+### vs built-in context engines
+
+| | **Codescope** | Cursor built-in | Windsurf built-in | Continue.dev | Claude Code skills |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Architecture | **Graph-first** | Embeddings | Embeddings | File context | Embeddings |
-| Call graph traversal | **Native** | ❌ | ❌ | ❌ | ❌ |
+| Architecture | **Graph-first** | Embeddings | Embeddings | Embeddings | File-reading |
+| Call graph traversal | **Native, sub-ms** | ❌ | ❌ | ❌ | Read-based |
 | Impact analysis (N-hop) | **Native** | ❌ | ❌ | ❌ | ❌ |
 | Type hierarchy queries | **Native** | ❌ | ❌ | ❌ | ❌ |
-| Cross-session memory | **Yes (shared)** | Limited | ❌ | Per-project files | ❌ |
-| Works with any agent | **Yes (MCP + LSP)** | Cursor only | Windsurf only | Claude only | Continue only |
-| Fully local | **Yes** | ❌ (cloud) | ❌ (cloud) | Yes | Yes |
+| Cross-session memory | **Shared across agents** | Per-editor | ❌ | ❌ | Per-project files |
+| Editor/agent lock-in | **None — MCP + LSP** | Cursor only | Windsurf only | Continue only | Claude only |
+| Fully local | **Yes** | ❌ (cloud indexing) | ❌ (cloud) | Yes | Yes |
 | CUDA/GPU code-aware | **Yes** | ❌ | ❌ | ❌ | ❌ |
-| Price | **Free (MIT)** | $20+/mo | $15+/mo | Included | Free |
+| Cost | **Free (MIT)** | Bundled (cloud tier) | Bundled (cloud tier) | Free | Bundled |
 
-### vs dedicated code intelligence tools
+### vs dedicated code intelligence backends
 
-| | **Codescope** | Sourcegraph | Greptile | Aider |
+| | **Codescope** | Sourcegraph | Greptile | Aider's repomap |
 |---|:---:|:---:|:---:|:---:|
-| Graph database | SurrealDB | Partial (SCIP) | Yes (cloud) | ❌ |
+| Graph database | SurrealDB (embedded) | SCIP (partial graph) | Cloud graph | ❌ (flat map) |
 | MCP protocol | **32 tools** | ❌ | API only | ❌ |
-| LSP bridge | **Yes** | Yes (per-lang) | ❌ | ❌ |
-| AI memory | **Yes** | ❌ | ❌ | ❌ |
-| Self-hosted | **Yes** | Paid tier | ❌ | Yes |
-| Price | **Free (MIT)** | $$$ | SaaS | Free |
+| LSP bridge | **Yes, graph-backed** | Yes (per-language) | ❌ | ❌ |
+| AI agent memory | **Yes, cross-session** | ❌ | ❌ | ❌ |
+| Self-hosted | **Yes** | Paid tier | ❌ (SaaS) | Yes |
+| Cost | **Free (MIT)** | $$$ | SaaS pricing | Free |
+
+**The honest positioning:** if you already love Cursor or Claude Code, don't switch. Add codescope as a second brain. If you're building your own agent, codescope handles context so you don't have to.
 
 ---
 
