@@ -1,5 +1,5 @@
 import { onMount, onCleanup } from 'solid-js';
-import { setCenterNode } from '../store';
+import { setCenterNode, setErrorMsg } from '../store';
 import { api } from '../api';
 import { KIND_COLORS } from '../utils/colors';
 
@@ -13,7 +13,8 @@ export default function CirclePack() {
     let rawData: any;
     try {
       rawData = await api.graph(undefined, 3);
-    } catch {
+    } catch (e) {
+      setErrorMsg(`Failed to load circle pack data: ${String(e)}`);
       return;
     }
 

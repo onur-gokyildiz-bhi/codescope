@@ -11,9 +11,7 @@ use crate::server::GraphRagServer;
 #[tool_router(router = refactor_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Consolidated refactor tool — rename planning, dead-code discovery, safe-delete check.
-    #[tool(
-        description = "Refactor ops: action=rename|find_unused|safe_delete. Shows references, dead code, or delete safety check."
-    )]
+    #[tool(description = "Refactor ops (rename references, find unused, safe-delete check).")]
     async fn refactor(&self, Parameters(params): Parameters<RefactorParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

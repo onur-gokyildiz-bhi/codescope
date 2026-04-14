@@ -102,6 +102,10 @@ impl LanguageServer for Backend {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
+                // LSP spec defaults to UTF-16 when a client doesn't negotiate.
+                // We advertise UTF-16 explicitly so clients know what we
+                // expect for `Position::character` offsets.
+                position_encoding: Some(PositionEncodingKind::UTF16),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
@@ -448,26 +452,56 @@ fn location_for_entity(
     })
 }
 
-/// Extract the identifier at `pos` within `text`. Accepts ASCII identifier
-/// characters plus `_`. Returns None if the cursor isn't on an identifier.
+/// Extract the identifier at `pos` within `text`.
+///
+/// Accepts any Unicode alphanumeric character plus `_` — this matches what
+/// Rust, Python, and JavaScript all allow in identifiers (they allow more,
+/// but `is_alphanumeric || _` is a safe superset for "looks like a word").
+///
+/// `pos.character` is interpreted as a **UTF-16 code unit offset** per the
+/// LSP spec default (and what we advertise via `positionEncoding`). We
+/// translate that to a char index by accumulating `char::len_utf16()` per
+/// character until we hit the target offset. Characters outside the BMP
+/// (e.g. many emoji, some CJK Extension B) count as 2 UTF-16 units.
+///
+/// Returns None if the cursor isn't on an identifier character (and isn't
+/// immediately after one).
 pub fn word_at_position(text: &str, pos: Position) -> Option<String> {
     let line = text.lines().nth(pos.line as usize)?;
-    let col = pos.character as usize;
-    let bytes = line.as_bytes();
-    if col > bytes.len() {
+    let target_utf16 = pos.character as usize;
+
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+
+    // Collect the line's chars so we can walk in both directions and slice
+    // by char index. Lines are typically short, so this is cheap.
+    let chars: Vec<char> = line.chars().collect();
+
+    // Convert UTF-16 code unit offset → char index.
+    // If target_utf16 lands in the middle of a surrogate pair we snap to the
+    // preceding char (conservative; cursor can't really be mid-surrogate).
+    let line_utf16_len: usize = chars.iter().map(|c| c.len_utf16()).sum();
+    if target_utf16 > line_utf16_len {
+        // Past end of line → invalid.
         return None;
     }
+    let mut char_idx = chars.len(); // default: end-of-line
+    let mut acc = 0usize;
+    for (i, c) in chars.iter().enumerate() {
+        if acc >= target_utf16 {
+            char_idx = i;
+            break;
+        }
+        acc += c.len_utf16();
+    }
 
-    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-
-    // Walk left
-    let mut start = col;
-    while start > 0 && is_ident(bytes[start - 1]) {
+    // Walk left over identifier characters.
+    let mut start = char_idx;
+    while start > 0 && is_ident(chars[start - 1]) {
         start -= 1;
     }
-    // Walk right
-    let mut end = col;
-    while end < bytes.len() && is_ident(bytes[end]) {
+    // Walk right over identifier characters.
+    let mut end = char_idx;
+    while end < chars.len() && is_ident(chars[end]) {
         end += 1;
     }
 
@@ -475,11 +509,11 @@ pub fn word_at_position(text: &str, pos: Position) -> Option<String> {
         return None;
     }
 
-    let ident = std::str::from_utf8(&bytes[start..end]).ok()?;
+    let ident: String = chars[start..end].iter().collect();
     if ident.is_empty() {
         None
     } else {
-        Some(ident.to_string())
+        Some(ident)
     }
 }
 
@@ -539,5 +573,156 @@ mod tests {
             },
         );
         assert_eq!(got.as_deref(), Some("foo"));
+    }
+
+    // ----- non-ASCII identifiers -----
+
+    #[test]
+    fn word_at_position_accented_python_identifier() {
+        // Python allows Unicode identifiers. "données" = 7 chars, all BMP,
+        // so UTF-16 offset == char offset.
+        let text = "def données():";
+        // Cursor in the middle of "données" (after 'd').
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 5,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("données"));
+    }
+
+    #[test]
+    fn word_at_position_cjk_identifier() {
+        // JS/TS allow CJK identifiers. "変数" is 2 BMP chars, 2 UTF-16 units.
+        let text = "let 変数 = 1;";
+        // Cursor on the first CJK char.
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 4,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("変数"));
+
+        // Cursor immediately AFTER the identifier (2 UTF-16 units in).
+        let got2 = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 6,
+            },
+        );
+        assert_eq!(got2.as_deref(), Some("変数"));
+    }
+
+    #[test]
+    fn word_at_position_at_start_of_accented_identifier() {
+        let text = "foo été bar";
+        // Cursor right at the 'é' (UTF-16 offset 4, after "foo ").
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 4,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("été"));
+    }
+
+    #[test]
+    fn word_at_position_at_end_of_accented_identifier() {
+        let text = "foo été bar";
+        // "foo " (4) + "été" (3 chars, 3 UTF-16 units) = 7.
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 7,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("été"));
+    }
+
+    #[test]
+    fn word_at_position_middle_of_accented_identifier() {
+        let text = "let naïve = 1;";
+        // "let " (4) + "na" (2) = 6 → cursor between 'a' and 'ï'.
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 6,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("naïve"));
+    }
+
+    #[test]
+    fn word_at_position_non_bmp_char_uses_two_utf16_units() {
+        // 🦀 (U+1F980) is a non-BMP char — 2 UTF-16 code units, 1 char.
+        // Emoji aren't typically valid identifier chars in most languages,
+        // but we need to verify the UTF-16 offset math handles surrogate
+        // pairs in preceding text correctly.
+        //
+        // Layout: "🦀 foo"
+        //   UTF-16 units: 🦀=2, space=1, f=1, o=1, o=1 → total 6
+        //   Chars:        🦀=1, space=1, f=1, o=1, o=1 → total 5
+        //
+        // A cursor at UTF-16 offset 3 is right before 'f' (after "🦀 "),
+        // which would have been offset 2 under a char-based count. The
+        // returned identifier should be "foo" regardless.
+        let text = "🦀 foo";
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 3,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("foo"));
+
+        // Sanity check: a naive char-based implementation would have placed
+        // the cursor at UTF-16 offset 3 inside "foo" (char idx 3 = 'o'),
+        // which would also return "foo" — so also test offset 4 which a
+        // byte-based impl would place mid-"foo" but UTF-16-correct impl
+        // places between 'f' and 'o'.
+        let got2 = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 4,
+            },
+        );
+        assert_eq!(got2.as_deref(), Some("foo"));
+    }
+
+    #[test]
+    fn word_at_position_past_end_of_line_returns_none() {
+        let text = "foo";
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 100,
+            },
+        );
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn word_at_position_at_exact_end_of_line() {
+        // Cursor at the newline position still captures the trailing word.
+        let text = "hello";
+        let got = word_at_position(
+            text,
+            Position {
+                line: 0,
+                character: 5,
+            },
+        );
+        assert_eq!(got.as_deref(), Some("hello"));
     }
 }

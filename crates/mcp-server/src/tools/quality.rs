@@ -5,19 +5,24 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
+use crate::helpers::maybe_archive;
 use crate::params::*;
 use crate::server::GraphRagServer;
 
 #[tool_router(router = quality_router, vis = "pub(crate)")]
 impl GraphRagServer {
     /// Lint: run a built-in or custom quality check.
-    #[tool(
-        description = "Lint: mode=dead_code|smells|custom. dead_code: zero-caller functions. smells: god functions, cycles. custom: run SurrealQL rule."
-    )]
+    #[tool(description = "Quality lint checks (dead_code, smells, or a custom SurrealQL rule).")]
     async fn lint(&self, Parameters(params): Parameters<LintParams>) -> String {
         match params.mode.as_str() {
-            "dead_code" => lint_dead_code(self, &params).await,
-            "smells" => lint_smells(self, &params).await,
+            "dead_code" => {
+                let out = lint_dead_code(self, &params).await;
+                maybe_archive(self.result_archive(), "lint_dead_code", out).await
+            }
+            "smells" => {
+                let out = lint_smells(self, &params).await;
+                maybe_archive(self.result_archive(), "lint_smells", out).await
+            }
             "custom" => lint_custom(self, &params).await,
             other => format!(
                 "Unknown lint mode '{}'. Use 'dead_code', 'smells', or 'custom'.",

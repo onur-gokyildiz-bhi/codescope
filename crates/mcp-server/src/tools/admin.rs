@@ -12,7 +12,7 @@ use crate::server::{GraphRagServer, ProjectCtx};
 impl GraphRagServer {
     /// Project management: init (open a project in daemon mode) or list (show open projects).
     #[tool(
-        description = "Project management: action=init|list. init: open a project (daemon mode). list: show open projects."
+        description = "Project management (open a project in daemon mode, or list open projects)."
     )]
     async fn project(&self, Parameters(params): Parameters<ProjectParams>) -> String {
         match params.action.as_str() {

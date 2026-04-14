@@ -11,7 +11,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Contributor analysis: expertise map, reviewer suggestions, team patterns.
     #[tool(
-        description = "Contributors: mode=map|reviewers|patterns. map: who knows which files. reviewers: suggest reviewers for changed files. patterns: detect team coding conventions."
+        description = "Contributor analysis (expertise map, reviewer suggestions, team coding patterns)."
     )]
     async fn contributors(&self, Parameters(params): Parameters<ContributorsParams>) -> String {
         match params.mode.as_str() {

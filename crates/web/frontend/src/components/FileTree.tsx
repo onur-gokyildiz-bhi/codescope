@@ -1,5 +1,5 @@
 import { createSignal, createEffect, For, Show } from 'solid-js';
-import { setCenterNode, setShowFiles, projectVersion } from '../store';
+import { setCenterNode, setShowFiles, projectVersion, setErrorMsg } from '../store';
 import { api } from '../api';
 
 interface TreeNode {
@@ -86,7 +86,7 @@ export default function FileTree() {
         ? files.map((f: any) => typeof f === 'string' ? f : f.path || f.name || '')
         : [];
       setTree(buildTree(paths));
-    } catch { /* ignore */ }
+    } catch (e) { setErrorMsg(`Failed to load file tree: ${String(e)}`); }
   });
 
   return (

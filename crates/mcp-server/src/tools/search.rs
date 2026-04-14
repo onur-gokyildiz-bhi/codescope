@@ -15,7 +15,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Unified search: dispatches to fuzzy, exact, file, cross_type, neighborhood, or backlinks.
     #[tool(
-        description = "Unified search: mode=fuzzy|exact|file|cross_type|neighborhood|backlinks. fuzzy: search by name substring. exact: find function by exact name. file: list entities in file. cross_type: search all entity types. neighborhood: callers+callees+siblings. backlinks: reverse references."
+        description = "Unified code graph search across modes (fuzzy, exact, file, cross_type, neighborhood, backlinks)."
     )]
     #[tracing::instrument(skip_all, fields(mode = %params.mode))]
     async fn search(&self, Parameters(params): Parameters<SearchUnifiedParams>) -> String {
@@ -49,7 +49,18 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callers found for '{}'", params.function_name);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
+                let mut output = format!(
+                    "Callers of `{}` ({}):\n",
+                    params.function_name,
+                    results.len()
+                );
+                for r in &results {
+                    let name = r.name.as_deref().unwrap_or("?");
+                    let fp = r.file_path.as_deref().unwrap_or("?");
+                    let line = r.start_line.unwrap_or(0);
+                    output.push_str(&format!("- `{}` ({}:{})\n", name, fp, line));
+                }
+                crate::helpers::maybe_archive(self.result_archive(), "find_callers", output).await
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -71,7 +82,18 @@ impl GraphRagServer {
                 if results.is_empty() {
                     return format!("No callees found for '{}'", params.function_name);
                 }
-                serde_json::to_string_pretty(&results).unwrap_or_else(|_| "Error formatting".into())
+                let mut output = format!(
+                    "Callees of `{}` ({}):\n",
+                    params.function_name,
+                    results.len()
+                );
+                for r in &results {
+                    let name = r.name.as_deref().unwrap_or("?");
+                    let fp = r.file_path.as_deref().unwrap_or("?");
+                    let line = r.start_line.unwrap_or(0);
+                    output.push_str(&format!("- `{}` ({}:{})\n", name, fp, line));
+                }
+                crate::helpers::maybe_archive(self.result_archive(), "find_callees", output).await
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -118,9 +140,7 @@ impl GraphRagServer {
     }
 
     /// Retrieve full output of an archived large result by ID
-    #[tool(
-        description = "Retrieve full output of an archived large result. Use when a tool returned a summary with a retrieval ID."
-    )]
+    #[tool(description = "Retrieve full output of an archived large result by retrieval ID.")]
     async fn retrieve_archived(
         &self,
         Parameters(params): Parameters<RetrieveArchivedParams>,
@@ -319,7 +339,8 @@ async fn search_cross_type(server: &GraphRagServer, params: &SearchUnifiedParams
                 }
             }
 
-            output
+            crate::helpers::maybe_archive(server.result_archive(), "search_cross_type", output)
+                .await
         }
         Err(e) => format!("Error searching for '{}': {}", params.query, e),
     }
@@ -480,7 +501,7 @@ async fn search_backlinks(server: &GraphRagServer, params: &SearchUnifiedParams)
                 );
             }
 
-            output
+            crate::helpers::maybe_archive(server.result_archive(), "search_backlinks", output).await
         }
         Err(e) => format!("Error finding backlinks for '{}': {}", params.query, e),
     }

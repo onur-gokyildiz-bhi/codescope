@@ -5,7 +5,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
-use crate::helpers::{build_project_profile, derive_scope_from_file_path};
+use crate::helpers::{build_project_profile, derive_scope_from_file_path, maybe_archive};
 use crate::params::*;
 use crate::server::GraphRagServer;
 
@@ -103,6 +103,7 @@ impl GraphRagServer {
         };
         let analysis = params.analysis.as_deref().unwrap_or("all");
         let limit = params.limit.unwrap_or(20);
+        let archive_key = format!("community_detection_{}", analysis);
         let mut output = "## Code Community Analysis\n\n".to_string();
 
         if analysis == "all" || analysis == "clusters" {
@@ -198,7 +199,7 @@ impl GraphRagServer {
             }
         }
 
-        output
+        maybe_archive(self.result_archive(), &archive_key, output).await
     }
 
     /// Export the knowledge graph as an Obsidian-compatible vault with wikilinks

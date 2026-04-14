@@ -1,5 +1,5 @@
 import { createSignal, createEffect, onMount, For, Show } from 'solid-js';
-import { currentFile, setCurrentFile } from '../store';
+import { currentFile, setCurrentFile, setErrorMsg } from '../store';
 import { api } from '../api';
 
 declare const hljs: any;
@@ -16,7 +16,8 @@ export default function SourceViewer() {
       const data = await api.fileContent(path);
       setContent(data.content || '');
       setEntities(data.entities || []);
-    } catch {
+    } catch (e) {
+      setErrorMsg(`Failed to load file: ${String(e)}`);
       setContent('// Failed to load file');
       setEntities([]);
     }
@@ -37,7 +38,7 @@ export default function SourceViewer() {
     try {
       const result = hljs.highlightAuto(raw);
       return result.value.split('\n');
-    } catch {
+    } catch { /* intentionally ignored: hljs not loaded — fall back to plain text */
       return raw.split('\n');
     }
   }

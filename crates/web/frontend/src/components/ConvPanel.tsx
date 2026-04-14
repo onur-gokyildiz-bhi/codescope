@@ -1,5 +1,5 @@
 import { createSignal, createEffect, For, Show } from 'solid-js';
-import { setShowConv, projectVersion } from '../store';
+import { setShowConv, projectVersion, setErrorMsg } from '../store';
 import { api } from '../api';
 
 type TabId = 'decisions' | 'problems' | 'solutions' | 'topics' | 'sessions';
@@ -33,7 +33,7 @@ export default function ConvPanel() {
         }));
       }
       setItems(parsed);
-    } catch { /* ignore */ }
+    } catch (e) { setErrorMsg(`Failed to load conversations: ${String(e)}`); }
     setLoading(false);
   });
 

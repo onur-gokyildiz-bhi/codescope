@@ -12,7 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// HTTP analysis — find client calls or endpoint callers.
     #[tool(
-        description = "HTTP analysis: mode=calls|endpoint_callers. calls: find HTTP client calls (filter by method). endpoint_callers: find code calling a URL pattern."
+        description = "HTTP cross-service analysis (find client calls or code targeting an endpoint URL)."
     )]
     async fn http_analysis(&self, Parameters(params): Parameters<HttpAnalysisParams>) -> String {
         let ctx = match self.ctx().await {

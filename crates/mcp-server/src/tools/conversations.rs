@@ -12,7 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Unified conversations tool: index transcripts, search decisions/problems, or timeline for an entity.
     #[tool(
-        description = "Conversations: action=index|search|timeline. index: ingest transcripts. search: find decisions/problems. timeline: activity for an entity."
+        description = "Conversation memory (index transcripts, search decisions/problems, entity timeline)."
     )]
     async fn conversations(&self, Parameters(params): Parameters<ConversationsParams>) -> String {
         match params.action.as_str() {

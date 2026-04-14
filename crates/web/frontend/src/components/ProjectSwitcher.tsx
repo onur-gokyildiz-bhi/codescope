@@ -3,7 +3,7 @@ import {
   currentProject, setCurrentProject,
   availableProjects, setAvailableProjects,
   setProjectVersion, setStats, setGraphData, setSelectedNode,
-  setCenterNode,
+  setCenterNode, setErrorMsg,
 } from '../store';
 import { api } from '../api';
 
@@ -19,9 +19,7 @@ export default function ProjectSwitcher() {
         setCurrentProject(projects[0]);
       }
       setLoaded(true);
-    } catch {
-      // Not in daemon mode (stdio) — hide the switcher
-    }
+    } catch { /* intentionally ignored: not in daemon mode (stdio) — switcher stays hidden */ }
   });
 
   const switchProject = (name: string) => {
@@ -34,7 +32,7 @@ export default function ProjectSwitcher() {
     // Bump version to trigger re-fetch in all components
     setProjectVersion(v => v + 1);
     // Re-fetch stats immediately
-    api.stats().then(s => setStats(s)).catch(() => {});
+    api.stats().then(s => setStats(s)).catch((e) => setErrorMsg(`Failed to refresh stats: ${String(e)}`));
   };
 
   return (

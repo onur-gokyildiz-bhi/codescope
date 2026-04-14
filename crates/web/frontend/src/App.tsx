@@ -53,7 +53,7 @@ export default function App() {
     try {
       const s = await api.stats();
       setStats(s);
-    } catch { /* server may not be ready */ }
+    } catch { /* intentionally ignored: stats poll runs on project switch; server may not be ready yet */ }
   });
 
   return (

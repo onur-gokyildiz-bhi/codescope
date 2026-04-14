@@ -1,24 +1,61 @@
-import { onMount, onCleanup, createEffect } from 'solid-js';
+import { onMount, onCleanup, createEffect, createSignal, Show } from 'solid-js';
 import {
   graphData, setGraphData, selectedNode, setSelectedNode,
   hoveredNode, setHoveredNode, graphDepth,
   centerNode, setCenterNode, colorMode,
   repelStrength, linkDistance, setCurrentFile,
-  projectVersion, setLoading, setErrorMsg,
+  projectVersion, loading, setLoading, setErrorMsg,
 } from '../store';
 import { api } from '../api';
 import { kindColor, moduleColor, edgeColor, DIM_COLOR, DIM_EDGE, HIGHLIGHT_EDGE } from '../utils/colors';
+
+const MAX_VISIBLE_NODES = 500;
 
 function isKnowledge(kind: string): boolean {
   return kind.startsWith('knowledge:');
 }
 
+// Rank nodes for LOD: clusters first, then by caller_count (if present), then by kind priority.
+function importanceScore(n: any): number {
+  if (n.kind === 'cluster') return 1e9;
+  const callers = typeof n.caller_count === 'number' ? n.caller_count : 0;
+  const kindWeight =
+    n.kind === 'file' ? 100 :
+    n.kind === 'class' ? 50 :
+    n.kind === 'function' ? 10 :
+    isKnowledge(n.kind || '') ? 5 : 1;
+  return callers * 1000 + kindWeight;
+}
+
+function applyLOD(data: { nodes: any[]; links: any[] }): { nodes: any[]; links: any[]; total: number } {
+  const nodes = data.nodes || [];
+  const links = data.links || [];
+  const total = nodes.length;
+  if (total <= MAX_VISIBLE_NODES) {
+    return { nodes, links, total };
+  }
+  const sorted = [...nodes].sort((a, b) => importanceScore(b) - importanceScore(a));
+  const kept = sorted.slice(0, MAX_VISIBLE_NODES);
+  const keepIds = new Set(kept.map(n => n.id));
+  const filteredLinks = links.filter((l: any) => {
+    const sid = typeof l.source === 'object' ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' ? l.target.id : l.target;
+    return keepIds.has(sid) && keepIds.has(tid);
+  });
+  return { nodes: kept, links: filteredLinks, total };
+}
+
 export default function Graph3D() {
   let container!: HTMLDivElement;
   let graph: any;
+  const [totalNodes, setTotalNodes] = createSignal(0);
 
   onMount(async () => {
-    const ForceGraph3D = (await import('3d-force-graph')).default;
+    // Load ForceGraph3D + three together so THREE is guaranteed before any node render.
+    const [ForceGraph3D, THREE] = await Promise.all([
+      import('3d-force-graph').then(m => m.default),
+      import('three'),
+    ]);
     graph = ForceGraph3D()(container)
       .backgroundColor('#0d1117')
       .nodeVal((n: any) => {
@@ -44,17 +81,16 @@ export default function Graph3D() {
       })
       .nodeThreeObject((n: any) => {
         if (!isKnowledge(n.kind)) return undefined;
-        const THREE = (window as any).__THREE || (graph as any).scene()?.constructor;
-        if (!THREE) return undefined;
         try {
-          const geo = new (window as any).THREE.OctahedronGeometry(4);
-          const mat = new (window as any).THREE.MeshLambertMaterial({
+          const geo = new THREE.OctahedronGeometry(4);
+          const mat = new THREE.MeshLambertMaterial({
             color: getNodeColor(n),
             transparent: true,
             opacity: 0.85,
           });
-          return new (window as any).THREE.Mesh(geo, mat);
-        } catch {
+          return new THREE.Mesh(geo, mat);
+        } catch (e) {
+          setErrorMsg(String(e));
           return undefined;
         }
       })
@@ -101,12 +137,6 @@ export default function Graph3D() {
       .d3VelocityDecay(0.3)
       .warmupTicks(80)
       .cooldownTicks(120);
-
-    // Expose THREE for knowledge node shapes
-    try {
-      const THREE = await import('three');
-      (window as any).THREE = THREE;
-    } catch { /* three.js already bundled by 3d-force-graph */ }
   });
 
   // Load graph data on mount and on project switch
@@ -116,10 +146,12 @@ export default function Graph3D() {
     setLoading(true);
     try {
       const data = await api.graph(center || undefined, graphDepth());
-      setGraphData(data);
+      const capped = applyLOD(data);
+      setTotalNodes(capped.total);
+      setGraphData({ nodes: capped.nodes, links: capped.links });
       setErrorMsg(null);
     } catch (e: any) {
-      setErrorMsg('Failed to load graph data');
+      setErrorMsg(`Failed to load graph data: ${String(e?.message || e)}`);
     } finally {
       setLoading(false);
     }
@@ -163,10 +195,12 @@ export default function Graph3D() {
       setLoading(true);
       try {
         const data = await api.graph(center, depth);
-        setGraphData(data);
+        const capped = applyLOD(data);
+        setTotalNodes(capped.total);
+        setGraphData({ nodes: capped.nodes, links: capped.links });
         setErrorMsg(null);
-      } catch {
-        setErrorMsg('Failed to load graph data');
+      } catch (e: any) {
+        setErrorMsg(`Failed to load graph data: ${String(e?.message || e)}`);
       } finally {
         setLoading(false);
       }
@@ -177,5 +211,22 @@ export default function Graph3D() {
     if (graph) graph._destructor?.();
   });
 
-  return <div ref={container} style={{ width: '100%', height: '100%' }} />;
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <div ref={container} style={{ width: '100%', height: '100%' }} />
+      <Show when={graphData().nodes.length === 0 && !loading()}>
+        <div class="empty-state">
+          <h2>No graph yet</h2>
+          <p>Index your codebase to see the graph:</p>
+          <pre>cd your-project &amp;&amp; codescope index .</pre>
+          <p>Then reload this page.</p>
+        </div>
+      </Show>
+      <Show when={totalNodes() > MAX_VISIBLE_NODES}>
+        <div class="lod-indicator">
+          Showing {MAX_VISIBLE_NODES} of {totalNodes()} nodes. Use cluster mode or search to see more.
+        </div>
+      </Show>
+    </div>
+  );
 }

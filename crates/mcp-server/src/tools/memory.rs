@@ -11,7 +11,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Unified memory tool — action=save|search|pin
     #[tool(
-        description = "Memory: action=save|search|pin. save: persist note. search: query decisions/problems/solutions. pin: adjust tier."
+        description = "Memory management (save/search/pin decisions, problems, solutions across sessions)."
     )]
     async fn memory(&self, Parameters(params): Parameters<MemoryParams>) -> String {
         let ctx = match self.ctx().await {

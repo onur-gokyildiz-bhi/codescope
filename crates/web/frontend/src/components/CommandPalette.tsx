@@ -1,5 +1,5 @@
 import { createSignal, createEffect, onMount, For, Show } from 'solid-js';
-import { setShowPalette, setCenterNode, setSelectedNode } from '../store';
+import { setShowPalette, setCenterNode, setSelectedNode, setErrorMsg } from '../store';
 import { api } from '../api';
 import { fuzzyScore } from '../utils/fuzzy';
 
@@ -59,7 +59,8 @@ export default function CommandPalette() {
         const builtinMatches = BUILT_IN.filter(b => fuzzyScore(q, b.name) > 0);
         setResults([...builtinMatches, ...items]);
         setSelected(0);
-      } catch {
+      } catch (e) {
+        setErrorMsg(`Search failed: ${String(e)}`);
         const builtinMatches = BUILT_IN.filter(b => fuzzyScore(q, b.name) > 0);
         setResults(builtinMatches);
       }

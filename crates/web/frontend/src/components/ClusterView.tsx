@@ -1,5 +1,5 @@
 import { createSignal, createEffect, For, Show } from 'solid-js';
-import { setCenterNode, projectVersion } from '../store';
+import { setCenterNode, projectVersion, setErrorMsg } from '../store';
 import { api } from '../api';
 
 interface Cluster {
@@ -24,7 +24,7 @@ export default function ClusterView() {
         functions: c.functions || [],
       }));
       setClusters(items);
-    } catch { /* ignore */ }
+    } catch (e) { setErrorMsg(`Failed to load clusters: ${String(e)}`); }
     setLoading(false);
   });
 

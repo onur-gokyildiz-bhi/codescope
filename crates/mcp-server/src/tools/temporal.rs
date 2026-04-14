@@ -6,6 +6,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
+use crate::helpers::maybe_archive;
 use crate::params::*;
 use crate::server::GraphRagServer;
 
@@ -44,7 +45,7 @@ impl GraphRagServer {
 
     /// Consolidated code health analysis: hotspots, churn, coupling, review_diff
     #[tool(
-        description = "Code health analysis: mode=hotspots|churn|coupling|review_diff. hotspots: high-churn+complexity. churn: most-changed files. coupling: files changed together. review_diff: graph context for git diff."
+        description = "Code health analysis (hotspots, churn, coupling, review_diff) from git + graph."
     )]
     async fn code_health(&self, Parameters(params): Parameters<CodeHealthParams>) -> String {
         let ctx = match self.ctx().await {
@@ -52,7 +53,8 @@ impl GraphRagServer {
             Err(e) => return e,
         };
 
-        match params.mode.as_str() {
+        let mode = params.mode.clone();
+        let output = match params.mode.as_str() {
             "hotspots" => {
                 let sync = codescope_core::temporal::TemporalGraphSync::new(ctx.db);
                 match sync.calculate_hotspots(&ctx.repo_name).await {
@@ -264,10 +266,15 @@ impl GraphRagServer {
                 ));
                 output
             }
-            other => format!(
-                "Error: unknown mode '{}'. Use: hotspots | churn | coupling | review_diff",
-                other
-            ),
-        }
+            other => {
+                return format!(
+                    "Error: unknown mode '{}'. Use: hotspots | churn | coupling | review_diff",
+                    other
+                );
+            }
+        };
+
+        let archive_key = format!("code_health_{}", mode);
+        maybe_archive(self.result_archive(), &archive_key, output).await
     }
 }

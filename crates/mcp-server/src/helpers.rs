@@ -30,12 +30,18 @@ pub async fn connect_global_db() -> anyhow::Result<Surreal<Db>> {
 /// If the output is under the threshold (4096 chars), returns it unchanged.
 /// Otherwise, stores the full output in the archive and returns the first 20 lines
 /// plus a retrieval ID that can be used with `retrieve_archived`.
+///
+/// Caps archive size at 100 entries (LRU-ish): when full, drops the oldest
+/// key (first in HashMap iteration order, which is effectively insertion-
+/// ordered for small maps on recent hashbrown but not guaranteed — good
+/// enough as a cheap bound against unbounded memory growth).
 pub(crate) async fn maybe_archive(
     archive: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     tool_name: &str,
     output: String,
 ) -> String {
     const THRESHOLD: usize = 4096;
+    const MAX_ENTRIES: usize = 100;
     if output.len() <= THRESHOLD {
         return output;
     }
@@ -51,7 +57,13 @@ pub(crate) async fn maybe_archive(
         id,
         id,
     );
-    archive.write().await.insert(id, output);
+    let mut guard = archive.write().await;
+    if guard.len() >= MAX_ENTRIES {
+        if let Some(oldest) = guard.keys().next().cloned() {
+            guard.remove(&oldest);
+        }
+    }
+    guard.insert(id, output);
     summary
 }
 

@@ -12,7 +12,7 @@ use crate::server::GraphRagServer;
 impl GraphRagServer {
     /// Unified skills tool: index markdown folder, traverse with progressive detail, or auto-generate notes.
     #[tool(
-        description = "Skills/knowledge graph: action=index|traverse|generate. index: parse markdown folder. traverse: navigate with detail 1-4. generate: auto-generate notes from conversations."
+        description = "Skills graph operations (index markdown folder, traverse by name, generate notes)."
     )]
     async fn skills(&self, Parameters(params): Parameters<SkillsParams>) -> String {
         match params.action.as_str() {

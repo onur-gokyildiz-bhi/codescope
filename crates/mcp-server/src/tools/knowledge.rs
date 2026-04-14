@@ -97,7 +97,7 @@ async fn search_db(
 #[tool_router(router = knowledge_router, vis = "pub(crate)")]
 impl GraphRagServer {
     #[tool(
-        description = "Knowledge graph: action=save|search|link|lint. Optional scope=project|global|both (default: project). global: cross-project shared knowledge."
+        description = "Knowledge graph ops (save, search, link, lint) with scope=project|global|both."
     )]
     #[tracing::instrument(skip_all, fields(action = %params.action))]
     async fn knowledge(&self, Parameters(params): Parameters<KnowledgeParams>) -> String {

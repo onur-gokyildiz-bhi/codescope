@@ -45,7 +45,9 @@ pub struct HttpCallParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct HttpAnalysisParams {
-    /// Mode: "calls" (find HTTP client calls) | "endpoint_callers" (find who calls a URL)
+    #[schemars(
+        description = "calls: find HTTP client calls (filter by method) | endpoint_callers: find code calling a URL pattern"
+    )]
     pub mode: String,
     /// For "calls": optional HTTP method filter (GET, POST, ...). For "endpoint_callers": URL pattern.
     pub query: Option<String>,
@@ -133,7 +135,9 @@ pub struct DiffReviewParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct CodeHealthParams {
-    /// Mode: "hotspots" | "churn" | "coupling" | "review_diff"
+    #[schemars(
+        description = "hotspots: high-churn + complexity files | churn: most-changed files | coupling: files changed together | review_diff: graph context for git diff"
+    )]
     pub mode: String,
     /// For "churn" and "coupling": max results (default 20)
     pub limit: Option<usize>,
@@ -157,7 +161,7 @@ pub struct InitProjectParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectParams {
-    /// Action: "init" | "list"
+    #[schemars(description = "init: open a project (daemon mode) | list: show open projects")]
     pub action: String,
     /// For "init": repo name
     pub repo: Option<String>,
@@ -169,7 +173,9 @@ pub struct ProjectParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LintParams {
-    /// Mode: "dead_code" | "smells" | "custom"
+    #[schemars(
+        description = "dead_code: zero-caller functions | smells: god functions, cycles, deep nesting | custom: run SurrealQL rule"
+    )]
     pub mode: String,
     /// For "custom": SurrealQL query returning violations
     pub query: Option<String>,
@@ -277,7 +283,9 @@ pub struct DeadCodeParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RefactorParams {
-    /// Action: "rename" | "find_unused" | "safe_delete"
+    #[schemars(
+        description = "rename: show all references for a symbol | find_unused: list unreferenced functions | safe_delete: check whether a symbol can be safely deleted"
+    )]
     pub action: String,
     /// Target name (function/class) — required for all actions
     pub name: String,
@@ -371,7 +379,9 @@ pub struct MemoryPinParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MemoryParams {
-    /// Action: "save" | "search" | "pin"
+    #[schemars(
+        description = "save: persist note | search: query decisions/problems/solutions | pin: adjust tier (0=critical, 1=important, 2=contextual)"
+    )]
     pub action: String,
     /// For "save": memory content. For "search": query string. For "pin": memory name.
     pub text: Option<String>,
@@ -385,7 +395,9 @@ pub struct MemoryParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct KnowledgeParams {
-    /// Action: "save" | "search" | "link" | "lint"
+    #[schemars(
+        description = "save: persist a knowledge entity (concept/entity/source/claim/decision) | search: query knowledge graph | link: create relation between two entities | lint: health-check (orphans, low_confidence, contradictions, unlinked_code, stale, all)"
+    )]
     pub action: String,
     /// For "save": title. For "search": query. For "link": from entity name.
     pub title: Option<String>,
@@ -443,13 +455,17 @@ pub struct SuggestStructureParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RetrieveArchivedParams {
-    /// Retrieval ID from an archived result (e.g. "impact_analysis_0")
+    #[schemars(
+        description = "Retrieval ID from an archived result (e.g. \"impact_analysis_0\"). Use when a tool returned a summary with a retrieval ID."
+    )]
     pub id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ConversationsParams {
-    /// Action: "index" | "search" | "timeline"
+    #[schemars(
+        description = "index: ingest transcripts | search: find decisions/problems/solutions/topics | timeline: activity history for an entity"
+    )]
     pub action: String,
     /// For "search": query string. For "timeline": entity name.
     pub query: Option<String>,
@@ -461,7 +477,9 @@ pub struct ConversationsParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SearchUnifiedParams {
-    /// Mode: "fuzzy" | "exact" | "file" | "cross_type" | "neighborhood" | "backlinks"
+    #[schemars(
+        description = "fuzzy: name substring search | exact: find function by exact name | file: list entities in a file | cross_type: search all entity types | neighborhood: callers+callees+siblings | backlinks: reverse references"
+    )]
     pub mode: String,
     /// Query or entity name (required for all modes)
     pub query: String,
@@ -473,7 +491,9 @@ pub struct SearchUnifiedParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ContributorsParams {
-    /// Mode: "map" (expertise map) | "reviewers" (suggest for files) | "patterns" (team coding patterns)
+    #[schemars(
+        description = "map: who knows which files (expertise map) | reviewers: suggest reviewers for changed files | patterns: detect team coding conventions (imports/naming/structure/all)"
+    )]
     pub mode: String,
     /// For "reviewers": list of changed files. For "patterns": optional focus (imports/naming/structure/all).
     pub focus: Option<String>,
@@ -483,7 +503,9 @@ pub struct ContributorsParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SkillsParams {
-    /// Action: "index" | "traverse" | "generate"
+    #[schemars(
+        description = "index: parse markdown folder into skill graph | traverse: navigate skills by name with detail 1-4 | generate: auto-generate skill notes from conversations"
+    )]
     pub action: String,
     /// For "index": folder path. For "traverse": skill name.
     pub path: Option<String>,

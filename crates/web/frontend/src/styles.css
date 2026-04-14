@@ -861,3 +861,58 @@ code, pre, .mono {
     display: none;
   }
 }
+
+/* Empty state overlay for Graph3D when no data is indexed yet */
+.empty-state {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  padding: var(--space-8) var(--space-6);
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  max-width: 480px;
+  z-index: 20;
+  pointer-events: auto;
+}
+.empty-state h2 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-xl);
+  color: var(--accent);
+}
+.empty-state p {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-lg);
+  color: var(--text-dim);
+}
+.empty-state pre {
+  display: inline-block;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--font-md);
+  color: var(--text);
+  text-align: left;
+}
+
+/* LOD cap indicator shown when nodes were trimmed to MAX_VISIBLE_NODES */
+.lod-indicator {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  z-index: 20;
+  pointer-events: none;
+}

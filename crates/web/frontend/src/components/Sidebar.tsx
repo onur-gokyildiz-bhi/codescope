@@ -1,5 +1,5 @@
 import { createSignal, createEffect, Show, For } from 'solid-js';
-import { selectedNode, setSelectedNode, setCenterNode, setShowSidebar } from '../store';
+import { selectedNode, setSelectedNode, setCenterNode, setShowSidebar, setErrorMsg } from '../store';
 import { api } from '../api';
 
 function isKnowledge(kind: string): boolean {
@@ -20,12 +20,12 @@ export default function Sidebar() {
       try {
         const d = await api.knowledgeDetail(node.id);
         setKnowDetail(d);
-      } catch { /* ignore */ }
+      } catch (e) { setErrorMsg(`Failed to load knowledge detail: ${String(e)}`); }
     } else {
       try {
         const d = await api.nodeDetail(node.name);
         setDetail(d);
-      } catch { /* ignore */ }
+      } catch (e) { setErrorMsg(`Failed to load node detail: ${String(e)}`); }
     }
   });
 

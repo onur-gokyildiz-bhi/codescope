@@ -1,6 +1,6 @@
 import { createSignal, createEffect, For, Show } from 'solid-js';
 import { api } from '../api';
-import { setCenterNode, projectVersion } from '../store';
+import { setCenterNode, projectVersion, setErrorMsg } from '../store';
 
 interface Hotspot {
   name: string;
@@ -28,7 +28,7 @@ export default function HotspotChart() {
         .sort((a: Hotspot, b: Hotspot) => b.score - a.score)
         .slice(0, 30);
       setHotspots(items);
-    } catch { /* ignore */ }
+    } catch (e) { setErrorMsg(`Failed to load hotspots: ${String(e)}`); }
     setLoading(false);
   });
 
