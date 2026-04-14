@@ -132,15 +132,18 @@ impl GraphRagServer {
         let kind_filter = params
             .kind
             .as_ref()
-            .map(|k| format!("AND kind = '{}'", k))
+            .map(|k| format!("AND kind = '{}'", k.replace('\'', "")))
             .unwrap_or_default();
 
+        // Inline tag literal because SurrealDB CONTAINS doesn't work reliably
+        // with .bind() parameters (but does work with LET-declared vars).
+        let tag_literal = params.query.replace('\'', "");
         let query = format!(
             "SELECT title, kind, content, confidence, source_url, tags, created_at, updated_at \
              FROM knowledge \
              WHERE (string::contains(string::lowercase(title), string::lowercase($query)) \
                 OR string::contains(string::lowercase(content), string::lowercase($query)) \
-                OR tags CONTAINS $query) \
+                OR tags CONTAINS '{tag_literal}') \
              {kind_filter} \
              ORDER BY updated_at DESC \
              LIMIT {limit}"
