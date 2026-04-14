@@ -6,7 +6,7 @@ use surrealdb::Surreal;
 
 /// Current schema version. Bump when adding a new migration in `migrations.rs`.
 /// Version 0 = legacy DBs without meta:schema row.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Deserialize, SurrealValue)]
 struct SchemaMetaRow {

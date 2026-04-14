@@ -4,7 +4,7 @@
 
 **The brain your AI coding assistant is missing.**
 
-A graph-first code intelligence engine. Your agents stop reading files and start traversing a knowledge graph — 99%+ cheaper, deterministic, sub-millisecond.
+A graph-first code intelligence engine. Your agents stop reading files and start traversing a knowledge graph — 98-99% fewer tokens, deterministic, single-digit-millisecond traversal.
 
 Rust-native · Fully local · 32 MCP tools · LSP bridge · 57 languages
 
@@ -29,8 +29,8 @@ Question: "Who calls parse_config transitively within 3 hops?"
 
 Traditional RAG:        Codescope:
 ─────────────────       ─────────────────
-148,000 tokens          542 tokens
-~12 seconds             0.8 ms
+~150K tokens            ~1-2K tokens
+~12 seconds             ~3 ms (end-to-end)
 Fuzzy text match        Deterministic edge walk
 Guess confidence        Actual answer
 ```
@@ -54,7 +54,7 @@ codescope init
 
 Your agent can now:
 - **`search(mode="neighborhood", query="parse_config")`** — callers, callees, siblings, file context, in one call
-- **`impact_analysis("User::email", depth=3)`** — transitive blast radius in 2.5 ms
+- **`impact_analysis("User::email", depth=3)`** — transitive blast radius in ~3 ms end-to-end (see [BENCHMARKS.md](BENCHMARKS.md#graph-first-multi-hop-traversal-the-differentiator))
 - **`knowledge(action="search", query="status:done")`** — remember what was already shipped across sessions
 - **`code_health(mode="hotspots")`** — high-churn + high-complexity code combined in one query
 - **`refactor(action="safe_delete", name="foo")`** — check if a function has zero callers before removing it
@@ -134,7 +134,7 @@ codescope lsp
 # or: codescope-lsp (standalone binary)
 ```
 
-Your editor's **Go to Definition**, **Find References**, **Hover**, and **Workspace Symbols** are now graph-backed. Sub-millisecond response. No extension needed.
+Your editor's **Go to Definition**, **Find References**, **Hover**, and **Workspace Symbols** are now graph-backed. Single-digit-millisecond response. No extension needed.
 
 ### Manual commands (for scripting)
 
@@ -214,16 +214,16 @@ Plus: `raw_query` (escape hatch), `graph_stats`, `supported_languages`, `suggest
 Most competitors are vector databases wearing a codebase hat. Codescope is a **knowledge graph** with embeddings as a secondary index.
 
 ### 2. Token efficiency that shows on the bill
-Real numbers from 7 projects across 5 languages:
+Measured across 7 projects in 5 languages. Savings range **98.5–99.9%** depending on query type and repo. Sample rows (from [BENCHMARKS.md](BENCHMARKS.md#token-savings-vs-traditional-approach)):
 
-| Question | Traditional RAG | Codescope | Saved |
-|----------|:---------------:|:---------:|:-----:|
-| Find function + callers | 148K tokens | 542 tokens | **99.6%** |
-| List all structs | 1.4M tokens | 1.2K tokens | **99.9%** |
-| Impact of changing X | 142K tokens | 278 tokens | **99.8%** |
-| Largest functions | 454K tokens | 289 tokens | **99.9%** |
+| Question | Repo | Traditional | Codescope | Saved |
+|----------|------|:-----------:|:---------:|:-----:|
+| Find function + context | tokio | 125,620 tokens | 1,894 tokens | **98.5%** |
+| List all structs | tokio | 1,463,493 tokens | 1,183 tokens | **99.9%** |
+| Impact analysis (callers + callees) | ripgrep | 197,615 tokens | 2,252 tokens | **98.9%** |
+| Find largest functions | axum | 415,438 tokens | 292 tokens | **99.9%** |
 
-[Full methodology →](BENCHMARKS.md)
+[Full per-repo tables and methodology →](BENCHMARKS.md)
 
 ### 3. Delta-mode context bundling
 Second call to `context_bundle` on the same file returns only the structural diff — not the whole map. 97% token savings on repeat visits.
@@ -275,21 +275,22 @@ JSON · YAML · TOML · Markdown · Dockerfile · SQL · Terraform · OpenAPI ·
 
 ## Benchmarks
 
-Tested on **7 real repositories** across 5 languages:
+Re-benchmarked 2026-04-10 on 4 real repositories (Windows 11, Rust 1.91.1, SurrealDB embedded, bench tool with single-row inserts):
 
-| Project | Language | Files | Entities | Index | Query p50 |
-|---------|----------|------:|---------:|------:|----------:|
-| tokio | Rust | 769 | 12,628 | 33s | 2 ms |
-| FastAPI | Python | 2,713 | 50,150 | 96s | 4 ms |
-| Gin | Go | 108 | 2,397 | 5s | 0.8 ms |
-| Zod | TypeScript | 465 | 21,165 | 84s | 3 ms |
-| Express | JavaScript | 158 | 450 | 2s | 0.3 ms |
-| ripgrep | Rust | 101 | 3,594 | 10s | 1 ms |
-| axum | Rust | 296 | 4,231 | 11s | 1 ms |
+| Project | Language | Files | Entities | Relations | Index | DB size |
+|---------|----------|------:|---------:|----------:|------:|--------:|
+| ripgrep | Rust | 142   | 4,623    | 16,535    | 36.9s | 22.2 MB |
+| axum    | Rust | 410   | 5,278    | 15,068    | 37.2s | 22.5 MB |
+| tokio   | Rust | 812   | 13,600   | 44,675    | 141.8s | 63.8 MB |
+| Gin     | Go   | 109   | 2,400    | 11,324    | 25.1s | 11.5 MB |
 
-**Multi-hop traversal:** 0.5–1.3 ms for 3-hop impact analysis on repos up to 50K entities. Graph traversal scales with edge count, not repo size.
+> The bench tool uses single-row inserts as a worst-case baseline. The production MCP server pipeline batches inserts and runs materially faster on the same corpora.
 
-Full methodology and competitive comparison: [BENCHMARKS.md](BENCHMARKS.md)
+Token-savings measurements also cover **FastAPI (Python), Zod (TypeScript), and Express.js (JavaScript)** from an earlier bench run — those per-repo tables are preserved in [BENCHMARKS.md](BENCHMARKS.md#token-savings-vs-traditional-approach) but have not been re-run under the current indexer.
+
+**Multi-hop traversal (end-to-end via `impact_analysis`):** 1.06–3.26 ms across the four re-benchmarked repos (up to 44.7k edges). The minimal traversal primitive (`.name` only) runs 0.63–1.49 ms per hop. Graph traversal scales with edge fan-out at the target, not corpus size.
+
+Full per-repo tables, competitive comparison, and methodology: [BENCHMARKS.md](BENCHMARKS.md)
 
 ---
 
@@ -319,7 +320,7 @@ So "vs Cursor" is the wrong framing. **Codescope vs Cursor's built-in embeddings
 | | **Codescope** | Cursor built-in | Windsurf built-in | Continue.dev | Claude Code skills |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Architecture | **Graph-first** | Embeddings | Embeddings | Embeddings | File-reading |
-| Call graph traversal | **Native, sub-ms** | ❌ | ❌ | ❌ | Read-based |
+| Call graph traversal | **Native, single-digit ms** | ❌ | ❌ | ❌ | Read-based |
 | Impact analysis (N-hop) | **Native** | ❌ | ❌ | ❌ | ❌ |
 | Type hierarchy queries | **Native** | ❌ | ❌ | ❌ | ❌ |
 | Cross-session memory | **Shared across agents** | Per-editor | ❌ | ❌ | Per-project files |

@@ -40,6 +40,17 @@ pub fn migrations() -> Vec<Migration> {
             description: "Initial schema_version tracking",
             run: |_db| Box::pin(async move { Ok(()) }),
         },
+        Migration {
+            from_version: 1,
+            to_version: 2,
+            description: "Record additive tables from v0.7.x (knowledge, conversation, decision, ...) in schema_version",
+            run: |_db| Box::pin(async move {
+                // All tables added with IF NOT EXISTS; no data migration needed.
+                // This migration exists purely to update meta:schema.version
+                // so downstream tools can detect the capability.
+                Ok(())
+            }),
+        },
     ]
 }
 

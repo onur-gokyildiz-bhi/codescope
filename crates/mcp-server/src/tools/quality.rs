@@ -37,8 +37,9 @@ impl GraphRagServer {
         let mut info = Vec::new();
 
         let file_q = format!(
-            "SELECT language FROM file WHERE path CONTAINS '{}' LIMIT 1",
-            params.file_path.replace('\'', "")
+            "SELECT language FROM file WHERE path CONTAINS '{}' AND repo = '{}' LIMIT 1",
+            params.file_path.replace('\'', ""),
+            ctx.repo_name.replace('\'', "")
         );
         let mut lang = "unknown".to_string();
         if let Ok(mut r) = ctx.db.query(&file_q).await {
@@ -81,8 +82,9 @@ impl GraphRagServer {
         }
 
         let siblings_q = format!(
-            "SELECT name FROM `function` WHERE file_path CONTAINS '{}' LIMIT 20",
-            params.file_path.replace('\'', "")
+            "SELECT name FROM `function` WHERE file_path CONTAINS '{}' AND repo = '{}' LIMIT 20",
+            params.file_path.replace('\'', ""),
+            ctx.repo_name.replace('\'', "")
         );
         if let Ok(mut r) = ctx.db.query(&siblings_q).await {
             let siblings: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
@@ -117,8 +119,9 @@ impl GraphRagServer {
         }
 
         let size_q = format!(
-            "SELECT line_count FROM file WHERE path CONTAINS '{}' LIMIT 1",
-            params.file_path.replace('\'', "")
+            "SELECT line_count FROM file WHERE path CONTAINS '{}' AND repo = '{}' LIMIT 1",
+            params.file_path.replace('\'', ""),
+            ctx.repo_name.replace('\'', "")
         );
         if let Ok(mut r) = ctx.db.query(&size_q).await {
             let sizes: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
@@ -176,6 +179,7 @@ async fn lint_dead_code(server: &GraphRagServer, params: &LintParams) -> String 
                 math::max(end_line - start_line, 0) AS size \
          FROM `function` \
          WHERE count(<-calls) = 0 \
+           AND repo = '{}' \
            AND end_line > start_line \
            AND math::max(end_line - start_line, 0) >= {} \
            AND name != 'main' \
@@ -200,7 +204,9 @@ async fn lint_dead_code(server: &GraphRagServer, params: &LintParams) -> String 
            AND !(name ~ 'Async$') \
          ORDER BY end_line - start_line DESC \
          LIMIT {}",
-        min_lines, limit
+        ctx.repo_name.replace('\'', ""),
+        min_lines,
+        limit
     );
 
     match ctx.db.query(&query).await {
@@ -253,7 +259,8 @@ async fn lint_smells(server: &GraphRagServer, params: &LintParams) -> String {
 
     let god_q = format!(
         "SELECT name, file_path, math::max(end_line - start_line, 0) AS lines \
-         FROM `function` WHERE end_line - start_line > 200 ORDER BY end_line - start_line DESC LIMIT {}",
+         FROM `function` WHERE end_line - start_line > 200 AND repo = '{}' ORDER BY end_line - start_line DESC LIMIT {}",
+        ctx.repo_name.replace('\'', ""),
         limit
     );
     if let Ok(mut r) = ctx.db.query(&god_q).await {
@@ -278,7 +285,10 @@ async fn lint_smells(server: &GraphRagServer, params: &LintParams) -> String {
 
     let fanin_q = format!(
         "SELECT out.name AS name, out.file_path AS file_path, count() AS caller_count \
-         FROM calls GROUP BY out.name, out.file_path ORDER BY caller_count DESC LIMIT {}",
+         FROM calls WHERE out.repo = '{}' AND in.repo = '{}' \
+         GROUP BY out.name, out.file_path ORDER BY caller_count DESC LIMIT {}",
+        ctx.repo_name.replace('\'', ""),
+        ctx.repo_name.replace('\'', ""),
         limit
     );
     if let Ok(mut r) = ctx.db.query(&fanin_q).await {
@@ -301,7 +311,10 @@ async fn lint_smells(server: &GraphRagServer, params: &LintParams) -> String {
 
     let fanout_q = format!(
         "SELECT in.name AS name, in.file_path AS file_path, count() AS callee_count \
-         FROM calls GROUP BY in.name, in.file_path ORDER BY callee_count DESC LIMIT {}",
+         FROM calls WHERE out.repo = '{}' AND in.repo = '{}' \
+         GROUP BY in.name, in.file_path ORDER BY callee_count DESC LIMIT {}",
+        ctx.repo_name.replace('\'', ""),
+        ctx.repo_name.replace('\'', ""),
         limit
     );
     if let Ok(mut r) = ctx.db.query(&fanout_q).await {
@@ -323,7 +336,8 @@ async fn lint_smells(server: &GraphRagServer, params: &LintParams) -> String {
     }
 
     let dense_q = format!(
-        "SELECT file_path, count() AS func_count FROM `function` GROUP BY file_path ORDER BY func_count DESC LIMIT {}",
+        "SELECT file_path, count() AS func_count FROM `function` WHERE repo = '{}' GROUP BY file_path ORDER BY func_count DESC LIMIT {}",
+        ctx.repo_name.replace('\'', ""),
         limit
     );
     if let Ok(mut r) = ctx.db.query(&dense_q).await {

@@ -108,9 +108,15 @@ impl GraphRagServer {
         if analysis == "all" || analysis == "clusters" {
             let q = "SELECT file_path, count(->calls) AS out_calls, count(<-calls) AS in_calls, \
                      (count(->calls) + count(<-calls)) AS total_edges \
-                     FROM `function` WHERE file_path != NONE \
+                     FROM `function` WHERE file_path != NONE AND repo = $repo \
                      GROUP BY file_path ORDER BY total_edges DESC LIMIT $lim";
-            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+            if let Ok(mut r) = ctx
+                .db
+                .query(q)
+                .bind(("lim", limit as i64))
+                .bind(("repo", ctx.repo_name.clone()))
+                .await
+            {
                 let clusters: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                 if !clusters.is_empty() {
                     output.push_str("### Most Connected Files (Cluster Centers)\n\n");
@@ -133,9 +139,15 @@ impl GraphRagServer {
                      count(<-calls) AS callers, count(->calls) AS callees, \
                      (count(<-calls) * count(->calls)) AS bridge_score \
                      FROM `function` \
-                     WHERE count(<-calls) > 0 AND count(->calls) > 0 \
+                     WHERE count(<-calls) > 0 AND count(->calls) > 0 AND repo = $repo \
                      ORDER BY bridge_score DESC LIMIT $lim";
-            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+            if let Ok(mut r) = ctx
+                .db
+                .query(q)
+                .bind(("lim", limit as i64))
+                .bind(("repo", ctx.repo_name.clone()))
+                .await
+            {
                 let bridges: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                 if !bridges.is_empty() {
                     output.push_str("### Bridge Functions (Connect Different Parts)\n\n");
@@ -158,8 +170,14 @@ impl GraphRagServer {
 
         if analysis == "all" || analysis == "central" {
             let q = "SELECT name, file_path, count(<-calls) AS in_degree \
-                     FROM `function` ORDER BY in_degree DESC LIMIT $lim";
-            if let Ok(mut r) = ctx.db.query(q).bind(("lim", limit as i64)).await {
+                     FROM `function` WHERE repo = $repo ORDER BY in_degree DESC LIMIT $lim";
+            if let Ok(mut r) = ctx
+                .db
+                .query(q)
+                .bind(("lim", limit as i64))
+                .bind(("repo", ctx.repo_name.clone()))
+                .await
+            {
                 let central: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                 if !central.is_empty() {
                     output.push_str("### Most Central Functions (Highest In-Degree)\n\n");

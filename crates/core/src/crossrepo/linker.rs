@@ -60,14 +60,16 @@ impl CrossRepoLinker {
                 continue;
             }
 
+            // SurrealDB CONTAINS operator does not work reliably with .bind() parameters —
+            // returns empty silently. Inline the literal with single-quote escape instead.
+            let safe_module = module_name.replace('\'', "");
             let matches: Vec<FileMatch> = self
                 .db
-                .query(
+                .query(format!(
                     "SELECT qualified_name, repo FROM file \
-                     WHERE path CONTAINS $module AND repo != $source_repo \
-                     LIMIT 5",
-                )
-                .bind(("module", module_name.clone()))
+                     WHERE path CONTAINS '{safe_module}' AND repo != $source_repo \
+                     LIMIT 5"
+                ))
                 .bind(("source_repo", imp.repo.clone()))
                 .await?
                 .take(0)?;

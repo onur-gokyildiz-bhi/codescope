@@ -307,20 +307,17 @@ impl GraphRagServer {
         let tables = ["decision", "problem", "solution", "conv_topic"];
         let mut all_results: Vec<serde_json::Value> = Vec::new();
 
+        // SurrealDB CONTAINS operator does not work reliably with .bind() parameters —
+        // returns empty silently. Inline the literal with single-quote escape instead.
+        let safe_name = name.replace('\'', "");
         for table in &tables {
             let query = format!(
                 "SELECT name, body, timestamp, kind, '{}' AS type \
-                 FROM {} WHERE body CONTAINS $name \
+                 FROM {} WHERE body CONTAINS '{}' \
                  ORDER BY timestamp DESC LIMIT $lim",
-                table, table
+                table, table, safe_name
             );
-            if let Ok(mut resp) = ctx
-                .db
-                .query(&query)
-                .bind(("name", name.clone()))
-                .bind(("lim", limit))
-                .await
-            {
+            if let Ok(mut resp) = ctx.db.query(&query).bind(("lim", limit)).await {
                 let results: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
                 all_results.extend(results);
             }

@@ -280,7 +280,7 @@ async fn test_find_unused_symbols() {
     );
     builder.insert_entities(&[unused_fn]).await.unwrap();
 
-    let results = query.find_unused_symbols(1).await.unwrap();
+    let results = query.find_unused_symbols(1, "test-repo").await.unwrap();
     let names: Vec<&str> = results
         .iter()
         .filter_map(|v| v.get("name").and_then(|n| n.as_str()))

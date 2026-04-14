@@ -19,6 +19,7 @@ impl GraphRagServer {
             Ok(c) => c,
             Err(e) => return e,
         };
+        let repo_name = ctx.repo_name.clone();
         let gq = GraphQuery::new(ctx.db);
 
         match params.action.as_str() {
@@ -66,7 +67,7 @@ impl GraphRagServer {
                 // `name` is required by the schema but unused for this action; min_lines
                 // defaults to 3 (matches prior DeadCodeParams behavior).
                 let min_lines = 3u32;
-                match gq.find_unused_symbols(min_lines).await {
+                match gq.find_unused_symbols(min_lines, &repo_name).await {
                     Ok(results) => {
                         if results.is_empty() {
                             return "No unused symbols found (or all are entry points/trivial)."

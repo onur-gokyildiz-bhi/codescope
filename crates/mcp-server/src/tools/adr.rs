@@ -87,15 +87,13 @@ impl GraphRagServer {
             }
             "get" => {
                 let id = params.id.as_deref().unwrap_or("");
-                let q =
-                    "SELECT * FROM decision WHERE name CONTAINS $search AND repo = $repo LIMIT 1";
-                match ctx
-                    .db
-                    .query(q)
-                    .bind(("search", id.to_string()))
-                    .bind(("repo", ctx.repo_name.clone()))
-                    .await
-                {
+                // SurrealDB CONTAINS operator does not work reliably with .bind() parameters —
+                // returns empty silently. Inline the literal with single-quote escape instead.
+                let safe_id = id.replace('\'', "");
+                let q = format!(
+                    "SELECT * FROM decision WHERE name CONTAINS '{safe_id}' AND repo = $repo LIMIT 1"
+                );
+                match ctx.db.query(q).bind(("repo", ctx.repo_name.clone())).await {
                     Ok(mut r) => {
                         let results: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                         if let Some(d) = results.first() {

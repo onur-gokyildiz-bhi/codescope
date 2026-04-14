@@ -13,15 +13,37 @@ pub fn default_db_path(repo_name: &str) -> PathBuf {
         .join(repo_name)
 }
 
-/// Check if any codescope process is currently running (Linux/macOS).
+/// Check if any codescope process is currently running.
 fn is_codescope_running() -> bool {
-    std::process::Command::new("pgrep")
-        .args(["-f", "codescope"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    #[cfg(windows)]
+    {
+        // Windows: use tasklist
+        match std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq codescope.exe", "/FO", "CSV", "/NH"])
+            .output()
+        {
+            Ok(output) => {
+                let s = String::from_utf8_lossy(&output.stdout);
+                // tasklist with no matches returns "INFO: No tasks..."
+                s.contains("codescope")
+            }
+            Err(_) => {
+                // If tasklist missing, err on the safe side — say process IS running
+                // so we don't accidentally remove a live lock
+                true
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("pgrep")
+            .args(["-f", "codescope"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 /// Try to remove a stale LOCK file if the owning process is dead.
@@ -97,6 +119,10 @@ pub async fn connect_db(
                     }
                 } else if is_codescope_running() {
                     // Process is alive — can't steal the lock
+                    #[cfg(windows)]
+                    let kill_cmd = "taskkill /F /IM codescope.exe";
+                    #[cfg(not(windows))]
+                    let kill_cmd = "pkill -f codescope";
                     anyhow::bail!(
                         "Database is locked by a running codescope process.\n\
                          \n\
@@ -108,8 +134,9 @@ pub async fn connect_db(
                            Or use the index_codebase MCP tool directly.\n\
                          \n\
                          Option B — Stop the MCP server and re-init:\n\
-                           pkill -f codescope\n\
-                           codescope init"
+                           {}\n\
+                           codescope init",
+                        kill_cmd
                     );
                 } else {
                     anyhow::bail!(

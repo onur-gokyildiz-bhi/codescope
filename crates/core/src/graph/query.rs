@@ -808,7 +808,11 @@ impl GraphQuery {
 
     /// Find unused symbols — functions/classes with zero callers/importers.
     /// Filters out entry points (main, test_, handler, new, init).
-    pub async fn find_unused_symbols(&self, min_lines: u32) -> Result<Vec<serde_json::Value>> {
+    pub async fn find_unused_symbols(
+        &self,
+        min_lines: u32,
+        repo: &str,
+    ) -> Result<Vec<serde_json::Value>> {
         let results: Vec<serde_json::Value> = tokio::time::timeout(
             QUERY_TIMEOUT,
             self.db
@@ -816,7 +820,8 @@ impl GraphQuery {
                     "SELECT name, file_path, start_line, end_line, signature, kind, \
                         (end_line - start_line) AS line_count \
                  FROM `function` WHERE \
-                     name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE) \
+                     repo = $repo \
+                     AND name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE AND out.repo = $repo) \
                      AND name != 'main' \
                      AND string::starts_with(name, 'test_') = false \
                      AND string::starts_with(name, 'Test') = false \
@@ -832,7 +837,8 @@ impl GraphQuery {
                  ORDER BY line_count DESC \
                  LIMIT 50",
                 )
-                .bind(("min_lines", min_lines)),
+                .bind(("min_lines", min_lines))
+                .bind(("repo", repo.to_string())),
         )
         .await
         .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??

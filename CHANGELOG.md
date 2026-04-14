@@ -4,6 +4,97 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-04-14
+
+OpenTelemetry observability and scalable 3D graph clustering for large repos.
+
+### Features
+- **OpenTelemetry observability:** new telemetry module (`crates/mcp-server/src/telemetry.rs`) with OTLP export. Activates only when `CODESCOPE_OTLP_ENDPOINT` env var is set (zero overhead otherwise). Tested with Jaeger, Grafana Tempo, and Honeycomb. `impact_analysis` instrumented with `#[tracing::instrument]`. Uses `opentelemetry` 0.27 / `opentelemetry-otlp` 0.27 `SpanExporter` API. README gains an Observability section.
+- **Scalable 3D graph clustering:** backend `api_graph` gains `cluster_mode={none,folder,auto}` and `max_nodes` params. `apply_folder_clustering` groups nodes by top-2 path segments, replaces >10-member folders with a single super-node, and aggregates cross-folder edges. Frontend renders cluster nodes at 3x size in distinct purple. Default `cluster_mode=auto` triggers when the graph has more than 500 nodes — solves the hairball problem on 100K+ line repos.
+
+### Internal
+- Launch-grade README rewrite; positioning fix — codescope is a context layer, not an editor.
+
+## [0.7.6] - 2026-04-14
+
+Schema migrations, cross-project shared knowledge, and diff-aware PR review.
+
+### Features
+- **Schema migration system:** `SCHEMA_VERSION` constant + `meta` table tracking DB version. Idempotent `migrate_to_current()` runs on every DB connect (auto-upgrade). New `codescope migrate` CLI command for explicit migration. Future schema changes no longer require users to `rm -rf` and re-index. Infrastructure lives in `crates/core/src/graph/migrations.rs`, covered by 4 unit tests (fresh DB, upgrade, idempotency, roundtrip).
+- **Cross-project shared knowledge:** global knowledge DB at `~/.codescope/db/_global/`. `knowledge` tool gains `scope` param (`project` default | `global` | `both`). `save` writes to the global DB when `scope=global`; `search` with `scope=both` unions and dedupes across project + global DBs; `link` edges live in the same DB as their nodes. Lazy global DB connection — no overhead if unused.
+- **Diff-aware PR review:** new `codescope review <target>` where target is a git ref range, commit SHA, or `.diff` file. Parses unified diff, maps changed lines to graph entities, and runs impact analysis per changed function. `--max-callers` (default 10) and `--coverage` (flags functions with no test file references) flags. Markdown output on stdout (pipe to `gh pr comment`). No new dependencies — shells out to `git`, avoids `git2`.
+
+## [0.7.5] - 2026-04-14
+
+CUDA semantic support, LSP bridge, and tool consolidation round 3 (39 → 32).
+
+### Features
+- **CUDA semantic support:** detects `__global__`, `__device__`, `__host__` qualifiers on functions. Kernel launch sites (`kernel<<<grid, block>>>(args)`) emit a `calls` edge with `metadata.kind='kernel_launch'` and launch config captured as metadata. New `cuda_qualifier` field on the `Function` entity, surfaced in search results. File extensions: `.cu`, `.cuh`, `.cu.inc`, `.cuh.inc`.
+- **LSP bridge:** new `codescope-lsp` crate (`crates/lsp/`) built on `tower-lsp`. Exposes the graph via the Language Server Protocol: `initialize`, `goto_definition`, `references`, `hover`, `workspace_symbol`, `document_symbol`. Works with VS Code, Zed, Neovim, and Helix — no editor extension needed. Invoke via `codescope lsp` (or the `codescope-lsp` binary directly).
+
+### Changed
+- **Tool consolidation round 3 (39 → 32):** `search_functions`, `find_function`, `file_entities`, `related`, `explore`, `backlinks` collapsed into one `search` tool with `mode=fuzzy|exact|file|cross_type|neighborhood|backlinks`. `contributor_map`, `suggest_reviewers`, `team_patterns` collapsed into one `contributors` tool with `mode=map|reviewers|patterns`. 9 tools → 2 tools. Total reduction across all rounds: 57 → 32 (44%).
+
+### Fixes
+- C/C++ function extraction now works (was silently returning `None`).
+
+## [0.7.4] - 2026-04-14
+
+File watcher auto re-index, daemon-aware init, and tool consolidation rounds 1 + 2 (57 → 39).
+
+### Features
+- **File watcher wired into MCP stdio auto-index:** live re-indexing now triggers automatically from the stdio MCP server, not just the daemon.
+- **`codescope init --daemon`:** daemon-aware MCP config generation for users running the shared multi-project daemon.
+
+### Changed
+- **Tool consolidation rounds 1 + 2 (57 → 49 → 39):** 10 tools merged into 4 unified tools in round 1, then a further tightening in round 2. Agents should migrate to the consolidated tool names.
+
+## [0.7.3] - 2026-04-14
+
+Urgent fix for `knowledge_search` parse error on v0.7.2, project-rules installer, and web UI network access.
+
+### Fixes
+- **`knowledge_search` parse error:** added `updated_at` to the `SELECT` projection (was `ORDER BY`'d but not selected — SurrealDB parse error). Reported by a DGX Spark user on v0.7.2.
+- **`knowledge_search` tag search:** inline tag literal instead of `.bind()` (SurrealDB `.bind()` does not work with `CONTAINS`). Output now also shows tags.
+- `install.sh`: robust error handling — ERR trap, Windows bash detection, nested binary search with clearer error messages.
+- DB: auto-recover from stale `LOCK` file via `pgrep` check instead of failing; better error message suggests `pkill` + `rm LOCK`.
+- Clippy `ptr_arg` — `try_remove_stale_lock` takes `&Path` instead of `&PathBuf`.
+
+### Features
+- **`codescope web --host` flag:** web UI bind address for network/LAN access; LAN hostname shown in startup output.
+- `setup-claude.sh` / `setup-claude.ps1` now also install rules to project-level `.claude/rules/` when the directory exists.
+- `.claude/rules/codescope-mandatory.md` gains knowledge-tracking auto-triggers (`knowledge_search` before tasks, `knowledge_save` after).
+
+### Internal
+- CI: auto-format on push instead of failing the job. Bumped to Node.js 24. `cargo fmt --all` rule codified in CLAUDE.md.
+
+## [0.7.2] - 2026-04-14
+
+MCP tool drift fix, uninstall wizard, query decomposition, and design system tokens.
+
+### Features
+- **Query decomposition:** multi-step question handling for the `ask` engine — breaks compound questions into sub-queries, runs each against the graph, and composes a single answer.
+- **Result archiving:** persist query results for later recall.
+- **Uninstall mode in the setup wizard:** interactive removal of binaries, MCP config, and project rules.
+- **Design system tokens:** shared color, spacing, and typography tokens across the web UI.
+- **Work tracking protocol:** status tags (`status:done`, `status:planned`, `shipped:YYYY-MM-DD`, `vX.Y.Z`) documented for use with `knowledge_save` so future sessions can detect already-shipped work.
+
+### Fixes
+- **MCP tool drift:** slimmed tool descriptions and tightened `.claude/rules/` guidance so agents stop drifting back to `Read`/`Grep` between sessions.
+- **Double MCP registration:** setup wizard now detects marketplace installs and skips re-registering the MCP server.
+
+## [0.7.1] - 2026-04-13
+
+Knowledge graph UI, delta-mode `context_bundle`, graph-ranked search, and multi-edge impact analysis.
+
+### Features
+- **Knowledge graph in the web UI:** knowledge nodes render as octahedrons alongside code entities, with dashed edges for `supports` / `contradicts` / `related_to` relationships. New knowledge panel shows confidence, tags, content, and linked entities. Command palette searches both code and knowledge with `kind` badges. Loading bar and error toasts added.
+- **Delta-mode `context_bundle`:** repeat calls within a session return a structural diff instead of the full bundle, saving ~80-97% tokens per session (token-optimizer pattern).
+- **Graph-ranked search:** search results re-sorted by caller count as a simplified Personalized PageRank proxy (graph-of-skills pattern).
+- **Multi-edge `impact_analysis`:** after call-chain BFS, also reports importing files and trait implementors — complete blast radius, not just the call graph (graph-of-skills pattern).
+- **Knowledge hot cache** + schema edge fields + GraphRAG positioning groundwork.
+- `docs/llm-usage-guide.md` — tool selection and usage patterns for agents.
+
 ## [0.7.0] - 2026-04-13
 
 Knowledge graph release. Codescope is no longer code-only — it now manages general knowledge (concepts, entities, sources, claims) alongside code entities in the same SurrealDB graph. Inspired by Karpathy's LLM Wiki pattern and claude-obsidian.

@@ -165,16 +165,16 @@ impl TemporalGraphSync {
 
     /// Get the evolution of a specific entity over time
     pub async fn entity_evolution(&self, entity_name: &str) -> Result<Vec<EvolutionEntry>> {
-        let name = entity_name.to_string();
+        // SurrealDB CONTAINS operator does not work reliably with .bind() parameters —
+        // returns empty silently. Inline the literal with single-quote escape instead.
+        let safe_name = entity_name.replace('\'', "");
 
         let results: Vec<EvolutionEntry> = self
             .db
-            .query(
-                "SELECT ->modified_in->commit.{hash, author, message, timestamp} AS commits \
-                 FROM file WHERE path CONTAINS $name"
-                    .to_string(),
-            )
-            .bind(("name", name))
+            .query(format!(
+                "SELECT ->modified_in->commit.{{hash, author, message, timestamp}} AS commits \
+                 FROM file WHERE path CONTAINS '{safe_name}'"
+            ))
             .await?
             .take(0)?;
 
