@@ -139,7 +139,8 @@ impl GraphRagServer {
             "SELECT title, kind, content, confidence, source_url, tags, created_at, updated_at \
              FROM knowledge \
              WHERE (string::contains(string::lowercase(title), string::lowercase($query)) \
-                OR string::contains(string::lowercase(content), string::lowercase($query))) \
+                OR string::contains(string::lowercase(content), string::lowercase($query)) \
+                OR tags CONTAINS $query) \
              {kind_filter} \
              ORDER BY updated_at DESC \
              LIMIT {limit}"
@@ -163,8 +164,18 @@ impl GraphRagServer {
                     let confidence = r.get("confidence").and_then(|v| v.as_str()).unwrap_or("-");
                     let content = r.get("content").and_then(|v| v.as_str()).unwrap_or("");
                     let preview: String = content.chars().take(150).collect();
+                    let tags = r
+                        .get("tags")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|t| t.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
                     output.push_str(&format!(
-                        "{}. **{}** [{}] (confidence: {})\n   {}{}\n\n",
+                        "{}. **{}** [{}] (confidence: {})\n   {}{}\n",
                         i + 1,
                         title,
                         kind,
@@ -172,6 +183,10 @@ impl GraphRagServer {
                         preview,
                         if content.len() > 150 { "..." } else { "" }
                     ));
+                    if !tags.is_empty() {
+                        output.push_str(&format!("   tags: {}\n", tags));
+                    }
+                    output.push('\n');
                 }
                 output
             }
