@@ -2,6 +2,8 @@
 .graph-rag/
 .claude/*
 !.claude/rules/
+!.claude/agents/
+!.claude/skills/
 *.swp
 *.swo
 .DS_Store
