@@ -15,6 +15,7 @@ impl GraphRagServer {
     #[tool(
         description = "Transitive blast radius via BFS (depth 1-5). Shows callers, importers, implementors."
     )]
+    #[tracing::instrument(skip_all, fields(function_name = %params.function_name, depth = params.depth.unwrap_or(3)))]
     async fn impact_analysis(
         &self,
         Parameters(params): Parameters<ImpactAnalysisParams>,

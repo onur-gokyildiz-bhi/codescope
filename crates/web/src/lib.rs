@@ -358,6 +358,113 @@ struct GraphParams {
     center: Option<String>,
     depth: Option<u32>,
     repo: Option<String>,
+    /// Clustering mode: "none" (default), "folder" (group by top-2 path segments), "auto" (cluster when nodes > max_nodes)
+    cluster_mode: Option<String>,
+    /// Auto-cluster threshold (default 500)
+    max_nodes: Option<usize>,
+}
+
+/// Apply folder-based clustering to a graph. Replaces nodes within the same
+/// top-level folder with a single super-node when that folder has >10 members.
+/// Aggregates cross-folder edges into edges between cluster nodes.
+fn apply_folder_clustering(data: GraphData) -> GraphData {
+    use std::collections::HashMap;
+
+    // Derive cluster id for a node: top 2 path segments (e.g. "crates/core")
+    fn cluster_id(node: &GraphNode) -> Option<String> {
+        if node.file_path.is_empty() || node.kind == "file" {
+            return None;
+        }
+        let parts: Vec<&str> = node.file_path.split('/').take(2).collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        Some(format!("{}/{}", parts[0], parts[1]))
+    }
+
+    // Count members per cluster
+    let mut cluster_counts: HashMap<String, usize> = HashMap::new();
+    for n in &data.nodes {
+        if let Some(c) = cluster_id(n) {
+            *cluster_counts.entry(c).or_insert(0) += 1;
+        }
+    }
+
+    // Threshold: cluster only if folder has > 10 members
+    const MIN_CLUSTER_SIZE: usize = 10;
+    let active_clusters: std::collections::HashSet<String> = cluster_counts
+        .iter()
+        .filter(|(_, &n)| n > MIN_CLUSTER_SIZE)
+        .map(|(k, _)| k.clone())
+        .collect();
+
+    if active_clusters.is_empty() {
+        return data;
+    }
+
+    // Build node map: original id -> cluster id (or itself if not clustered)
+    let mut node_map: HashMap<String, String> = HashMap::new();
+    let mut clustered_nodes: Vec<GraphNode> = Vec::new();
+    let mut seen_clusters: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for n in &data.nodes {
+        if let Some(c) = cluster_id(n) {
+            if active_clusters.contains(&c) {
+                let cid = format!("cluster:{}", c);
+                node_map.insert(n.id.clone(), cid.clone());
+                if seen_clusters.insert(cid.clone()) {
+                    let count = cluster_counts.get(&c).copied().unwrap_or(0);
+                    clustered_nodes.push(GraphNode {
+                        id: cid,
+                        name: format!("{} ({})", c, count),
+                        kind: "cluster".to_string(),
+                        file_path: c.clone(),
+                        confidence: None,
+                        tags: None,
+                        content: None,
+                        source_url: None,
+                    });
+                }
+                continue;
+            }
+        }
+        node_map.insert(n.id.clone(), n.id.clone());
+        clustered_nodes.push(GraphNode {
+            id: n.id.clone(),
+            name: n.name.clone(),
+            kind: n.kind.clone(),
+            file_path: n.file_path.clone(),
+            confidence: n.confidence.clone(),
+            tags: n.tags.clone(),
+            content: n.content.clone(),
+            source_url: n.source_url.clone(),
+        });
+    }
+
+    // Aggregate edges
+    let mut edge_counts: HashMap<(String, String, String), u32> = HashMap::new();
+    for e in &data.links {
+        let src = node_map.get(&e.source).cloned().unwrap_or(e.source.clone());
+        let tgt = node_map.get(&e.target).cloned().unwrap_or(e.target.clone());
+        if src == tgt {
+            continue;
+        }
+        *edge_counts.entry((src, tgt, e.kind.clone())).or_insert(0) += 1;
+    }
+
+    let clustered_edges: Vec<GraphEdge> = edge_counts
+        .into_iter()
+        .map(|((source, target, kind), _)| GraphEdge {
+            source,
+            target,
+            kind,
+        })
+        .collect();
+
+    GraphData {
+        nodes: clustered_nodes,
+        links: clustered_edges,
+    }
 }
 
 #[derive(Serialize)]
@@ -552,11 +659,18 @@ async fn api_graph(
                     }
                 }
 
-                Json(GraphData {
+                let mut data = GraphData {
                     nodes,
                     links: edges,
-                })
-                .into_response()
+                };
+                let max_nodes = params.max_nodes.unwrap_or(500);
+                let mode = params.cluster_mode.as_deref().unwrap_or("none");
+                let should_cluster =
+                    mode == "folder" || (mode == "auto" && data.nodes.len() > max_nodes);
+                if should_cluster {
+                    data = apply_folder_clustering(data);
+                }
+                Json(data).into_response()
             }
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }

@@ -3,7 +3,7 @@ members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench", "cr
 resolver = "2"
 
 [workspace.package]
-version = "0.7.6"
+version = "0.7.7"
 edition = "2021"
 license = "MIT"
 authors = ["Onur Gokyildiz"]
@@ -46,6 +46,12 @@ thiserror = "2"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Observability (OpenTelemetry — OTLP export)
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["tonic", "metrics"] }
+tracing-opentelemetry = "0.28"
 
 # Async traits
 async-trait = "0.1"

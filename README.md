@@ -415,6 +415,25 @@ SurrealDB knowledge graph
 
 ---
 
+## Observability
+
+Codescope can export OpenTelemetry traces over OTLP for MCP tool invocations,
+graph queries, and cache-hit counters. Useful for spotting slow tools and
+tracking cache effectiveness.
+
+Set `CODESCOPE_OTLP_ENDPOINT` to enable export:
+
+```bash
+export CODESCOPE_OTLP_ENDPOINT=http://localhost:4317
+codescope mcp .
+```
+
+When the env var is unset (the default), telemetry is a strict no-op —
+zero overhead and zero network connections. Tested with Jaeger,
+Grafana Tempo, and Honeycomb.
+
+---
+
 ## Contributing
 
 Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup.

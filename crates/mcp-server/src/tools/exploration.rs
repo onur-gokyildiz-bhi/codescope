@@ -18,6 +18,7 @@ impl GraphRagServer {
     #[tool(
         description = "File context: functions, callers, classes, imports, decisions. Use before Read."
     )]
+    #[tracing::instrument(skip_all, fields(file_path = %params.file_path))]
     async fn context_bundle(&self, Parameters(params): Parameters<ContextBundleParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,
@@ -197,6 +198,12 @@ impl GraphRagServer {
                 let mut cache_guard = cache.write().await;
                 if let Some(prev) = cache_guard.get(&file_key) {
                     if *prev == output {
+                        tracing::info!(
+                            target: "codescope.cache",
+                            outcome = "unchanged",
+                            file = %file_key,
+                            "delta_mode_hit"
+                        );
                         drop(cache_guard);
                         return format!(
                             "## Context: {} (UNCHANGED)\n\nNo structural changes since last check. \
@@ -226,9 +233,21 @@ impl GraphRagServer {
                         }
                         delta.push('\n');
                     }
+                    tracing::info!(
+                        target: "codescope.cache",
+                        outcome = "changed",
+                        added = added.len(),
+                        removed = removed.len(),
+                        "delta_mode_miss"
+                    );
                     cache_guard.insert(file_key, output);
                     delta
                 } else {
+                    tracing::info!(
+                        target: "codescope.cache",
+                        outcome = "cold",
+                        "delta_mode_cold"
+                    );
                     cache_guard.insert(file_key, output.clone());
                     output
                 }

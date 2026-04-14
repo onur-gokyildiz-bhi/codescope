@@ -4,6 +4,7 @@ pub mod indexing;
 pub mod nlp;
 pub mod params;
 pub mod server;
+pub mod telemetry;
 pub mod tools;
 pub mod watcher;
 
@@ -13,10 +14,42 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use rmcp::ServiceExt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 /// Run MCP server in stdio mode — single project, one process.
 /// This is the main entry point used by both the standalone binary and the unified CLI.
 pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Result<()> {
+    // Initialize tracing subscriber. When CODESCOPE_OTLP_ENDPOINT is set,
+    // we also install the OpenTelemetry layer so tool spans are exported
+    // over OTLP to Jaeger / Tempo / Honeycomb. Otherwise the OTel layer is
+    // absent and there is zero telemetry overhead.
+    let otel_provider = telemetry::init().ok().flatten();
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(false);
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let otel_layer = otel_provider.as_ref().map(|provider| {
+        use opentelemetry::trace::TracerProvider as _;
+        let tracer = provider.tracer("codescope-mcp");
+        tracing_opentelemetry::layer().with_tracer(tracer)
+    });
+
+    // Subscriber init is idempotent-safe against panics via `try_init`.
+    let _ = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        .with(otel_layer)
+        .try_init();
+
+    if otel_provider.is_some() {
+        tracing::info!("OpenTelemetry OTLP export enabled (CODESCOPE_OTLP_ENDPOINT)");
+    } else {
+        tracing::debug!("OpenTelemetry disabled (set CODESCOPE_OTLP_ENDPOINT to enable)");
+    }
+
     // Debug log to file (always, for troubleshooting MCP startup)
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -161,6 +194,10 @@ pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) ->
     // Graceful shutdown — give background tasks time to finish
     tracing::info!("MCP session ended, shutting down...");
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Flush any pending OpenTelemetry spans before exit. No-op if OTLP
+    // was never enabled.
+    telemetry::shutdown();
 
     Ok(())
 }

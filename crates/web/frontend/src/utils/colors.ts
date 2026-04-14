@@ -18,6 +18,7 @@ export const KIND_COLORS: Record<string, string> = {
   'knowledge:claim': '#D29922',
   'knowledge:decision': '#F85149',
   'knowledge:pattern': '#3FB950',
+  cluster: '#a371f7',
 };
 
 export const EDGE_COLORS: Record<string, string> = {

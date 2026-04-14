@@ -22,6 +22,7 @@ export default function Graph3D() {
     graph = ForceGraph3D()(container)
       .backgroundColor('#0d1117')
       .nodeVal((n: any) => {
+        if (n.kind === 'cluster') return 12;
         if (isKnowledge(n.kind)) return 4;
         const s = n.kind === 'file' ? 2 : n.kind === 'class' ? 1.5 : 1;
         return s * s;

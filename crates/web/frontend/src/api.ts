@@ -17,10 +17,11 @@ export const api = {
 
   stats: () => fetch(withRepo(`${BASE}/api/stats`)).then(r => r.json()),
 
-  graph: (center?: string, depth = 2) => {
+  graph: (center?: string, depth = 2, clusterMode = 'auto') => {
     const p = new URLSearchParams();
     if (center) p.set('center', center);
     p.set('depth', String(depth));
+    p.set('cluster_mode', clusterMode);
     const proj = currentProject();
     if (proj) p.set('repo', proj);
     return fetch(`${BASE}/api/graph?${p}`).then(r => r.json());

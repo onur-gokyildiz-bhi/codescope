@@ -37,6 +37,10 @@ notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 tokio-util = "0.7"
 axum = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 
 [dev-dependencies]
 # graph_query_tests.rs uses the in-memory SurrealDB engine for fast

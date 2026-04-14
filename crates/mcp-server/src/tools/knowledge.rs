@@ -99,6 +99,7 @@ impl GraphRagServer {
     #[tool(
         description = "Knowledge graph: action=save|search|link|lint. Optional scope=project|global|both (default: project). global: cross-project shared knowledge."
     )]
+    #[tracing::instrument(skip_all, fields(action = %params.action))]
     async fn knowledge(&self, Parameters(params): Parameters<KnowledgeParams>) -> String {
         let ctx = match self.ctx().await {
             Ok(c) => c,

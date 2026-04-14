@@ -95,13 +95,19 @@ async fn main() -> Result<()> {
         );
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .init();
-
     let args = Args::parse();
+
+    // Stdio path owns its own subscriber (may wrap an OpenTelemetry layer
+    // when CODESCOPE_OTLP_ENDPOINT is set). Non-stdio modes still init the
+    // plain fmt subscriber here.
+    let is_stdio = matches!(args.command, Some(Command::Stdio { .. }) | None);
+    if !is_stdio {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .init();
+    }
 
     match args.command {
         Some(Command::Serve { port, bind }) => run_daemon(&bind, port).await,

@@ -17,6 +17,7 @@ impl GraphRagServer {
     #[tool(
         description = "Unified search: mode=fuzzy|exact|file|cross_type|neighborhood|backlinks. fuzzy: search by name substring. exact: find function by exact name. file: list entities in file. cross_type: search all entity types. neighborhood: callers+callees+siblings. backlinks: reverse references."
     )]
+    #[tracing::instrument(skip_all, fields(mode = %params.mode))]
     async fn search(&self, Parameters(params): Parameters<SearchUnifiedParams>) -> String {
         match params.mode.as_str() {
             "fuzzy" => search_fuzzy(self, &params).await,
