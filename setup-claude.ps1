@@ -317,10 +317,20 @@ foreach ($agent in $agents) {
 Write-Host "  [4/5] Installing mandatory rules..." -ForegroundColor Yellow
 foreach ($agent in $agents) {
     if ($agent -eq "claude-code") {
+        # Global rules
         $rulesDir = "$env:USERPROFILE\.claude\rules"
         if (-not (Test-Path $rulesDir)) { New-Item -ItemType Directory -Force -Path $rulesDir | Out-Null }
         Invoke-WebRequest -Uri "$REPO_RAW/.claude/rules/codescope-mandatory.md" -OutFile "$rulesDir\codescope-mandatory.md" -UseBasicParsing 2>$null
-        Write-Host "         + codescope-mandatory.md (alwaysApply)" -ForegroundColor Green
+        Write-Host "         + $rulesDir\codescope-mandatory.md (global)" -ForegroundColor Green
+
+        # Project-level rules if we're in a project
+        $projectClaude = Join-Path (Get-Location) ".claude"
+        if (Test-Path $projectClaude) {
+            $projectRules = Join-Path $projectClaude "rules"
+            if (-not (Test-Path $projectRules)) { New-Item -ItemType Directory -Force -Path $projectRules | Out-Null }
+            Invoke-WebRequest -Uri "$REPO_RAW/.claude/rules/codescope-mandatory.md" -OutFile "$projectRules\codescope-mandatory.md" -UseBasicParsing 2>$null
+            Write-Host "         + $projectRules\codescope-mandatory.md (project)" -ForegroundColor Green
+        }
     }
 }
 

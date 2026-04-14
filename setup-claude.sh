@@ -332,10 +332,19 @@ echo "  [4/5] Installing mandatory rules..."
 for agent in "${AGENTS[@]}"; do
     case "$agent" in
         claude-code)
+            # Global rules (applies to all projects)
             RULES_DIR="$HOME/.claude/rules"
             mkdir -p "$RULES_DIR"
             curl -fsSL "$REPO_RAW/.claude/rules/codescope-mandatory.md" -o "$RULES_DIR/codescope-mandatory.md" 2>/dev/null
-            echo "         ✓ ~/.claude/rules/codescope-mandatory.md (alwaysApply)"
+            echo "         ✓ ~/.claude/rules/codescope-mandatory.md (global)"
+
+            # Project-level rules (if we're inside a project with .claude/)
+            if [ -d "$(pwd)/.claude" ]; then
+                PROJECT_RULES="$(pwd)/.claude/rules"
+                mkdir -p "$PROJECT_RULES"
+                curl -fsSL "$REPO_RAW/.claude/rules/codescope-mandatory.md" -o "$PROJECT_RULES/codescope-mandatory.md" 2>/dev/null
+                echo "         ✓ $(pwd)/.claude/rules/codescope-mandatory.md (project)"
+            fi
             ;;
     esac
 done
