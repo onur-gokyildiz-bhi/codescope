@@ -44,15 +44,35 @@ pub async fn connect_db(
     {
         Ok(db) => db,
         Err(e) => {
+            let err_str = e.to_string();
+            let hint = if err_str.contains("locked") || err_str.contains("LOCK") {
+                format!(
+                    "\nThe database is locked by another process (likely codescope-mcp).\n\
+                     Fix:\n\
+                     \n\
+                     1. Stop the other process:\n\
+                        pkill -f codescope\n\
+                     \n\
+                     2. Remove the stale lock:\n\
+                        rm -f {}/LOCK\n\
+                     \n\
+                     3. Try again:\n\
+                        codescope init",
+                    path.display()
+                )
+            } else {
+                format!(
+                    "\nTry re-indexing or removing the DB directory:\n\
+                     rm -rf {}",
+                    path.display()
+                )
+            };
             anyhow::bail!(
                 "Failed to open database at {}.\n\
-                 Error: {}\n\
-                 \n\
-                 Try re-indexing or removing the DB directory:\n\
-                 rm -rf {}",
+                 Error: {}\n{}",
                 path.display(),
                 e,
-                path.display()
+                hint
             );
         }
     };
