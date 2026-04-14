@@ -4,6 +4,7 @@
 !.claude/rules/
 !.claude/agents/
 !.claude/skills/
+!.claude/reviews/
 *.swp
 *.swo
 .DS_Store
