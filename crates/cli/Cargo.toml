@@ -16,6 +16,8 @@ path = "src/main.rs"
 codescope-core = { path = "../core" }
 codescope-mcp = { path = "../mcp-server" }
 codescope-web = { path = "../web" }
+codescope-lsp = { path = "../lsp" }
+tower-lsp = "0.20"
 surrealdb = { workspace = true }
 ignore = { workspace = true }
 tokio = { workspace = true }

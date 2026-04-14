@@ -51,6 +51,7 @@ fn parse_package_json(
         body: None,
         body_hash: None,
         language: "json".to_string(),
+        cuda_qualifier: None,
     });
 
     let value: serde_json::Value = match serde_json::from_str(source) {
@@ -94,6 +95,7 @@ fn parse_package_json(
                 .map(|s| s.to_string()),
             body_hash: None,
             language: "json".to_string(),
+            cuda_qualifier: None,
         });
         relations.push(CodeRelation {
             kind: RelationKind::Contains,
@@ -123,6 +125,7 @@ fn parse_package_json(
                         body: dep_version.as_str().map(|s| s.to_string()),
                         body_hash: None,
                         language: "json".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::DependsOnPackage,
@@ -154,6 +157,7 @@ fn parse_package_json(
                     body: script_cmd.as_str().map(|s| s.to_string()),
                     body_hash: None,
                     language: "json".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::RunsScript,
@@ -193,6 +197,7 @@ fn parse_cargo_toml(
         body: None,
         body_hash: None,
         language: "toml".to_string(),
+        cuda_qualifier: None,
     });
 
     let value: toml::Value = match toml::from_str(source) {
@@ -229,6 +234,7 @@ fn parse_cargo_toml(
                 .map(|s| s.to_string()),
             body_hash: None,
             language: "toml".to_string(),
+            cuda_qualifier: None,
         });
 
         // Dependencies
@@ -258,6 +264,7 @@ fn parse_cargo_toml(
                     body: None,
                     body_hash: None,
                     language: "toml".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::DependsOnPackage,

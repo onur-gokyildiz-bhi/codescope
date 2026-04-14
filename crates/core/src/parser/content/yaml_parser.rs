@@ -36,6 +36,7 @@ impl ContentParser for YamlParser {
             body: None,
             body_hash: None,
             language: "yaml".to_string(),
+            cuda_qualifier: None,
         });
 
         let value: serde_yaml::Value = match serde_yaml::from_str(source) {
@@ -113,6 +114,7 @@ fn extract_yaml_value(
                 body: body_str,
                 body_hash: None,
                 language: "yaml".to_string(),
+                cuda_qualifier: None,
             });
 
             relations.push(CodeRelation {

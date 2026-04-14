@@ -36,6 +36,7 @@ impl ContentParser for TerraformParser {
             body: None,
             body_hash: None,
             language: "terraform".to_string(),
+            cuda_qualifier: None,
         });
 
         for (i, line) in source.lines().enumerate() {
@@ -60,6 +61,7 @@ impl ContentParser for TerraformParser {
                         body: None,
                         body_hash: None,
                         language: "terraform".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -89,6 +91,7 @@ impl ContentParser for TerraformParser {
                         body: None,
                         body_hash: None,
                         language: "terraform".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -118,6 +121,7 @@ impl ContentParser for TerraformParser {
                         body: None,
                         body_hash: None,
                         language: "terraform".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -147,6 +151,7 @@ impl ContentParser for TerraformParser {
                         body: None,
                         body_hash: None,
                         language: "terraform".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,

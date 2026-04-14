@@ -43,6 +43,7 @@ impl EntityExtractor {
             body: None,
             body_hash: Some(file_hash),
             language: self.language.clone(),
+            cuda_qualifier: None,
         };
         entities.push(file_entity);
 
@@ -229,7 +230,8 @@ impl EntityExtractor {
     ) -> Result<Option<CodeEntity>> {
         let name = self
             .find_child_text(node, "name", source)
-            .or_else(|| self.find_child_text(node, "identifier", source));
+            .or_else(|| self.find_child_text(node, "identifier", source))
+            .or_else(|| self.extract_c_declarator_name(node, source));
 
         let name = match name {
             Some(n) => n,
@@ -253,6 +255,17 @@ impl EntityExtractor {
             EntityKind::Function
         };
 
+        // CUDA qualifier detection for `.cu` / `.cuh` files.
+        // Tree-sitter-cpp sometimes parses `__global__` / `__device__` / `__host__`
+        // as a sibling node before the function_definition rather than inside it,
+        // so we scan up to ~200 chars of source immediately preceding the
+        // function's start offset as well as the function text itself.
+        let cuda_qualifier = if self.language == "cuda" {
+            detect_cuda_qualifier(source, node.start_byte(), body_text)
+        } else {
+            None
+        };
+
         Ok(Some(CodeEntity {
             kind,
             name,
@@ -267,6 +280,7 @@ impl EntityExtractor {
             body: Some(body_text.to_string()),
             body_hash: Some(body_hash),
             language: self.language.clone(),
+            cuda_qualifier,
         }))
     }
 
@@ -304,6 +318,7 @@ impl EntityExtractor {
             body: None,
             body_hash: None,
             language: self.language.clone(),
+            cuda_qualifier: None,
         }))
     }
 
@@ -330,6 +345,7 @@ impl EntityExtractor {
             body: Some(text),
             body_hash: None,
             language: self.language.clone(),
+            cuda_qualifier: None,
         }))
     }
 
@@ -343,6 +359,22 @@ impl EntityExtractor {
     ) {
         let mut cursor = node.walk();
         self.walk_for_calls_with_entities(&mut cursor, source, caller_qname, relations, entities);
+
+        // CUDA: detect kernel launches `kernelName<<<grid, block>>>(args)`.
+        // Tree-sitter-cpp misparses `<<<...>>>` as bit-shift operators, so we
+        // fall back to a lightweight text scan over the caller's body.
+        if self.language == "cuda" {
+            let body = node.utf8_text(source.as_bytes()).unwrap_or("");
+            let body_start_row = node.start_position().row;
+            detect_kernel_launches(
+                body,
+                body_start_row,
+                caller_qname,
+                &self.repo,
+                &self.file_path,
+                relations,
+            );
+        }
     }
 
     fn walk_for_calls_with_entities(
@@ -408,6 +440,7 @@ impl EntityExtractor {
                     body: Some(raw_text),
                     body_hash: None,
                     language: self.language.clone(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::CallsEndpoint,
@@ -523,6 +556,40 @@ impl EntityExtractor {
         node.child_by_field_name(field)
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.trim().to_string())
+    }
+
+    /// Resolve a function name from a C/C++/CUDA `function_definition` node by
+    /// walking the `declarator` chain until we hit an `identifier` / `field_identifier`
+    /// / `qualified_identifier`. Returns `None` if no name can be resolved.
+    fn extract_c_declarator_name(&self, node: Node, source: &str) -> Option<String> {
+        let mut cur = node.child_by_field_name("declarator")?;
+        for _ in 0..16 {
+            match cur.kind() {
+                "identifier" | "field_identifier" | "type_identifier" => {
+                    return cur
+                        .utf8_text(source.as_bytes())
+                        .ok()
+                        .map(|s| s.trim().to_string());
+                }
+                "qualified_identifier" | "destructor_name" | "operator_name" => {
+                    return cur
+                        .utf8_text(source.as_bytes())
+                        .ok()
+                        .map(|s| s.trim().to_string());
+                }
+                _ => {
+                    // function_declarator / pointer_declarator / reference_declarator /
+                    // parenthesized_declarator / array_declarator — recurse via `declarator`.
+                    if let Some(next) = cur.child_by_field_name("declarator") {
+                        cur = next;
+                    } else {
+                        // Fallback: take first named child.
+                        cur = cur.named_child(0)?;
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn build_function_signature(&self, node: Node, source: &str, name: &str) -> String {
@@ -721,4 +788,112 @@ fn hash_content(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Detect a CUDA function qualifier (`__global__`, `__device__`, `__host__`)
+/// for a function_definition node. Returns the first qualifier found on the
+/// function's declaration, or `None`.
+///
+/// Strategy: examine a window containing the ~200 bytes preceding the function
+/// start (for qualifiers emitted as siblings by tree-sitter-cpp) plus the
+/// portion of the function text up to its first `(` (for qualifiers attached
+/// inside the declaration). `__host__ __device__` is reported as `__host__`.
+fn detect_cuda_qualifier(source: &str, start_byte: usize, fn_text: &str) -> Option<String> {
+    const QUALIFIERS: [&str; 3] = ["__global__", "__device__", "__host__"];
+
+    // Window: up to 200 bytes before the node + function text up to first '('.
+    let pre_start = start_byte.saturating_sub(200);
+    let pre = source.get(pre_start..start_byte).unwrap_or("");
+    // Only keep the last declaration boundary (after previous '}' or ';').
+    let pre_trimmed = pre.rfind(['}', ';']).map(|i| &pre[i + 1..]).unwrap_or(pre);
+
+    let head = fn_text.split('(').next().unwrap_or(fn_text);
+    let window = format!("{} {}", pre_trimmed, head);
+
+    // Match __global__ > __device__ > __host__ (first-wins in declaration order).
+    let mut best: Option<(usize, &str)> = None;
+    for q in &QUALIFIERS {
+        if let Some(idx) = window.find(q) {
+            match best {
+                Some((b, _)) if b <= idx => {}
+                _ => best = Some((idx, q)),
+            }
+        }
+    }
+    best.map(|(_, q)| q.to_string())
+}
+
+/// Scan a caller's source text for CUDA kernel launches `kernel<<<grid, block>>>(...)`.
+/// Emits a `Calls` relation with `raw_callee` set to the kernel name and a
+/// `launch_config` metadata field carrying the launch parameters.
+///
+/// This is a regex-free tolerant scan — tree-sitter-cpp misparses `<<<...>>>`
+/// as bit-shift operators, so the AST walk can't detect them reliably.
+fn detect_kernel_launches(
+    body: &str,
+    body_start_row: usize,
+    caller_qname: &str,
+    repo: &str,
+    file_path: &str,
+    relations: &mut Vec<CodeRelation>,
+) {
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        // Find "<<<"
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' && bytes[i + 2] == b'<' {
+            // Scan back over whitespace, then collect the identifier.
+            let mut j = i;
+            while j > 0 && (bytes[j - 1] as char).is_ascii_whitespace() {
+                j -= 1;
+            }
+            let ident_end = j;
+            while j > 0 {
+                let c = bytes[j - 1] as char;
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    j -= 1;
+                } else {
+                    break;
+                }
+            }
+            let ident = &body[j..ident_end];
+            // Find matching ">>>"
+            let mut k = i + 3;
+            while k + 2 < bytes.len()
+                && !(bytes[k] == b'>' && bytes[k + 1] == b'>' && bytes[k + 2] == b'>')
+            {
+                k += 1;
+            }
+            if k + 2 >= bytes.len() {
+                break;
+            }
+            let launch_cfg = &body[i + 3..k];
+            // Next non-whitespace char must be '(' for a real launch.
+            let mut p = k + 3;
+            while p < bytes.len() && (bytes[p] as char).is_ascii_whitespace() {
+                p += 1;
+            }
+            if !ident.is_empty() && p < bytes.len() && bytes[p] == b'(' {
+                // Compute line number: count newlines before i.
+                let line = body_start_row + body[..i].bytes().filter(|&b| b == b'\n').count() + 1;
+                let callee_qname = format!("{}:{}:{}", repo, file_path, ident);
+                relations.push(CodeRelation {
+                    kind: RelationKind::Calls,
+                    from_entity: caller_qname.to_string(),
+                    to_entity: callee_qname,
+                    from_table: "function".to_string(),
+                    to_table: "function".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "line": line,
+                        "raw_callee": ident,
+                        "kind": "kernel_launch",
+                        "launch_config": launch_cfg.trim(),
+                    })),
+                });
+            }
+            i = k + 3;
+        } else {
+            i += 1;
+        }
+    }
 }

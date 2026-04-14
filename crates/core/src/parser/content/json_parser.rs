@@ -44,6 +44,7 @@ impl ContentParser for JsonParser {
             body: None,
             body_hash: None,
             language: "json".to_string(),
+            cuda_qualifier: None,
         });
 
         // Parse JSON
@@ -120,6 +121,7 @@ fn extract_json_keys(
             body: body_str,
             body_hash: None,
             language: "json".to_string(),
+            cuda_qualifier: None,
         });
 
         relations.push(CodeRelation {

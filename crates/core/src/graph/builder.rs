@@ -457,7 +457,8 @@ fn build_entity_set(entity: &CodeEntity) -> String {
         ),
         EntityKind::Function | EntityKind::Method => format!(
             "SET name = {}, qualified_name = {}, signature = {}, body_hash = {}, \
-             file_path = {}, repo = {}, language = {}, start_line = {}, end_line = {}",
+             file_path = {}, repo = {}, language = {}, start_line = {}, end_line = {}, \
+             cuda_qualifier = {}",
             surql_str(&entity.name),
             surql_str(&entity.qualified_name),
             surql_opt_str(&entity.signature),
@@ -467,6 +468,7 @@ fn build_entity_set(entity: &CodeEntity) -> String {
             surql_str(&entity.language),
             entity.start_line,
             entity.end_line,
+            surql_opt_str(&entity.cuda_qualifier),
         ),
         EntityKind::Class
         | EntityKind::Struct

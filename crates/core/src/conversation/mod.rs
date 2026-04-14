@@ -68,6 +68,7 @@ pub fn parse_conversation(
         )),
         body_hash: Some(parse_result.file_hash.clone()),
         language: "conversation".to_string(),
+        cuda_qualifier: None,
     });
 
     // Phase 2: Classify turns into decisions/problems/solutions
@@ -131,6 +132,7 @@ pub fn parse_conversation(
             body: Some(body_text),
             body_hash: scope, // Repurpose body_hash to carry scope to the builder
             language: "conversation".to_string(),
+            cuda_qualifier: None,
         });
 
         // Session contains this entity

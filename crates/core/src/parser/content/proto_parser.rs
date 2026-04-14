@@ -36,6 +36,7 @@ impl ContentParser for ProtoParser {
             body: None,
             body_hash: None,
             language: "protobuf".to_string(),
+            cuda_qualifier: None,
         });
 
         let mut current_service: Option<String> = None;
@@ -72,6 +73,7 @@ impl ContentParser for ProtoParser {
                         body: None,
                         body_hash: None,
                         language: "protobuf".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -103,6 +105,7 @@ impl ContentParser for ProtoParser {
                         body: None,
                         body_hash: None,
                         language: "protobuf".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -136,6 +139,7 @@ impl ContentParser for ProtoParser {
                         body: None,
                         body_hash: None,
                         language: "protobuf".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -167,6 +171,7 @@ impl ContentParser for ProtoParser {
                         body: None,
                         body_hash: None,
                         language: "protobuf".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -198,6 +203,7 @@ impl ContentParser for ProtoParser {
                         body: None,
                         body_hash: None,
                         language: "protobuf".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,

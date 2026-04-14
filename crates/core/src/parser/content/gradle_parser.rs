@@ -38,6 +38,7 @@ impl ContentParser for GradleParser {
             body: None,
             body_hash: None,
             language: "gradle".to_string(),
+            cuda_qualifier: None,
         });
 
         let lines: Vec<&str> = source.lines().collect();
@@ -63,6 +64,7 @@ impl ContentParser for GradleParser {
                     body: Some(plugin.to_string()),
                     body_hash: None,
                     language: "gradle".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,
@@ -91,6 +93,7 @@ impl ContentParser for GradleParser {
                     body: Some(trimmed.to_string()),
                     body_hash: None,
                     language: "gradle".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::DependsOnPackage,
@@ -119,6 +122,7 @@ impl ContentParser for GradleParser {
                     body: Some(value),
                     body_hash: None,
                     language: "gradle".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,

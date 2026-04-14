@@ -1,9 +1,9 @@
 [workspace]
-members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench", "crates/web"]
+members = ["crates/core", "crates/mcp-server", "crates/cli", "crates/bench", "crates/web", "crates/lsp"]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.4"
+version = "0.7.5"
 edition = "2021"
 license = "MIT"
 authors = ["Onur Gokyildiz"]

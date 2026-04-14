@@ -134,6 +134,17 @@ impl CodeParser {
 
         let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
+        // Handle CUDA double-extensions: `.cu.inc` / `.cuh.inc`.
+        // `Path::extension()` returns only the final segment ("inc"), so we
+        // remap to the CUDA extension when the filename has the double suffix.
+        let ext = if filename.ends_with(".cu.inc") {
+            "cu"
+        } else if filename.ends_with(".cuh.inc") {
+            "cuh"
+        } else {
+            ext
+        };
+
         let rel_path = file_path.to_string_lossy().to_string();
 
         // Dispatch to appropriate parser
@@ -206,6 +217,7 @@ impl CodeParser {
                     body: None,
                     body_hash: Some(file_hash),
                     language: lang,
+                    cuda_qualifier: None,
                 },
             );
         }

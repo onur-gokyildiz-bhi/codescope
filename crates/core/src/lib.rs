@@ -31,6 +31,10 @@ pub struct CodeEntity {
     pub body: Option<String>,
     pub body_hash: Option<String>,
     pub language: String,
+    /// CUDA kernel/function qualifier: `__global__`, `__device__`, or `__host__`.
+    /// Only set for functions parsed from `.cu` / `.cuh` files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuda_qualifier: Option<String>,
 }
 
 /// Classification of extracted entities across all supported content types.

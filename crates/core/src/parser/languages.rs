@@ -80,6 +80,14 @@ impl LanguageRegistry {
                     "hxx".into(),
                 ],
             },
+            // CUDA (parsed as C++ — tree-sitter-cpp handles most CUDA syntax;
+            // `__global__`/`__device__`/`__host__` qualifiers and `<<<...>>>`
+            // kernel launches are detected as a post-processing pass in the extractor).
+            LanguageConfig {
+                name: "cuda".into(),
+                language: tree_sitter_cpp::LANGUAGE.into(),
+                extensions: vec!["cu".into(), "cuh".into()],
+            },
             // C#
             LanguageConfig {
                 name: "csharp".into(),

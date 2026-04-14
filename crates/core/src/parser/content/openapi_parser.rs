@@ -55,6 +55,7 @@ impl ContentParser for OpenApiParser {
             body: None,
             body_hash: None,
             language: "openapi".to_string(),
+            cuda_qualifier: None,
         });
 
         // Extract paths (endpoints)
@@ -90,6 +91,7 @@ impl ContentParser for OpenApiParser {
                             body: None,
                             body_hash: None,
                             language: "openapi".to_string(),
+                            cuda_qualifier: None,
                         });
                         relations.push(CodeRelation {
                             kind: RelationKind::DefinesEndpoint,
@@ -128,6 +130,7 @@ impl ContentParser for OpenApiParser {
                     body: None,
                     body_hash: None,
                     language: "openapi".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,
@@ -160,6 +163,7 @@ impl ContentParser for OpenApiParser {
                             body: None,
                             body_hash: None,
                             language: "openapi".to_string(),
+                            cuda_qualifier: None,
                         });
                         relations.push(CodeRelation {
                             kind: RelationKind::HasField,

@@ -22,6 +22,8 @@ pub struct SearchResult {
     pub end_line: Option<u32>,
     pub language: Option<String>,
     pub signature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuda_qualifier: Option<String>,
 }
 
 impl GraphQuery {

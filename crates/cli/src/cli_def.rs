@@ -132,6 +132,13 @@ pub enum Commands {
         auto_index: bool,
     },
 
+    /// Start Language Server Protocol bridge (stdio) — editor-agnostic
+    Lsp {
+        /// Workspace path (repo name is derived from the directory name).
+        /// If omitted, the current directory is used.
+        path: Option<PathBuf>,
+    },
+
     /// Start daemon (MCP + Web UI on single port, multi-project)
     Serve {
         #[arg(long, default_value = "9877")]

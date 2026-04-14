@@ -1,110 +1,19 @@
-//! Obsidian-like context exploration tools: explore, context_bundle, related, backlinks.
+//! Obsidian-like context exploration tool: context_bundle.
+//!
+//! Other exploration modes (explore, related, backlinks) moved into the
+//! unified `search` tool in `search.rs` (modes: neighborhood, cross_type, backlinks).
 
 use codescope_core::graph::query::GraphQuery;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 
-use crate::helpers::{derive_scope_from_file_path, maybe_archive};
+use crate::helpers::derive_scope_from_file_path;
 use crate::params::*;
 use crate::server::GraphRagServer;
 
 #[tool_router(router = exploration_router, vis = "pub(crate)")]
 impl GraphRagServer {
-    /// Explore an entity's full graph neighborhood — like Obsidian's local graph view
-    #[tool(
-        description = "Full neighborhood of an entity: callers, callees, siblings, file context."
-    )]
-    async fn explore(&self, Parameters(params): Parameters<ExploreParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-        let gq = GraphQuery::new(ctx.db);
-
-        match gq.explore(&params.name).await {
-            Ok(result) => {
-                let mut output = format!("## Explore: {}\n\n", params.name);
-
-                if let Some(entity_type) = result.get("entity_type").and_then(|v| v.as_str()) {
-                    output.push_str(&format!("**Type:** {}\n\n", entity_type));
-                }
-
-                if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
-                    output.push_str("### Entity\n");
-                    for m in matches {
-                        if let Some(fp) = m.get("file_path").and_then(|v| v.as_str()) {
-                            let line = m.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                            output.push_str(&format!("- **{}** ({}:{})\n", params.name, fp, line));
-                        }
-                        if let Some(sig) = m.get("signature").and_then(|v| v.as_str()) {
-                            output.push_str(&format!("  `{}`\n", sig));
-                        }
-                    }
-                    output.push('\n');
-                }
-
-                if let Some(callers) = result.get("called_by").and_then(|v| v.as_array()) {
-                    if !callers.is_empty() {
-                        output.push_str(&format!("### Called By ({} functions)\n", callers.len()));
-                        for c in callers {
-                            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                            output.push_str(&format!("- {} ({})\n", name, fp));
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                if let Some(callees) = result.get("calls_to").and_then(|v| v.as_array()) {
-                    if !callees.is_empty() {
-                        output.push_str(&format!("### Calls ({} functions)\n", callees.len()));
-                        for c in callees {
-                            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                            output.push_str(&format!("- {} ({})\n", name, fp));
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                if let Some(siblings) = result.get("sibling_functions").and_then(|v| v.as_array()) {
-                    if !siblings.is_empty() {
-                        output.push_str(&format!("### Same File ({} siblings)\n", siblings.len()));
-                        for s in siblings {
-                            let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let sig = s.get("signature").and_then(|v| v.as_str());
-                            if let Some(sig) = sig {
-                                output.push_str(&format!("- {} `{}`\n", name, sig));
-                            } else {
-                                output.push_str(&format!("- {}\n", name));
-                            }
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                if let Some(funcs) = result.get("functions").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Functions ({})\n", funcs.len()));
-                    for f in funcs {
-                        let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let sig = f.get("signature").and_then(|v| v.as_str());
-                        let line = f.get("start_line").and_then(|v| v.as_u64()).unwrap_or(0);
-                        if let Some(sig) = sig {
-                            output.push_str(&format!("- L{}: {} `{}`\n", line, name, sig));
-                        } else {
-                            output.push_str(&format!("- L{}: {}\n", line, name));
-                        }
-                    }
-                    output.push('\n');
-                }
-
-                maybe_archive(self.result_archive(), "explore", output).await
-            }
-            Err(e) => format!("Error exploring '{}': {}", params.name, e),
-        }
-    }
-
     /// Get full context for a file — like opening an Obsidian note with all linked content
     #[tool(
         description = "File context: functions, callers, classes, imports, decisions. Use before Read."
@@ -325,127 +234,6 @@ impl GraphRagServer {
                 }
             }
             Err(e) => format!("Error getting context for '{}': {}", params.file_path, e),
-        }
-    }
-
-    /// Search across ALL entity types — universal knowledge graph search
-    #[tool(description = "Search all entity types: code, configs, docs, packages, infrastructure.")]
-    async fn related(&self, Parameters(params): Parameters<RelatedParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-        let gq = GraphQuery::new(ctx.db);
-        let limit = params.limit.unwrap_or(10);
-
-        match gq.cross_search(&params.keyword, limit).await {
-            Ok(result) => {
-                let total = result
-                    .get("total_results")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let mut output =
-                    format!("## Related: '{}' ({} results)\n\n", params.keyword, total);
-
-                for (key, icon, label) in [
-                    ("functions", "fn", "Functions"),
-                    ("classes", "cls", "Classes"),
-                    ("configs", "cfg", "Config Keys"),
-                    ("docs", "doc", "Documentation"),
-                    ("packages", "pkg", "Packages"),
-                    ("files", "file", "Files"),
-                    ("imports", "imp", "Imports"),
-                    ("infra", "inf", "Infrastructure"),
-                ] {
-                    if let Some(items) = result.get(key).and_then(|v| v.as_array()) {
-                        output.push_str(&format!("### {} [{}] ({})\n", label, icon, items.len()));
-                        for item in items {
-                            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                            let fp = item.get("file_path").and_then(|v| v.as_str());
-                            if let Some(fp) = fp {
-                                output.push_str(&format!("- {} ({})\n", name, fp));
-                            } else {
-                                output.push_str(&format!("- {}\n", name));
-                            }
-                        }
-                        output.push('\n');
-                    }
-                }
-
-                output
-            }
-            Err(e) => format!("Error searching for '{}': {}", params.keyword, e),
-        }
-    }
-
-    /// Find all entities that reference/link to a given entity — Obsidian-like backlinks
-    #[tool(description = "All backlinks to an entity: callers, importers, containers, dependents.")]
-    async fn backlinks(&self, Parameters(params): Parameters<BacklinksParams>) -> String {
-        let ctx = match self.ctx().await {
-            Ok(c) => c,
-            Err(e) => return e,
-        };
-        let gq = GraphQuery::new(ctx.db);
-
-        match gq.backlinks(&params.name).await {
-            Ok(result) => {
-                let total = result
-                    .get("total_backlinks")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let mut output = format!("## Backlinks: {} ({} links)\n\n", params.name, total);
-
-                if let Some(callers) = result.get("callers").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Callers ({})\n", callers.len()));
-                    for c in callers {
-                        let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let fp = c.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                        let sig = c.get("signature").and_then(|v| v.as_str());
-                        if let Some(sig) = sig {
-                            output.push_str(&format!("- **{}** ({}) `{}`\n", name, fp, sig));
-                        } else {
-                            output.push_str(&format!("- **{}** ({})\n", name, fp));
-                        }
-                    }
-                    output.push('\n');
-                }
-
-                if let Some(importers) = result.get("importers").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Imported By ({})\n", importers.len()));
-                    for i in importers {
-                        let name = i.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let fp = i.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                        output.push_str(&format!("- {} ({})\n", name, fp));
-                    }
-                    output.push('\n');
-                }
-
-                if let Some(containers) = result.get("contained_in").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Defined In ({})\n", containers.len()));
-                    for c in containers {
-                        let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        output.push_str(&format!("- {}\n", name));
-                    }
-                    output.push('\n');
-                }
-
-                if let Some(deps) = result.get("dependents").and_then(|v| v.as_array()) {
-                    output.push_str(&format!("### Dependents ({})\n", deps.len()));
-                    for d in deps {
-                        let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let fp = d.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                        output.push_str(&format!("- {} ({})\n", name, fp));
-                    }
-                    output.push('\n');
-                }
-
-                if total == 0 {
-                    output.push_str("No backlinks found. The entity may not exist or has no incoming references.\n");
-                }
-
-                output
-            }
-            Err(e) => format!("Error finding backlinks for '{}': {}", params.name, e),
         }
     }
 }

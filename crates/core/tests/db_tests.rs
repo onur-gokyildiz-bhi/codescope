@@ -40,6 +40,7 @@ fn make_entity(kind: EntityKind, name: &str, file: &str) -> CodeEntity {
         body: Some("{ /* test */ }".to_string()),
         body_hash: Some("abc123".to_string()),
         language: "rust".to_string(),
+        cuda_qualifier: None,
     }
 }
 

@@ -36,6 +36,7 @@ impl ContentParser for SqlParser {
             body: None,
             body_hash: None,
             language: "sql".to_string(),
+            cuda_qualifier: None,
         });
 
         let lines: Vec<&str> = source.lines().collect();
@@ -62,6 +63,7 @@ impl ContentParser for SqlParser {
                         body: None,
                         body_hash: None,
                         language: "sql".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -92,6 +94,7 @@ impl ContentParser for SqlParser {
                         body: None,
                         body_hash: None,
                         language: "sql".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -123,6 +126,7 @@ impl ContentParser for SqlParser {
                         body: None,
                         body_hash: None,
                         language: "sql".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,

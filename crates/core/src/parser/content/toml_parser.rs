@@ -42,6 +42,7 @@ impl ContentParser for TomlParser {
             body: None,
             body_hash: None,
             language: "toml".to_string(),
+            cuda_qualifier: None,
         });
 
         let value: toml::Value = match toml::from_str(source) {
@@ -118,6 +119,7 @@ fn extract_toml_table(
             body: body_str,
             body_hash: None,
             language: "toml".to_string(),
+            cuda_qualifier: None,
         });
 
         relations.push(CodeRelation {

@@ -36,6 +36,7 @@ impl ContentParser for DockerfileParser {
             body: None,
             body_hash: None,
             language: "dockerfile".to_string(),
+            cuda_qualifier: None,
         });
 
         let mut current_stage = file_qname.clone();
@@ -76,6 +77,7 @@ impl ContentParser for DockerfileParser {
                     body: None,
                     body_hash: None,
                     language: "dockerfile".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,
@@ -111,6 +113,7 @@ impl ContentParser for DockerfileParser {
                     body: Some(args.to_string()),
                     body_hash: None,
                     language: "dockerfile".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,

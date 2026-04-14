@@ -43,6 +43,7 @@ impl ContentParser for MarkdownParser {
             body: None,
             body_hash: None,
             language: "markdown".to_string(),
+            cuda_qualifier: None,
         });
 
         // Phase 1: Parse YAML frontmatter (skill graph support)
@@ -76,6 +77,7 @@ impl ContentParser for MarkdownParser {
                 body: fm.description.clone(),  // description in body field
                 body_hash: None,
                 language: "skill".to_string(),
+                cuda_qualifier: None,
             });
 
             // File contains skill
@@ -137,6 +139,7 @@ impl ContentParser for MarkdownParser {
                         body: None,
                         body_hash: None,
                         language: "markdown".to_string(),
+                        cuda_qualifier: None,
                     });
                     relations.push(CodeRelation {
                         kind: RelationKind::Contains,
@@ -186,6 +189,7 @@ impl ContentParser for MarkdownParser {
                     body: None,
                     body_hash: None,
                     language: "markdown".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,
@@ -233,6 +237,7 @@ impl ContentParser for MarkdownParser {
                                 body: None,
                                 body_hash: None,
                                 language: "markdown".to_string(),
+                                cuda_qualifier: None,
                             });
                             relations.push(CodeRelation {
                                 kind: RelationKind::References,

@@ -1,0 +1,25 @@
+[package]
+name = "codescope-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "codescope_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codescope-lsp"
+path = "src/main.rs"
+
+[dependencies]
+codescope-core = { path = "../core" }
+tower-lsp = "0.20"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+surrealdb = { workspace = true }
+anyhow = { workspace = true }
+dirs = "5"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

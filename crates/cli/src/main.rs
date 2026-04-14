@@ -122,6 +122,21 @@ async fn main() -> Result<()> {
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
             codescope_web::run_web(path, repo, port, auto_index, cli.db_path, host).await?;
         }
+        Commands::Lsp { path } => {
+            // Change into the workspace dir so the LSP infers the right repo
+            // name from the directory. Keep this simple — the LSP itself also
+            // re-derives repo from the `initialize` params when the editor
+            // provides a workspace root, so this only matters if the editor
+            // doesn't send one.
+            if let Some(p) = path.as_ref() {
+                std::env::set_current_dir(p)?;
+            }
+            use tower_lsp::{LspService, Server};
+            let stdin = tokio::io::stdin();
+            let stdout = tokio::io::stdout();
+            let (service, socket) = LspService::new(codescope_lsp::Backend::new);
+            Server::new(stdin, stdout, socket).serve(service).await;
+        }
         Commands::Serve { port, bind } => {
             commands::serve::run(&bind, port).await?;
         }

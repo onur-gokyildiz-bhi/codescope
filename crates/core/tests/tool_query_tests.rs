@@ -36,6 +36,7 @@ fn make_fn(name: &str, file: &str, sig: &str) -> CodeEntity {
         body: Some("{ /* body */ }".to_string()),
         body_hash: Some("hash123".to_string()),
         language: "rust".to_string(),
+        cuda_qualifier: None,
     }
 }
 
@@ -54,6 +55,7 @@ fn make_class(name: &str, file: &str) -> CodeEntity {
         body: None,
         body_hash: None,
         language: "rust".to_string(),
+        cuda_qualifier: None,
     }
 }
 

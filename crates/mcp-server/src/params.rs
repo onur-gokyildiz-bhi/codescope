@@ -458,6 +458,28 @@ pub struct ConversationsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SearchUnifiedParams {
+    /// Mode: "fuzzy" | "exact" | "file" | "cross_type" | "neighborhood" | "backlinks"
+    pub mode: String,
+    /// Query or entity name (required for all modes)
+    pub query: String,
+    /// For "fuzzy": max results (default 20)
+    pub limit: Option<usize>,
+    /// For "cross_type": optional scope filter
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ContributorsParams {
+    /// Mode: "map" (expertise map) | "reviewers" (suggest for files) | "patterns" (team coding patterns)
+    pub mode: String,
+    /// For "reviewers": list of changed files. For "patterns": optional focus (imports/naming/structure/all).
+    pub focus: Option<String>,
+    /// For "reviewers": changed file list as comma-separated string.
+    pub files: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SkillsParams {
     /// Action: "index" | "traverse" | "generate"
     pub action: String,

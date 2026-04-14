@@ -37,6 +37,7 @@ impl ContentParser for EnvParser {
             body: None,
             body_hash: None,
             language: "env".to_string(),
+            cuda_qualifier: None,
         });
 
         for (i, line) in source.lines().enumerate() {
@@ -72,6 +73,7 @@ impl ContentParser for EnvParser {
                     body: Some(value.to_string()),
                     body_hash: None,
                     language: "env".to_string(),
+                    cuda_qualifier: None,
                 });
                 relations.push(CodeRelation {
                     kind: RelationKind::Contains,

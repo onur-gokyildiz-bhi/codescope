@@ -30,6 +30,7 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE FIELD IF NOT EXISTS complexity ON `function` TYPE option<int>;
         DEFINE FIELD IF NOT EXISTS embedding ON `function` TYPE option<array>;
         DEFINE FIELD IF NOT EXISTS binary_embedding ON `function` TYPE option<array>;
+        DEFINE FIELD IF NOT EXISTS cuda_qualifier ON `function` TYPE option<string>;
         DEFINE INDEX IF NOT EXISTS fn_name ON `function` FIELDS name;
         DEFINE INDEX IF NOT EXISTS fn_qname ON `function` FIELDS qualified_name UNIQUE;
         DEFINE INDEX IF NOT EXISTS fn_file ON `function` FIELDS file_path;
