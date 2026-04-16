@@ -21,31 +21,35 @@ use tracing_subscriber::EnvFilter;
 
 /// Run MCP server in stdio mode — single project, one process.
 /// Backward-compatible 3-arg entrypoint (CLI crate still uses this).
-/// Defaults `auto_index_background = false` so auto-indexing blocks the
-/// serve loop — tools never see an empty graph on first call.
+/// Defaults to background auto-indexing — the serve loop starts immediately
+/// and tools return a structured "indexing in progress" response (readiness
+/// gate) until the build completes. This is what MCP clients expect: a
+/// blocking startup can exceed the client's handshake timeout on large repos.
 pub async fn run_stdio(path: PathBuf, repo: Option<String>, auto_index: bool) -> Result<()> {
     run_stdio_with_options(path, repo, auto_index, false).await
 }
 
 /// Run MCP server in stdio mode with full option control.
 ///
-/// `auto_index_background` controls whether auto-indexing happens in the
-/// background (the old behavior — fast startup, but tools return empty
-/// results until index is done) or blocks the serve loop until indexing
-/// completes (the new default — tools always have data when first called).
-/// Users can opt into the old behavior with `--auto-index-background`
-/// or by setting `CODESCOPE_AUTO_INDEX_BACKGROUND=1`.
+/// `auto_index_blocking` controls whether auto-indexing blocks the serve
+/// loop (tools never see an empty graph on first call) or runs in the
+/// background (fast startup; tools return "indexing in progress" until
+/// the build completes). Default is background, because blocking startup
+/// on large repos (~minutes) exceeds the MCP client's handshake timeout.
+/// Opt into blocking with `--auto-index-blocking` or
+/// `CODESCOPE_AUTO_INDEX_BLOCKING=1` for one-off CLI runs on small repos.
 pub async fn run_stdio_with_options(
     path: PathBuf,
     repo: Option<String>,
     auto_index: bool,
-    auto_index_background: bool,
+    auto_index_blocking: bool,
 ) -> Result<()> {
-    // Resolve final background-mode flag: CLI flag OR env var overrides.
-    let background_mode = auto_index_background
-        || std::env::var("CODESCOPE_AUTO_INDEX_BACKGROUND")
+    // Background is the default; user must explicitly opt into blocking.
+    let blocking_mode = auto_index_blocking
+        || std::env::var("CODESCOPE_AUTO_INDEX_BLOCKING")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
+    let background_mode = !blocking_mode;
 
     // --- Logging ---
     //

@@ -23,11 +23,14 @@ struct Args {
     #[arg(long)]
     auto_index: bool,
 
-    /// Run auto-index in the background instead of blocking startup.
-    /// Tools return an "indexing in progress" response until the build
-    /// completes (see `index_status`). Env: CODESCOPE_AUTO_INDEX_BACKGROUND=1.
+    /// Block the serve loop until auto-indexing completes. By default
+    /// indexing runs in the background and tools return an "indexing in
+    /// progress" response (see `index_status`) until the build is ready.
+    /// Blocking is only useful for small repos or one-off CLI runs; it
+    /// can exceed the MCP client's handshake timeout on large projects.
+    /// Env: CODESCOPE_AUTO_INDEX_BLOCKING=1.
     #[arg(long)]
-    auto_index_background: bool,
+    auto_index_blocking: bool,
 }
 
 #[derive(Subcommand)]
@@ -46,9 +49,10 @@ enum Command {
         #[arg(long)]
         auto_index: bool,
 
-        /// Run auto-index in the background instead of blocking startup.
+        /// Block the serve loop until auto-indexing completes (opt-in).
+        /// Default is background so the server starts immediately.
         #[arg(long)]
-        auto_index_background: bool,
+        auto_index_blocking: bool,
     },
 
     /// Run as SSE daemon (single process, multi-project)
@@ -128,10 +132,9 @@ async fn main() -> Result<()> {
             path,
             repo,
             auto_index,
-            auto_index_background,
+            auto_index_blocking,
         }) => {
-            codescope_mcp::run_stdio_with_options(path, repo, auto_index, auto_index_background)
-                .await
+            codescope_mcp::run_stdio_with_options(path, repo, auto_index, auto_index_blocking).await
         }
         // No subcommand = backward-compatible stdio mode
         None => {
@@ -139,7 +142,7 @@ async fn main() -> Result<()> {
                 args.path,
                 args.repo,
                 args.auto_index,
-                args.auto_index_background,
+                args.auto_index_blocking,
             )
             .await
         }
