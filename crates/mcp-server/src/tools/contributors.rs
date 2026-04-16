@@ -106,7 +106,7 @@ async fn contributors_reviewers(server: &GraphRagServer, params: &ContributorsPa
     }
 
     let mut reviewers: Vec<_> = reviewer_scores.into_iter().collect();
-    reviewers.sort_by(|a, b| b.1.cmp(&a.1));
+    reviewers.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let mut output = format!(
         "## Suggested Reviewers\n\n**{} files changed**\n\n",
@@ -199,7 +199,7 @@ async fn contributors_patterns(server: &GraphRagServer, params: &ContributorsPar
                     *patterns.entry(pattern.to_string()).or_insert(0) += 1;
                 }
                 let mut sorted: Vec<_> = patterns.into_iter().collect();
-                sorted.sort_by(|a, b| b.1.cmp(&a.1));
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
                 for (p, c) in &sorted {
                     output.push_str(&format!("- {}: {} occurrences\n", p, c));
                 }
@@ -250,7 +250,7 @@ async fn contributors_patterns(server: &GraphRagServer, params: &ContributorsPar
                 }
             }
             let mut sorted: Vec<_> = dirs.into_iter().collect();
-            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
             output.push_str("### Project Structure (top-level)\n");
             for (d, c) in sorted.iter().take(10) {
                 output.push_str(&format!("- {}/  ({} files)\n", d, c));

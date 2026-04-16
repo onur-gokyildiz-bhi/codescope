@@ -67,21 +67,21 @@ impl GraphRagServer {
             .unwrap_or(true);
 
         match lang.as_str() {
-            "rust" | "python" | "ruby" | "elixir" => {
-                if !has_underscore && name.len() > 3 && starts_lower {
-                    warnings.push(format!(
-                        "Naming: '{}' uses camelCase but {} convention is snake_case",
-                        name, lang
-                    ));
-                }
+            "rust" | "python" | "ruby" | "elixir"
+                if !has_underscore && name.len() > 3 && starts_lower =>
+            {
+                warnings.push(format!(
+                    "Naming: '{}' uses camelCase but {} convention is snake_case",
+                    name, lang
+                ));
             }
-            "typescript" | "javascript" | "java" | "dart" | "kotlin" | "go" => {
-                if has_underscore && starts_lower {
-                    warnings.push(format!(
-                        "Naming: '{}' uses snake_case but {} convention is camelCase",
-                        name, lang
-                    ));
-                }
+            "typescript" | "javascript" | "java" | "dart" | "kotlin" | "go"
+                if has_underscore && starts_lower =>
+            {
+                warnings.push(format!(
+                    "Naming: '{}' uses snake_case but {} convention is camelCase",
+                    name, lang
+                ));
             }
             _ => {}
         }

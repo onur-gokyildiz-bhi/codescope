@@ -134,7 +134,7 @@ impl GitAnalyzer {
         }
 
         let mut pairs: Vec<_> = coupling.into_iter().collect();
-        pairs.sort_by(|a, b| b.1.cmp(&a.1));
+        pairs.sort_by_key(|b| std::cmp::Reverse(b.1));
         pairs.truncate(limit);
 
         Ok(pairs
@@ -162,7 +162,7 @@ impl GitAnalyzer {
 
         // Only allocate Strings for the top results
         let mut files: Vec<_> = churn.into_iter().collect();
-        files.sort_by(|a, b| b.1.cmp(&a.1));
+        files.sort_by_key(|b| std::cmp::Reverse(b.1));
         files.truncate(limit);
 
         Ok(files.into_iter().map(|(p, c)| (p.to_string(), c)).collect())
@@ -189,7 +189,7 @@ impl GitAnalyzer {
             .into_iter()
             .map(|(author, files)| {
                 let mut files: Vec<_> = files.into_iter().collect();
-                files.sort_by(|a, b| b.1.cmp(&a.1));
+                files.sort_by_key(|b| std::cmp::Reverse(b.1));
                 (author, files)
             })
             .collect())

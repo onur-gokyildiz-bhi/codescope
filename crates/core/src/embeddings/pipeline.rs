@@ -119,7 +119,7 @@ impl EmbeddingPipeline {
         // Build update payloads
         let updates: Vec<EmbedUpdatePayload> = functions
             .iter()
-            .zip(embeddings.into_iter())
+            .zip(embeddings)
             .map(|(func, embedding)| {
                 let bq = binary_quantize(&embedding);
                 let bq_as_ints: Vec<i64> = bq.iter().map(|&b| b as i64).collect();
@@ -145,11 +145,7 @@ impl EmbeddingPipeline {
             dims,
             f32_bytes / 1024,
             bq_bytes / 1024,
-            if bq_bytes > 0 {
-                f32_bytes / bq_bytes
-            } else {
-                0
-            }
+            f32_bytes.checked_div(bq_bytes).unwrap_or(0)
         );
 
         Ok(EmbedResult {
