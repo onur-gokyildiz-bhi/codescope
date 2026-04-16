@@ -27,13 +27,10 @@ fn query_timeout() -> Duration {
 fn default_limit() -> u32 {
     static LIMIT: OnceLock<u32> = OnceLock::new();
     *LIMIT.get_or_init(|| {
-        match std::env::var("CODESCOPE_QUERY_DEFAULT_LIMIT")
+        std::env::var("CODESCOPE_QUERY_DEFAULT_LIMIT")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-        {
-            Some(n) => n,
-            None => 500,
-        }
+            .unwrap_or(500)
     })
 }
 
