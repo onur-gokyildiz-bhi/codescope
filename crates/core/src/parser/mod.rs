@@ -5,12 +5,38 @@ pub mod languages;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::OnceLock;
 use tree_sitter::Parser;
 
 use crate::{CodeEntity, CodeRelation, EntityKind};
 use content::ContentParserRegistry;
 use extractor::EntityExtractor;
 use languages::LanguageRegistry;
+
+/// Returns the configured maximum file size in bytes.
+/// Reads `CODESCOPE_MAX_FILE_SIZE_BYTES` once; falls back to 2 MB on parse
+/// failure or absence.
+fn max_file_size_bytes() -> u64 {
+    static LIMIT: OnceLock<u64> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        const DEFAULT: u64 = 2_097_152; // 2 MB
+        match std::env::var("CODESCOPE_MAX_FILE_SIZE_BYTES") {
+            Ok(val) => match val.trim().parse::<u64>() {
+                Ok(n) => n,
+                Err(_) => {
+                    tracing::warn!(
+                        "CODESCOPE_MAX_FILE_SIZE_BYTES=\"{}\" is not a valid u64; \
+                         using default {}B",
+                        val,
+                        DEFAULT
+                    );
+                    DEFAULT
+                }
+            },
+            Err(_) => DEFAULT,
+        }
+    })
+}
 
 /// Check if a file should be skipped during indexing (build artifacts, generated code, etc.)
 pub fn should_skip_file(path: &Path) -> bool {
@@ -44,6 +70,12 @@ pub fn should_skip_file(path: &Path) -> bool {
 
     for dir in &skip_dirs {
         if path_str.contains(dir) {
+            tracing::debug!(
+                path = %path.display(),
+                reason = "excluded directory pattern",
+                pattern = dir,
+                "skipping file"
+            );
             return true;
         }
     }
@@ -63,6 +95,12 @@ pub fn should_skip_file(path: &Path) -> bool {
         ];
         for pat in &generated_suffixes {
             if fname.ends_with(pat) {
+                tracing::debug!(
+                    path = %path.display(),
+                    reason = "generated file suffix",
+                    pattern = pat,
+                    "skipping file"
+                );
                 return true;
             }
         }
@@ -79,13 +117,31 @@ pub fn should_skip_file(path: &Path) -> bool {
             "Gemfile.lock",
         ];
         if lock_files.contains(&fname) {
+            tracing::debug!(
+                path = %path.display(),
+                reason = "lock file",
+                "skipping file"
+            );
             return true;
         }
     }
 
-    // Large files (>512KB)
-    if path.metadata().map(|m| m.len() > 512_000).unwrap_or(false) {
-        return true;
+    // Large files — limit is configurable via CODESCOPE_MAX_FILE_SIZE_BYTES
+    let limit = max_file_size_bytes();
+    if let Ok(meta) = path.metadata() {
+        let size = meta.len();
+        if size > limit {
+            tracing::warn!(
+                path = %path.display(),
+                size_bytes = size,
+                limit_bytes = limit,
+                "skipping file: size {}B exceeds limit {}B \
+                 (set CODESCOPE_MAX_FILE_SIZE_BYTES to override)",
+                size,
+                limit
+            );
+            return true;
+        }
     }
 
     false

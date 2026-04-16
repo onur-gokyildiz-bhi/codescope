@@ -20,7 +20,7 @@ impl GraphRagServer {
     )]
     #[tracing::instrument(skip_all, fields(file_path = %params.file_path))]
     async fn context_bundle(&self, Parameters(params): Parameters<ContextBundleParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };

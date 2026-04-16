@@ -22,6 +22,12 @@ struct Args {
     /// Auto-index on startup
     #[arg(long)]
     auto_index: bool,
+
+    /// Run auto-index in the background instead of blocking startup.
+    /// Tools return an "indexing in progress" response until the build
+    /// completes (see `index_status`). Env: CODESCOPE_AUTO_INDEX_BACKGROUND=1.
+    #[arg(long)]
+    auto_index_background: bool,
 }
 
 #[derive(Subcommand)]
@@ -39,6 +45,10 @@ enum Command {
         /// Auto-index on startup
         #[arg(long)]
         auto_index: bool,
+
+        /// Run auto-index in the background instead of blocking startup.
+        #[arg(long)]
+        auto_index_background: bool,
     },
 
     /// Run as SSE daemon (single process, multi-project)
@@ -118,9 +128,21 @@ async fn main() -> Result<()> {
             path,
             repo,
             auto_index,
-        }) => codescope_mcp::run_stdio(path, repo, auto_index).await,
+            auto_index_background,
+        }) => {
+            codescope_mcp::run_stdio_with_options(path, repo, auto_index, auto_index_background)
+                .await
+        }
         // No subcommand = backward-compatible stdio mode
-        None => codescope_mcp::run_stdio(args.path, args.repo, args.auto_index).await,
+        None => {
+            codescope_mcp::run_stdio_with_options(
+                args.path,
+                args.repo,
+                args.auto_index,
+                args.auto_index_background,
+            )
+            .await
+        }
     }
 }
 

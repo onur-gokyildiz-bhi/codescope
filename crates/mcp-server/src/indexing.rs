@@ -27,6 +27,7 @@ use surrealdb::Surreal;
 
 use crate::collect_jsonl_files;
 use crate::helpers;
+use crate::index_state::IndexState;
 use crate::server::GraphRagServer;
 use crate::watcher;
 use codescope_core::graph::builder::GraphBuilder;
@@ -57,21 +58,55 @@ impl IndexingPipeline {
     /// Run all phases sequentially. Each phase logs its own errors.
     pub async fn run_full(self: Arc<Self>) {
         tracing::info!("Background indexing {}...", self.path.display());
+        let state = self.mcp.index_state().clone();
+        state.start().await;
+
         let builder = GraphBuilder::new(self.db.clone());
+
+        // Phase 1 FIRST: parse into an in-memory staging set BEFORE we
+        // touch the DB. If parsing produces zero results (e.g. directory
+        // permission denied, unsupported project), we abort WITHOUT
+        // wiping the existing graph — the user's prior index stays
+        // intact and `index_status` surfaces the reason.
+        let parse_results = self.phase1_parse_files(&state).await;
+
+        if parse_results.is_empty() {
+            // No files parsed successfully. Don't clobber the DB.
+            let reason = "phase1 produced zero parse results — check that the path is a supported codebase".to_string();
+            state.mark_failed(reason.clone()).await;
+            tracing::error!("{} — skipping DB wipe, graph left unchanged", reason);
+            return;
+        }
 
         // Phase 0: clean stale entities to prevent abs-path / rel-path duplicates.
         // UPSERT keys on qualified_name which includes file_path — if the same
         // file was previously indexed with a different path form (absolute vs
         // relative, \\?\ prefix vs not), the old record stays alongside the new
         // one. Wiping code entities before re-indexing is the simplest fix.
-        self.phase0_clean_stale().await;
-
-        // Phase 1: parse files in parallel (CPU-bound)
-        let parse_results = self.phase1_parse_files().await;
+        //
+        // NOTE: This is staging-swap-lite — we parsed into `parse_results`
+        // FIRST (above), so a phase1 failure never leaves the DB empty.
+        // A true transactional swap would require SurrealDB table-rename
+        // support, which isn't available in the current version.
+        if let Err(e) = self.phase0_clean_stale().await {
+            state.mark_failed(format!("phase0 (clean stale) failed: {e}")).await;
+            tracing::error!("Phase 0 failed — graph may be inconsistent: {e}");
+            return;
+        }
 
         // Phase 2: batch insert
-        let file_count = self.phase2_insert_results(&builder, parse_results).await;
+        let file_count = self.phase2_insert_results(&builder, parse_results, &state).await;
         tracing::info!("Background indexing complete: {} files", file_count);
+
+        if file_count == 0 {
+            // DB was wiped in phase0 but phase2 inserted nothing.
+            // This is the "silent empty DB" failure mode the user
+            // reported — surface it explicitly.
+            state
+                .mark_failed("phase2 inserted zero files after phase0 wiped the DB — the graph is empty; re-run with --auto-index or call index_codebase")
+                .await;
+            return;
+        }
 
         // Phase 2.5: cross-file call targets
         self.phase25_resolve_calls(&builder).await;
@@ -102,12 +137,21 @@ impl IndexingPipeline {
 
         // Phase 7: periodic conv re-index
         self.clone().phase7_spawn_periodic();
+
+        // All foreground phases done. Mark index Ready so the gate stops
+        // short-circuiting tool calls. Background phases (health check,
+        // periodic re-index) continue running.
+        state.mark_ready().await;
+        tracing::info!("Index state: Ready");
     }
 
     // ─── Phase 0: clean stale entities ────────────────────────────
 
-    async fn phase0_clean_stale(&self) {
-        // Delete all code entities and edges, then re-insert fresh.
+    /// Delete all code entities and edges before re-inserting fresh.
+    /// Returns an error only if EVERY delete fails (DB connection is gone)
+    /// — individual table deletes can fail cheaply (table doesn't exist yet)
+    /// and that's OK.
+    async fn phase0_clean_stale(&self) -> Result<(), String> {
         // This prevents duplicates from path normalization differences
         // between CLI init and MCP auto-index.
         //
@@ -126,17 +170,33 @@ impl IndexingPipeline {
             "imports",
             "inherits",
         ];
+        let mut all_failed = true;
+        let mut last_err: Option<String> = None;
         for table in &tables {
-            if let Err(e) = self.db.query(format!("DELETE {table}")).await {
-                tracing::warn!("Clean {table}: {e}");
+            match self.db.query(format!("DELETE {table}")).await {
+                Ok(_) => {
+                    all_failed = false;
+                }
+                Err(e) => {
+                    tracing::warn!("Clean {table}: {e}");
+                    last_err = Some(e.to_string());
+                }
             }
         }
+        if all_failed {
+            return Err(last_err.unwrap_or_else(|| "every DELETE failed".into()));
+        }
         tracing::info!("Cleaned stale entities for fresh re-index");
+        Ok(())
     }
 
     // ─── Phase 1: file collection + parallel parsing ─────────────
 
-    async fn phase1_parse_files(&self) -> Vec<ParseResult> {
+    /// Parse all supported files under `self.path` in parallel and return
+    /// `(entities, relations)` per successful file. Per-file read or parse
+    /// errors are pushed onto `IndexState` (logged + counted) instead of
+    /// being silently dropped with `.ok()`.
+    async fn phase1_parse_files(&self, state: &IndexState) -> Vec<ParseResult> {
         let parse_path = self.path.clone();
         // Normalize the base path: canonicalize + strip \\?\ prefix (Windows).
         // This must match what init.rs does, otherwise the same file gets
@@ -152,7 +212,12 @@ impl IndexingPipeline {
             }
         };
         let parse_repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || {
+
+        // Collect per-file errors in the worker thread, then replay them
+        // onto the async `IndexState` after the join. This avoids pulling
+        // a tokio runtime handle into the rayon closure.
+        type FileErr = (PathBuf, String);
+        let join_result = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
             let parser = codescope_core::parser::CodeParser::new();
             let walker = ignore::WalkBuilder::new(&parse_path)
@@ -173,26 +238,88 @@ impl IndexingPipeline {
                 .map(|e| e.into_path())
                 .collect();
 
-            tracing::info!("Found {} files to parse", files.len());
+            let total = files.len();
+            tracing::info!("Found {} files to parse", total);
 
-            files
+            // Each worker returns Either(ok_result, err_record) via a
+            // 2-tuple Vec of enums. We just flatten at the end.
+            enum Outcome {
+                Ok(ParseResult),
+                Skipped(PathBuf, String),
+                Err(FileErr),
+            }
+
+            let outcomes: Vec<Outcome> = files
                 .par_iter()
-                .filter_map(|file_path| {
+                .map(|file_path| {
                     let rel_path = file_path
                         .strip_prefix(&parse_path)
                         .unwrap_or(file_path)
                         .to_string_lossy()
                         .to_string()
                         .replace('\\', "/");
-                    let content = std::fs::read_to_string(file_path).ok()?;
-                    parser
-                        .parse_source(std::path::Path::new(&rel_path), &content, &parse_repo)
-                        .ok()
+                    let content = match std::fs::read_to_string(file_path) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Outcome::Skipped(
+                                file_path.clone(),
+                                format!("read: {e}"),
+                            );
+                        }
+                    };
+                    match parser.parse_source(
+                        std::path::Path::new(&rel_path),
+                        &content,
+                        &parse_repo,
+                    ) {
+                        Ok(res) => Outcome::Ok(res),
+                        Err(e) => Outcome::Err((file_path.clone(), e.to_string())),
+                    }
                 })
-                .collect::<Vec<_>>()
+                .collect();
+
+            let mut ok_results = Vec::with_capacity(outcomes.len());
+            let mut errors: Vec<FileErr> = Vec::new();
+            let mut skipped: Vec<(PathBuf, String)> = Vec::new();
+            for o in outcomes {
+                match o {
+                    Outcome::Ok(r) => ok_results.push(r),
+                    Outcome::Err(e) => errors.push(e),
+                    Outcome::Skipped(p, m) => skipped.push((p, m)),
+                }
+            }
+            (total, ok_results, errors, skipped)
         })
-        .await
-        .unwrap_or_default()
+        .await;
+
+        let (total, ok_results, errors, skipped) = match join_result {
+            Ok(tup) => tup,
+            Err(join_err) => {
+                // spawn_blocking itself failed (panic or cancellation).
+                // Surface this via state — previously `.unwrap_or_default()`
+                // silently swallowed it.
+                state
+                    .push_error(
+                        PathBuf::from("<phase1 worker>"),
+                        format!("spawn_blocking join error: {join_err}"),
+                    )
+                    .await;
+                return Vec::new();
+            }
+        };
+
+        state.set_total(total).await;
+        for (path, msg) in &skipped {
+            // Unreadable files — count separately from parse errors so
+            // `index_status` can distinguish "permission denied" from
+            // "tree-sitter rejected the input".
+            tracing::debug!("Skipped {}: {}", path.display(), msg);
+            state.inc_skipped().await;
+        }
+        for (path, err) in errors {
+            state.push_error(path, err).await;
+        }
+        ok_results
     }
 
     // ─── Phase 2: batch insert ───────────────────────────────────
@@ -201,16 +328,24 @@ impl IndexingPipeline {
         &self,
         builder: &GraphBuilder,
         results: Vec<ParseResult>,
+        state: &IndexState,
     ) -> usize {
         let mut file_count = 0;
         for (entities, relations) in results {
             if let Err(e) = builder.insert_entities(&entities).await {
                 tracing::warn!("Entity insert failed: {e}");
+                state
+                    .push_error(PathBuf::from("<phase2 entities>"), e.to_string())
+                    .await;
             }
             if let Err(e) = builder.insert_relations(&relations).await {
                 tracing::warn!("Relation insert failed: {e}");
+                state
+                    .push_error(PathBuf::from("<phase2 relations>"), e.to_string())
+                    .await;
             }
             file_count += 1;
+            state.inc_done().await;
         }
         file_count
     }

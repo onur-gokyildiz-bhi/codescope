@@ -8,6 +8,7 @@ use surrealdb::Surreal;
 
 use crate::daemon::DaemonState;
 use crate::helpers::build_context_summary;
+use crate::index_state::IndexState;
 
 /// Active project context — DB handle + metadata
 #[derive(Clone)]
@@ -40,6 +41,11 @@ pub struct GraphRagServer {
     /// When a tool output exceeds 4KB, the full result is archived here
     /// and a summary + retrieval ID is returned instead.
     result_archive: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    /// Indexing state for readiness gating. Tool handlers consult this
+    /// BEFORE running their DB queries — if the index is mid-build or
+    /// has failed, the handler returns a structured JSON response
+    /// instead of an empty result array.
+    index_state: IndexState,
     tool_router: ToolRouter<Self>,
 }
 
@@ -71,6 +77,7 @@ impl GraphRagServer {
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            index_state: IndexState::new(),
             tool_router: Self::merged_router(),
         }
     }
@@ -84,8 +91,27 @@ impl GraphRagServer {
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            index_state: IndexState::new(),
             tool_router: Self::merged_router(),
         }
+    }
+
+    /// Shared indexing state — used by the pipeline to write progress
+    /// and by tool handlers to read it for the readiness gate.
+    pub fn index_state(&self) -> &IndexState {
+        &self.index_state
+    }
+
+    /// Readiness-gate helper for tool handlers. If indexing is in
+    /// progress or has failed, returns a structured response string.
+    /// Otherwise returns `None` and the caller proceeds normally.
+    ///
+    /// Usage at the top of a handler:
+    /// ```ignore
+    /// if let Some(resp) = self.index_gate().await { return resp; }
+    /// ```
+    pub(crate) async fn index_gate(&self) -> Option<String> {
+        self.index_state.gate().await
     }
 
     /// Whether this server was started in stdio mode (single project pre-loaded).
@@ -148,6 +174,23 @@ impl GraphRagServer {
             .await
             .clone()
             .ok_or_else(|| "No project initialized. Call `init_project` first with repo name and codebase path.".into())
+    }
+
+    /// Get the active project context *gated by indexing state*. If the
+    /// background indexer is still running or has failed, returns the
+    /// structured status JSON in the Err branch — existing handlers
+    /// already forward the Err payload as the tool response, so this
+    /// keeps the readiness gate a one-line change in each handler
+    /// (`self.ctx()` → `self.gated_ctx()`).
+    ///
+    /// Admin tools that MUST remain callable during indexing (e.g.
+    /// `index_status`, `project`, `index_codebase`) should keep using
+    /// plain `ctx()`.
+    pub(crate) async fn gated_ctx(&self) -> Result<ProjectCtx, String> {
+        if let Some(gate_response) = self.index_gate().await {
+            return Err(gate_response);
+        }
+        self.ctx().await
     }
 
     /// Load conversation context + knowledge hot cache from DB and cache it.

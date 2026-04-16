@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,7 +7,45 @@ use surrealdb::engine::local::Db;
 use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
-const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Configurable query timeout. Set `CODESCOPE_QUERY_TIMEOUT_SECS` to override.
+/// Default: 60 seconds (up from the old hardcoded 30s).
+fn query_timeout() -> Duration {
+    static TIMEOUT: OnceLock<Duration> = OnceLock::new();
+    *TIMEOUT.get_or_init(|| {
+        match std::env::var("CODESCOPE_QUERY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            Some(secs) => Duration::from_secs(secs),
+            None => Duration::from_secs(60),
+        }
+    })
+}
+
+/// Configurable default LIMIT for unbounded SELECT queries.
+/// Set `CODESCOPE_QUERY_DEFAULT_LIMIT` to override. Default: 500.
+fn default_limit() -> u32 {
+    static LIMIT: OnceLock<u32> = OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        match std::env::var("CODESCOPE_QUERY_DEFAULT_LIMIT")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+        {
+            Some(n) => n,
+            None => 500,
+        }
+    })
+}
+
+/// Emit a consistent timeout error that callers can `.context()` match on.
+/// Preserves elapsed seconds so MCP handlers can distinguish timeout from empty result.
+fn timeout_err(hint: &str, timeout: Duration) -> anyhow::Error {
+    anyhow::anyhow!(
+        "query timeout after {}s: {}",
+        timeout.as_secs(),
+        hint
+    )
+}
 
 /// High-level graph query interface
 pub struct GraphQuery {
@@ -42,9 +81,13 @@ impl GraphQuery {
     /// Find a function by name (exact match)
     pub async fn find_function(&self, name: &str) -> Result<Vec<SearchResult>> {
         let name = name.to_string();
+        let lim = default_limit();
         let results: Vec<SearchResult> = self
             .db
-            .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE name = $name")
+            .query(format!(
+                "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
+                 FROM `function` WHERE name = $name LIMIT {lim}"
+            ))
             .bind(("name", name))
             .await?
             .take(0)?;
@@ -54,14 +97,19 @@ impl GraphQuery {
     /// Search functions by name pattern
     pub async fn search_functions(&self, pattern: &str) -> Result<Vec<SearchResult>> {
         let pattern = pattern.to_lowercase(); // Lowercase once in Rust, not per-row in DB
+        let lim = default_limit();
+        let timeout = query_timeout();
         let results: Vec<SearchResult> = tokio::time::timeout(
-            QUERY_TIMEOUT,
+            timeout,
             self.db
-                .query("SELECT qualified_name, name, file_path, start_line, end_line, language, signature FROM `function` WHERE string::contains(string::lowercase(name), $pattern)")
+                .query(format!(
+                    "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
+                     FROM `function` WHERE string::contains(string::lowercase(name), $pattern) LIMIT {lim}"
+                ))
                 .bind(("pattern", pattern)),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .map_err(|_| timeout_err("search_functions", timeout))??
         .take(0)?;
         Ok(results)
     }
@@ -69,20 +117,22 @@ impl GraphQuery {
     /// Find all callers of a function
     pub async fn find_callers(&self, function_name: &str) -> Result<Vec<SearchResult>> {
         let name = function_name.to_string();
+        let lim = default_limit();
+        let timeout = query_timeout();
         // Use direct edge traversal — much faster than subquery on large graphs
         let results: Vec<SearchResult> = tokio::time::timeout(
-            QUERY_TIMEOUT,
+            timeout,
             self.db
-                .query(
+                .query(format!(
                     "SELECT in.qualified_name AS qualified_name, in.name AS name, \
                      in.file_path AS file_path, in.start_line AS start_line, \
                      in.end_line AS end_line, in.language AS language, in.signature AS signature \
-                     FROM calls WHERE out.name = $name AND in.name != NONE",
-                )
+                     FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}"
+                ))
                 .bind(("name", name)),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .map_err(|_| timeout_err("find_callers", timeout))??
         .take(0)?;
         Ok(results)
     }
@@ -90,19 +140,21 @@ impl GraphQuery {
     /// Find all functions called by a function
     pub async fn find_callees(&self, function_name: &str) -> Result<Vec<SearchResult>> {
         let name = function_name.to_string();
+        let lim = default_limit();
+        let timeout = query_timeout();
         let results: Vec<SearchResult> = tokio::time::timeout(
-            QUERY_TIMEOUT,
+            timeout,
             self.db
-                .query(
+                .query(format!(
                     "SELECT out.qualified_name AS qualified_name, out.name AS name, \
                      out.file_path AS file_path, out.start_line AS start_line, \
                      out.end_line AS end_line, out.language AS language, out.signature AS signature \
-                     FROM calls WHERE in.name = $name AND out.name != NONE",
-                )
+                     FROM calls WHERE in.name = $name AND out.name != NONE LIMIT {lim}"
+                ))
                 .bind(("name", name)),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .map_err(|_| timeout_err("find_callees", timeout))??
         .take(0)?;
         Ok(results)
     }
@@ -110,14 +162,15 @@ impl GraphQuery {
     /// Find all entities in a file — single round-trip for both functions and classes
     pub async fn file_entities(&self, file_path: &str) -> Result<Vec<SearchResult>> {
         let path = file_path.to_string();
+        let lim = default_limit();
 
         let mut response = self.db
-            .query(
+            .query(format!(
                 "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
-                 FROM `function` WHERE file_path = $path; \
+                 FROM `function` WHERE file_path = $path LIMIT {lim}; \
                  SELECT qualified_name, name, file_path, start_line, end_line, language \
-                 FROM class WHERE file_path = $path;"
-            )
+                 FROM class WHERE file_path = $path LIMIT {lim};"
+            ))
             .bind(("path", path))
             .await?;
 
@@ -127,6 +180,36 @@ impl GraphQuery {
         let mut all = Vec::with_capacity(functions.len() + classes.len());
         all.extend(functions);
         all.extend(classes);
+        Ok(all)
+    }
+
+    /// Like `file_entities`, but each result is tagged with its entity kind
+    /// (e.g. "function", "class"). Used by consumers that need to distinguish
+    /// kinds downstream (LSP `SymbolKind`, renderers, etc.) without losing
+    /// the single round-trip benefit.
+    pub async fn file_entities_with_kind(
+        &self,
+        file_path: &str,
+    ) -> Result<Vec<(String, SearchResult)>> {
+        let path = file_path.to_string();
+        let lim = default_limit();
+
+        let mut response = self.db
+            .query(format!(
+                "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
+                 FROM `function` WHERE file_path = $path LIMIT {lim}; \
+                 SELECT qualified_name, name, file_path, start_line, end_line, language \
+                 FROM class WHERE file_path = $path LIMIT {lim};"
+            ))
+            .bind(("path", path))
+            .await?;
+
+        let functions: Vec<SearchResult> = response.take(0).unwrap_or_default();
+        let classes: Vec<SearchResult> = response.take(1).unwrap_or_default();
+
+        let mut all = Vec::with_capacity(functions.len() + classes.len());
+        all.extend(functions.into_iter().map(|r| ("function".to_string(), r)));
+        all.extend(classes.into_iter().map(|r| ("class".to_string(), r)));
         Ok(all)
     }
 
@@ -194,29 +277,33 @@ impl GraphQuery {
     pub async fn explore(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
 
+        let timeout = query_timeout();
+        // Cap entity-type lookups at 20 — a name matching 20+ entities of the same type would be
+        // pathological, but we don't want unbounded scans on large graphs.
+        let entity_cap = 20usize;
         // Multi-statement: find entity + get neighborhood in one round-trip
         let mut response = tokio::time::timeout(
-            QUERY_TIMEOUT,
+            timeout,
             self.db
-                .query(
+                .query(format!(
                     "SELECT name, qualified_name, file_path, signature, start_line, end_line, \
-                        'function' AS entity_type FROM `function` WHERE name = $name; \
+                        'function' AS entity_type FROM `function` WHERE name = $name LIMIT {entity_cap}; \
                  SELECT name, qualified_name, file_path, kind, start_line, end_line, \
-                        'class' AS entity_type FROM class WHERE name = $name; \
+                        'class' AS entity_type FROM class WHERE name = $name LIMIT {entity_cap}; \
                  SELECT name, qualified_name, file_path, kind, \
-                        'config' AS entity_type FROM config WHERE name = $name; \
+                        'config' AS entity_type FROM config WHERE name = $name LIMIT {entity_cap}; \
                  SELECT name, qualified_name, file_path, kind, \
-                        'doc' AS entity_type FROM doc WHERE name = $name; \
+                        'doc' AS entity_type FROM doc WHERE name = $name LIMIT {entity_cap}; \
                  SELECT name, qualified_name, file_path, kind, \
-                        'package' AS entity_type FROM package WHERE name = $name; \
-                 SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name; \
+                        'package' AS entity_type FROM package WHERE name = $name LIMIT {entity_cap}; \
+                 SELECT path AS name, language, 'file' AS entity_type FROM file WHERE path = $name LIMIT {entity_cap}; \
                  SELECT name, qualified_name, file_path, description, node_type, \
-                        'skill' AS entity_type FROM skill WHERE name = $name;",
-                )
+                        'skill' AS entity_type FROM skill WHERE name = $name LIMIT {entity_cap};"
+                ))
                 .bind(("name", n.clone())),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??;
+        .map_err(|_| timeout_err("explore", timeout))??;
 
         let functions: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let classes: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -254,17 +341,18 @@ impl GraphQuery {
         }
 
         // Get neighborhood based on entity type
+        let lim = default_limit();
         if found_type == "function" {
-            let mut resp2 = self.db.query(
+            let mut resp2 = self.db.query(format!(
                 "SELECT out.name AS name, out.file_path AS file_path, out.signature AS signature \
-                     FROM calls WHERE in.name = $name AND out.name != NONE; \
+                     FROM calls WHERE in.name = $name AND out.name != NONE LIMIT {lim}; \
                  SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature \
-                     FROM calls WHERE out.name = $name AND in.name != NONE; \
+                     FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}; \
                  SELECT name, start_line, signature FROM `function` \
                      WHERE file_path IN (SELECT VALUE file_path FROM `function` WHERE name = $name LIMIT 1)[0] \
                      AND name != $name \
                      ORDER BY start_line LIMIT 50;"
-            ).bind(("name", n.clone())).await?;
+            )).bind(("name", n.clone())).await?;
 
             let callees: Vec<serde_json::Value> = resp2.take(0).unwrap_or_default();
             let callers: Vec<serde_json::Value> = resp2.take(1).unwrap_or_default();
@@ -280,11 +368,11 @@ impl GraphQuery {
             // For classes, get inheritance relationships
             let mut resp2 = self
                 .db
-                .query(
-                    "SELECT ->inherits->class.name AS parent, ->inherits->class.file_path AS parent_file FROM class WHERE name = $name; \
-                     SELECT <-inherits<-class.name AS child, <-inherits<-class.file_path AS child_file FROM class WHERE name = $name; \
-                     SELECT ->implements->class.name AS iface FROM class WHERE name = $name;",
-                )
+                .query(format!(
+                    "SELECT ->inherits->class.name AS parent, ->inherits->class.file_path AS parent_file FROM class WHERE name = $name LIMIT {lim}; \
+                     SELECT <-inherits<-class.name AS child, <-inherits<-class.file_path AS child_file FROM class WHERE name = $name LIMIT {lim}; \
+                     SELECT ->implements->class.name AS iface FROM class WHERE name = $name LIMIT {lim};"
+                ))
                 .bind(("name", n.clone()))
                 .await?;
 
@@ -299,14 +387,14 @@ impl GraphQuery {
             // For skills, get wikilink neighbors
             let mut resp2 = self
                 .db
-                .query(
+                .query(format!(
                     "SELECT out.name AS name, out.description AS description, \
                         out.node_type AS node_type, context \
-                     FROM links_to WHERE in.name = $name; \
+                     FROM links_to WHERE in.name = $name LIMIT {lim}; \
                  SELECT in.name AS name, in.description AS description, \
                         in.node_type AS node_type, context \
-                     FROM links_to WHERE out.name = $name;",
-                )
+                     FROM links_to WHERE out.name = $name LIMIT {lim};"
+                ))
                 .bind(("name", n.clone()))
                 .await?;
 
@@ -330,16 +418,17 @@ impl GraphQuery {
     pub async fn file_context(&self, file_path: &str) -> Result<serde_json::Value> {
         let p = file_path.to_string();
 
-        let mut response = self.db.query(
+        let lim = default_limit();
+        let mut response = self.db.query(format!(
             "SELECT path, language, hash, line_count FROM file WHERE path = $path; \
-             SELECT name, signature, start_line, end_line FROM `function` WHERE file_path = $path ORDER BY start_line; \
-             SELECT name, kind, start_line, end_line FROM class WHERE file_path = $path ORDER BY start_line; \
-             SELECT name FROM import_decl WHERE file_path = $path; \
-             SELECT name, kind, body FROM config WHERE file_path = $path; \
-             SELECT name, kind, body FROM doc WHERE file_path = $path; \
-             SELECT name, kind FROM package WHERE file_path = $path; \
-             SELECT name, kind FROM infra WHERE file_path = $path;"
-        ).bind(("path", p.clone())).await?;
+             SELECT name, signature, start_line, end_line FROM `function` WHERE file_path = $path ORDER BY start_line LIMIT {lim}; \
+             SELECT name, kind, start_line, end_line FROM class WHERE file_path = $path ORDER BY start_line LIMIT {lim}; \
+             SELECT name FROM import_decl WHERE file_path = $path LIMIT {lim}; \
+             SELECT name, kind, body FROM config WHERE file_path = $path LIMIT {lim}; \
+             SELECT name, kind, body FROM doc WHERE file_path = $path LIMIT {lim}; \
+             SELECT name, kind FROM package WHERE file_path = $path LIMIT {lim}; \
+             SELECT name, kind FROM infra WHERE file_path = $path LIMIT {lim};"
+        )).bind(("path", p.clone())).await?;
 
         let file_info: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let functions: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -353,11 +442,11 @@ impl GraphQuery {
         // Batch query: get ALL cross-file callers for ALL functions in this file at once (avoids N+1)
         let mut resp2 = self
             .db
-            .query(
+            .query(format!(
                 "SELECT out.name AS callee_name, in.name AS name, in.file_path AS file_path \
                  FROM calls WHERE out.file_path = $fpath \
-                 AND in.name != NONE AND in.file_path != $fpath;",
-            )
+                 AND in.name != NONE AND in.file_path != $fpath LIMIT {lim};"
+            ))
             .bind(("fpath", p.clone()))
             .await?;
 
@@ -506,14 +595,15 @@ impl GraphQuery {
 
     /// Find all HTTP client calls in the codebase, optionally filtered by method.
     pub async fn find_http_calls(&self, method: Option<&str>) -> Result<Vec<serde_json::Value>> {
+        let lim = default_limit();
         if let Some(m) = method {
             let m = m.to_uppercase();
             let results: Vec<serde_json::Value> = self
                 .db
-                .query(
+                .query(format!(
                     "SELECT name, qualified_name, file_path, start_line, end_line, kind AS method, body \
-                     FROM http_call WHERE kind = $method ORDER BY file_path, start_line"
-                )
+                     FROM http_call WHERE kind = $method ORDER BY file_path, start_line LIMIT {lim}"
+                ))
                 .bind(("method", m))
                 .await?
                 .take(0)?;
@@ -521,10 +611,10 @@ impl GraphQuery {
         } else {
             let results: Vec<serde_json::Value> = self
                 .db
-                .query(
+                .query(format!(
                     "SELECT name, qualified_name, file_path, start_line, end_line, kind AS method \
-                     FROM http_call ORDER BY file_path, start_line",
-                )
+                     FROM http_call ORDER BY file_path, start_line LIMIT {lim}"
+                ))
                 .await?
                 .take(0)?;
             Ok(results)
@@ -537,15 +627,16 @@ impl GraphQuery {
         endpoint_pattern: &str,
     ) -> Result<Vec<serde_json::Value>> {
         let pattern = endpoint_pattern.to_lowercase();
+        let lim = default_limit();
         let results: Vec<serde_json::Value> = self
             .db
-            .query(
+            .query(format!(
                 "SELECT in.name AS caller_name, in.file_path AS caller_file, \
                  in.signature AS caller_signature, \
                  out.name AS http_call, out.kind AS method, out.file_path AS call_file, \
                  out.start_line AS call_line \
-                 FROM calls_endpoint WHERE string::contains(string::lowercase(out.name), $pattern)",
-            )
+                 FROM calls_endpoint WHERE string::contains(string::lowercase(out.name), $pattern) LIMIT {lim}"
+            ))
             .bind(("pattern", pattern))
             .await?
             .take(0)?;
@@ -572,21 +663,22 @@ impl GraphQuery {
         Box::pin(async move {
             let n = name.to_string();
 
-            let mut response = self.db.query(
+            let lim = default_limit();
+            let mut response = self.db.query(format!(
             "SELECT name, qualified_name, kind, file_path, start_line, end_line \
-                FROM class WHERE name = $name; \
+                FROM class WHERE name = $name LIMIT {lim}; \
              SELECT ->inherits->class.name AS parent, ->inherits->class.kind AS parent_kind, \
                     ->inherits->class.file_path AS parent_file \
-                FROM class WHERE name = $name; \
+                FROM class WHERE name = $name LIMIT {lim}; \
              SELECT <-inherits<-class.name AS child, <-inherits<-class.kind AS child_kind, \
                     <-inherits<-class.file_path AS child_file \
-                FROM class WHERE name = $name; \
+                FROM class WHERE name = $name LIMIT {lim}; \
              SELECT ->implements->class.name AS iface, ->implements->class.kind AS iface_kind \
-                FROM class WHERE name = $name; \
+                FROM class WHERE name = $name LIMIT {lim}; \
              SELECT <-implements<-class.name AS implementor, <-implements<-class.kind AS impl_kind, \
                     <-implements<-class.file_path AS impl_file \
-                FROM class WHERE name = $name;"
-        ).bind(("name", n)).await?;
+                FROM class WHERE name = $name LIMIT {lim};"
+        )).bind(("name", n)).await?;
 
             let entities: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
             let parents: Vec<serde_json::Value> = response.take(1).unwrap_or_default();
@@ -709,16 +801,17 @@ impl GraphQuery {
 
         // Level 2: Get outgoing and incoming wikilinks
         let qn = qname.to_string();
+        let lim = default_limit();
         let mut resp2 = self
             .db
-            .query(
+            .query(format!(
                 "SELECT out.name AS name, out.description AS description, \
                     out.node_type AS node_type, context \
-             FROM links_to WHERE in.qualified_name = $qn; \
+             FROM links_to WHERE in.qualified_name = $qn LIMIT {lim}; \
              SELECT in.name AS name, in.description AS description, \
                     in.node_type AS node_type, context \
-             FROM links_to WHERE out.qualified_name = $qn;",
-            )
+             FROM links_to WHERE out.qualified_name = $qn LIMIT {lim};"
+            ))
             .bind(("qn", qn))
             .await?;
 
@@ -736,10 +829,10 @@ impl GraphQuery {
         let fp = file_path.to_string();
         let mut resp3 = self
             .db
-            .query(
+            .query(format!(
                 "SELECT name, kind, start_line FROM doc WHERE file_path = $fp \
-             AND kind = 'DocSection' ORDER BY start_line",
-            )
+             AND kind = 'DocSection' ORDER BY start_line LIMIT {lim}"
+            ))
             .bind(("fp", fp))
             .await?;
 
@@ -764,23 +857,22 @@ impl GraphQuery {
     pub async fn find_all_references(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
 
+        let lim = default_limit();
         let mut response = self
             .db
-            .query(
+            .query(format!(
                 // Definition sites
                 "SELECT name, qualified_name, file_path, start_line, end_line, signature, \
-                    'definition' AS ref_type FROM `function` WHERE name = $name; \
+                    'definition' AS ref_type FROM `function` WHERE name = $name LIMIT {lim}; \
              SELECT name, qualified_name, file_path, start_line, end_line, kind, \
-                    'definition' AS ref_type FROM class WHERE name = $name; \
-             // Call sites (where this function is called)
+                    'definition' AS ref_type FROM class WHERE name = $name LIMIT {lim}; \
              SELECT in.name AS caller_name, in.file_path AS file_path, \
                     in.start_line AS start_line, 'call_site' AS ref_type, \
                     meta::id(id) AS edge_id \
-                    FROM calls WHERE out.name = $name AND in.name != NONE; \
-             // Import references
+                    FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}; \
              SELECT name, file_path, start_line, 'import' AS ref_type \
-                    FROM import_decl WHERE string::contains(name, $name);",
-            )
+                    FROM import_decl WHERE string::contains(name, $name) LIMIT {lim};"
+            ))
             .bind(("name", n))
             .await?;
 
@@ -813,8 +905,9 @@ impl GraphQuery {
         min_lines: u32,
         repo: &str,
     ) -> Result<Vec<serde_json::Value>> {
+        let timeout = query_timeout();
         let results: Vec<serde_json::Value> = tokio::time::timeout(
-            QUERY_TIMEOUT,
+            timeout,
             self.db
                 .query(
                     "SELECT name, file_path, start_line, end_line, signature, kind, \
@@ -841,7 +934,7 @@ impl GraphQuery {
                 .bind(("repo", repo.to_string())),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("DB query timed out after 30s"))??
+        .map_err(|_| timeout_err("find_unused_symbols", timeout))??
         .take(0)?;
 
         Ok(results)
@@ -850,20 +943,19 @@ impl GraphQuery {
     /// Check if a symbol can be safely deleted — zero references anywhere.
     pub async fn safe_delete_check(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
+        let lim = default_limit();
 
         let mut response = self
             .db
-            .query(
+            .query(format!(
                 // Check callers
                 "SELECT count() AS cnt FROM calls WHERE out.name = $name GROUP ALL; \
-             // Check if imported anywhere
              SELECT count() AS cnt FROM import_decl WHERE string::contains(name, $name) GROUP ALL; \
-             // Get the entity details
              SELECT name, file_path, start_line, end_line, signature \
-                    FROM `function` WHERE name = $name; \
+                    FROM `function` WHERE name = $name LIMIT {lim}; \
              SELECT name, file_path, start_line, end_line, kind \
-                    FROM class WHERE name = $name;",
-            )
+                    FROM class WHERE name = $name LIMIT {lim};"
+            ))
             .bind(("name", n))
             .await?;
 
@@ -954,23 +1046,24 @@ impl GraphQuery {
     pub async fn backlinks(&self, name: &str) -> Result<serde_json::Value> {
         let n = name.to_string();
 
+        let lim = default_limit();
         // Multi-direction backlink search
-        let mut response = self.db.query(
+        let mut response = self.db.query(format!(
             "SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature, 'caller' AS link_type \
-                 FROM calls WHERE out.name = $name AND in.name != NONE; \
+                 FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}; \
              SELECT name, file_path, 'importer' AS link_type \
-                 FROM import_decl WHERE string::contains(name, $name); \
+                 FROM import_decl WHERE string::contains(name, $name) LIMIT {lim}; \
              SELECT path AS name, language, 'container' AS link_type \
                  FROM file WHERE path IN \
                  (SELECT VALUE file_path FROM `function` WHERE name = $name) \
                  OR path IN (SELECT VALUE file_path FROM class WHERE name = $name) \
-                 OR path IN (SELECT VALUE file_path FROM config WHERE name = $name); \
+                 OR path IN (SELECT VALUE file_path FROM config WHERE name = $name) LIMIT {lim}; \
              SELECT name, kind, file_path, 'dependent' AS link_type \
-                 FROM package WHERE kind = 'Dependency' AND name = $name; \
+                 FROM package WHERE kind = 'Dependency' AND name = $name LIMIT {lim}; \
              SELECT in.name AS name, in.file_path AS file_path, in.description AS description, \
                     'wikilink' AS link_type, context \
-                 FROM links_to WHERE out.name = $name;"
-        ).bind(("name", n)).await?;
+                 FROM links_to WHERE out.name = $name LIMIT {lim};"
+        )).bind(("name", n)).await?;
 
         let callers: Vec<serde_json::Value> = response.take(0).unwrap_or_default();
         let importers: Vec<serde_json::Value> = response.take(1).unwrap_or_default();

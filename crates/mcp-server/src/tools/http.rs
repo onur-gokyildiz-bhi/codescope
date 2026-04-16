@@ -15,7 +15,7 @@ impl GraphRagServer {
         description = "HTTP cross-service analysis (find client calls or code targeting an endpoint URL)."
     )]
     async fn http_analysis(&self, Parameters(params): Parameters<HttpAnalysisParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };

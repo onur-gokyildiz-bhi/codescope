@@ -152,6 +152,18 @@ impl GraphRagServer {
         }
     }
 
+    /// Report the current state of the background indexer.
+    /// Intended to be called after an MCP tool returns an "indexing in
+    /// progress" response so the agent can decide whether to retry.
+    #[tool(
+        description = "Indexing status: files indexed, errors, running time, state (idle/indexing/ready/failed). Call after a tool returns an 'indexing in progress' response."
+    )]
+    async fn index_status(&self) -> String {
+        let snap = self.index_state().snapshot().await;
+        serde_json::to_string(&snap)
+            .unwrap_or_else(|_| "{\"state\":\"unknown\",\"error\":\"snapshot failed\"}".into())
+    }
+
     /// Index or re-index the codebase into the graph database
     #[tool(description = "Index source files into the knowledge graph.")]
     async fn index_codebase(&self, Parameters(params): Parameters<IndexParams>) -> String {

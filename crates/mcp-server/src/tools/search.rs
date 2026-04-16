@@ -38,7 +38,7 @@ impl GraphRagServer {
         description = "Find direct callers of a function (1-hop). For transitive use impact_analysis."
     )]
     async fn find_callers(&self, Parameters(params): Parameters<FindCallersParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -71,7 +71,7 @@ impl GraphRagServer {
         description = "Find direct callees of a function (1-hop). For full neighborhood use search mode=neighborhood."
     )]
     async fn find_callees(&self, Parameters(params): Parameters<FindCalleesParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -102,7 +102,7 @@ impl GraphRagServer {
     /// Get statistics about the indexed code graph
     #[tool(description = "Code graph statistics: files, functions, classes, relationships count.")]
     async fn graph_stats(&self) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -118,7 +118,7 @@ impl GraphRagServer {
     /// Execute a raw SurrealQL query against the code graph
     #[tool(description = "Raw SurrealQL query. Backtick `function`. Prefer dedicated tools first.")]
     async fn raw_query(&self, Parameters(params): Parameters<RawQueryParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };

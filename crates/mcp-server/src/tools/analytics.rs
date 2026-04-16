@@ -14,7 +14,7 @@ impl GraphRagServer {
     /// Show recently indexed entities grouped by file
     #[tool(description = "Recent changes to functions and classes since last index.")]
     async fn api_changelog(&self, Parameters(_params): Parameters<ApiChangelogParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -97,7 +97,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<CommunityDetectionParams>,
     ) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -208,7 +208,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<ExportObsidianParams>,
     ) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -388,7 +388,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<CaptureInsightParams>,
     ) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -534,7 +534,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<SuggestStructureParams>,
     ) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };

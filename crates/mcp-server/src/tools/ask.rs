@@ -18,7 +18,7 @@ impl GraphRagServer {
         description = "Natural language question about the codebase. Auto-extracts search terms."
     )]
     async fn ask(&self, Parameters(params): Parameters<NaturalLanguageQueryParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.gated_ctx().await {
             Ok(c) => c,
             Err(e) => return e,
         };
