@@ -40,11 +40,7 @@ fn default_limit() -> u32 {
 /// Emit a consistent timeout error that callers can `.context()` match on.
 /// Preserves elapsed seconds so MCP handlers can distinguish timeout from empty result.
 fn timeout_err(hint: &str, timeout: Duration) -> anyhow::Error {
-    anyhow::anyhow!(
-        "query timeout after {}s: {}",
-        timeout.as_secs(),
-        hint
-    )
+    anyhow::anyhow!("query timeout after {}s: {}", timeout.as_secs(), hint)
 }
 
 /// High-level graph query interface
@@ -164,7 +160,8 @@ impl GraphQuery {
         let path = file_path.to_string();
         let lim = default_limit();
 
-        let mut response = self.db
+        let mut response = self
+            .db
             .query(format!(
                 "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
                  FROM `function` WHERE file_path = $path LIMIT {lim}; \
@@ -194,7 +191,8 @@ impl GraphQuery {
         let path = file_path.to_string();
         let lim = default_limit();
 
-        let mut response = self.db
+        let mut response = self
+            .db
             .query(format!(
                 "SELECT qualified_name, name, file_path, start_line, end_line, language, signature \
                  FROM `function` WHERE file_path = $path LIMIT {lim}; \

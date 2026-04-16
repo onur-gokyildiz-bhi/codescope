@@ -364,7 +364,8 @@ fn init_stdio_logging() -> (PathBuf, LogGuard) {
         .unwrap_or_else(|_| {
             // If the state dir isn't writable, fall back to a temp file so
             // the process still starts rather than panicking.
-            let tmp = std::env::temp_dir().join(format!("codescope-mcp-{}.log", std::process::id()));
+            let tmp =
+                std::env::temp_dir().join(format!("codescope-mcp-{}.log", std::process::id()));
             std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)

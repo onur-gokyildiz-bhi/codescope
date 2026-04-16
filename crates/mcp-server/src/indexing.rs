@@ -72,7 +72,9 @@ impl IndexingPipeline {
 
         if parse_results.is_empty() {
             // No files parsed successfully. Don't clobber the DB.
-            let reason = "phase1 produced zero parse results — check that the path is a supported codebase".to_string();
+            let reason =
+                "phase1 produced zero parse results — check that the path is a supported codebase"
+                    .to_string();
             state.mark_failed(reason.clone()).await;
             tracing::error!("{} — skipping DB wipe, graph left unchanged", reason);
             return;
@@ -89,13 +91,17 @@ impl IndexingPipeline {
         // A true transactional swap would require SurrealDB table-rename
         // support, which isn't available in the current version.
         if let Err(e) = self.phase0_clean_stale().await {
-            state.mark_failed(format!("phase0 (clean stale) failed: {e}")).await;
+            state
+                .mark_failed(format!("phase0 (clean stale) failed: {e}"))
+                .await;
             tracing::error!("Phase 0 failed — graph may be inconsistent: {e}");
             return;
         }
 
         // Phase 2: batch insert
-        let file_count = self.phase2_insert_results(&builder, parse_results, &state).await;
+        let file_count = self
+            .phase2_insert_results(&builder, parse_results, &state)
+            .await;
         tracing::info!("Background indexing complete: {} files", file_count);
 
         if file_count == 0 {
@@ -261,10 +267,7 @@ impl IndexingPipeline {
                     let content = match std::fs::read_to_string(file_path) {
                         Ok(c) => c,
                         Err(e) => {
-                            return Outcome::Skipped(
-                                file_path.clone(),
-                                format!("read: {e}"),
-                            );
+                            return Outcome::Skipped(file_path.clone(), format!("read: {e}"));
                         }
                     };
                     match parser.parse_source(
