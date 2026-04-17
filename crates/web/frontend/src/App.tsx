@@ -110,7 +110,7 @@ export default function App() {
         <Show when={errorMsg()}>
           <div class="error-toast">
             <span>{errorMsg()}</span>
-            <button class="error-toast-close" onClick={() => setErrorMsg(null)}>&times;</button>
+            <button class="error-toast-close" onClick={() => setErrorMsg(null)} aria-label="Dismiss error">&times;</button>
           </div>
         </Show>
       </div>
