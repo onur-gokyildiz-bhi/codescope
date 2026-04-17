@@ -762,6 +762,72 @@ async fn api_graph(
                     }
                 }
 
+                // Decision / Problem / Solution / ConvTopic / Conversation nodes
+                // These live in _global and have no code counterpart — include them so
+                // selecting _global project shows a populated graph.
+                let conv_entity_q = "\
+                    SELECT id, name AS title, 'decision' AS kind, tags, body AS content FROM decision LIMIT 80; \
+                    SELECT id, name AS title, 'problem' AS kind, tags, body AS content FROM problem LIMIT 80; \
+                    SELECT id, name AS title, 'solution' AS kind, tags, body AS content FROM solution LIMIT 80; \
+                    SELECT id, name AS title, 'topic' AS kind, tags, '' AS content FROM conv_topic LIMIT 40; \
+                    SELECT id, name AS title, 'conversation' AS kind, NONE AS tags, body AS content FROM conversation LIMIT 40";
+                if let Ok(ce_result) = gq.raw_query(conv_entity_q).await {
+                    if let Some(arr) = ce_result.as_array() {
+                        for batch in arr {
+                            for row in batch.as_array().unwrap_or(&vec![]) {
+                                let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                let title = row.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("decision");
+                                if id.is_empty() { continue; }
+                                let tags_val = row.get("tags").and_then(|v| v.as_array()).map(|a| {
+                                    a.iter()
+                                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                                        .collect::<Vec<_>>()
+                                });
+                                let content_val = row.get("content").and_then(|v| v.as_str()).map(|s| {
+                                    if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() }
+                                });
+                                nodes.push(GraphNode {
+                                    id: id.to_string(),
+                                    name: title.to_string(),
+                                    kind: kind.to_string(),
+                                    file_path: String::new(),
+                                    confidence: None,
+                                    tags: tags_val,
+                                    content: content_val,
+                                    source_url: None,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Conversation relation edges
+                let conv_edge_q = "\
+                    SELECT in AS source, out AS target, 'discussed_in' AS kind FROM discussed_in LIMIT 200; \
+                    SELECT in AS source, out AS target, 'decided_about' AS kind FROM decided_about LIMIT 200; \
+                    SELECT in AS source, out AS target, 'solves_for' AS kind FROM solves_for LIMIT 200; \
+                    SELECT in AS source, out AS target, 'co_discusses' AS kind FROM co_discusses LIMIT 200; \
+                    SELECT in AS source, out AS target, 'links_to' AS kind FROM links_to LIMIT 200";
+                if let Ok(ce_result) = gq.raw_query(conv_edge_q).await {
+                    if let Some(arr) = ce_result.as_array() {
+                        for batch in arr {
+                            for row in batch.as_array().unwrap_or(&vec![]) {
+                                let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
+                                let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
+                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("links_to");
+                                if !src.is_empty() && !tgt.is_empty() {
+                                    edges.push(GraphEdge {
+                                        source: src.to_string(),
+                                        target: tgt.to_string(),
+                                        kind: kind.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let mut data = GraphData {
                     nodes,
                     links: edges,
