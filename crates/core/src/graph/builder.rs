@@ -8,8 +8,10 @@ use tracing::{debug, warn};
 use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
 
 /// Batch size for multi-statement DB queries.
-/// 200 entities per round-trip balances throughput vs memory.
-const BATCH_SIZE: usize = 50;
+/// Larger batches amortize per-roundtrip overhead; 500 is a sweet spot
+/// on SurrealKV (embedded) where each roundtrip also triggers a WAL
+/// flush. Override with `CODESCOPE_BATCH_SIZE`.
+const BATCH_SIZE: usize = 500;
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -240,66 +242,103 @@ impl GraphBuilder {
 
     /// Resolve cross-file call targets.
     ///
-    /// After indexing, many `calls` edges point to `function:repo_file_callee` where
-    /// callee was assumed to be in the same file. For cross-file calls, the target
-    /// doesn't exist. This method finds orphan targets and re-links them to matching
-    /// functions by name in the same repo.
+    /// After indexing, many `calls` edges point to `function:repo_file_callee`
+    /// where callee was assumed to be in the same file. For cross-file calls
+    /// the target doesn't exist. This finds orphan edges and re-links them
+    /// to matching functions by name in the same repo.
+    ///
+    /// Implementation: two bulk SELECTs (orphans + all functions in repo),
+    /// match in Rust via a HashMap, batch DELETE+RELATE. This replaces a
+    /// SurrealQL `FOR` loop that ran a sub-SELECT per orphan — O(N*M) inside
+    /// the embedded engine, effectively unbounded on large graphs.
     pub async fn resolve_call_targets(&self, repo: &str) -> Result<usize> {
-        // Step 1: Find calls where the target function doesn't exist
-        // Step 2: For each orphan, find a function with matching name in the repo
-        // Step 3: Delete orphan edge, create new one pointing to correct target
-        //
-        // We do this in SurrealQL for efficiency:
-        let query = "LET $orphans = (SELECT id, in AS caller, out AS callee, \
-               out.name AS target_name, meta::id(out) AS target_id \
-             FROM calls \
-             WHERE out.name IS NULL AND meta::tb(out) = 'function');
-             RETURN array::len($orphans);"
-            .to_string();
+        use std::collections::HashMap;
+        use surrealdb::types::{RecordId, SurrealValue, ToSql};
 
-        let mut response = self.db.query(&query).await?;
-        let orphan_count: Option<i64> = response.take(1).unwrap_or(None);
-        let count = orphan_count.unwrap_or(0) as usize;
+        #[derive(serde::Deserialize, SurrealValue)]
+        struct Orphan {
+            id: RecordId,
+            #[serde(rename = "in")]
+            caller: RecordId,
+            raw_target: String,
+        }
 
-        if count == 0 {
+        #[derive(serde::Deserialize, SurrealValue)]
+        struct FnRec {
+            name: String,
+            id: RecordId,
+        }
+
+        // Step 1: load all orphan calls in one query.
+        let orphan_query = "SELECT id, in, meta::id(out) AS raw_target FROM calls \
+             WHERE out.name IS NULL AND meta::tb(out) = 'function'";
+        let mut resp = self.db.query(orphan_query).await?;
+        let orphans: Vec<Orphan> = resp.take(0).unwrap_or_default();
+
+        if orphans.is_empty() {
             return Ok(0);
         }
 
         debug!(
-            "Found {} orphan call targets, attempting resolution...",
-            count
+            "Found {} orphan call targets, resolving in-memory...",
+            orphans.len()
         );
 
-        // Build a name→qualified_name index for all functions in the repo
-        let resolve_query = format!(
-            "LET $fns = (SELECT name, id FROM `function` WHERE repo = '{}');
-             LET $orphans = (SELECT id, in AS caller, meta::id(out) AS raw_target FROM calls WHERE out.name IS NULL AND meta::tb(out) = 'function');
-             FOR $o IN $orphans {{
-               LET $raw = $o.raw_target;
-               LET $parts = string::split($raw, '_');
-               LET $callee_name = array::last($parts);
-               LET $matches = (SELECT id FROM `function` WHERE name = $callee_name AND repo = '{}' LIMIT 1);
-               IF array::len($matches) > 0 {{
-                 LET $target = $matches[0].id;
-                 DELETE $o.id;
-                 RELATE ($o.caller)->calls->($target) SET line = 0;
-               }};
-             }};
-             RETURN 'done';",
-            repo.replace('\'', "\\'"),
-            repo.replace('\'', "\\'"),
+        // Step 2: load every function in the repo and build a name → id map.
+        // First-seen wins (matches the old LIMIT 1 behaviour).
+        let repo_escaped = repo.replace('\'', "\\'");
+        let fn_query = format!(
+            "SELECT name, id FROM `function` WHERE repo = '{}'",
+            repo_escaped
         );
+        let mut resp = self.db.query(&fn_query).await?;
+        let fns: Vec<FnRec> = resp.take(0).unwrap_or_default();
 
-        match self.db.query(&resolve_query).await {
-            Ok(_) => {
-                debug!("Call target resolution completed for {} orphans", count);
-                Ok(count)
-            }
-            Err(e) => {
-                warn!("Call target resolution failed: {}", e);
-                Ok(0)
+        let mut by_name: HashMap<String, RecordId> = HashMap::with_capacity(fns.len());
+        for f in fns {
+            by_name.entry(f.name).or_insert(f.id);
+        }
+
+        // Step 3: resolve each orphan using the in-memory map.
+        // Callee name recovery mirrors the old heuristic: last underscore-
+        // separated segment of the sanitized qualified name.
+        let mut ops: Vec<String> = Vec::with_capacity(orphans.len());
+        let mut resolved = 0usize;
+        for o in &orphans {
+            let callee_name = o
+                .raw_target
+                .rsplit('_')
+                .next()
+                .unwrap_or(o.raw_target.as_str());
+            if let Some(target_id) = by_name.get(callee_name) {
+                ops.push(format!(
+                    "DELETE {}; RELATE ({})->calls->({}) SET line = 0;",
+                    o.id.to_sql(),
+                    o.caller.to_sql(),
+                    target_id.to_sql()
+                ));
+                resolved += 1;
             }
         }
+
+        if ops.is_empty() {
+            return Ok(0);
+        }
+
+        // Step 4: batch-execute delete+relate pairs.
+        for chunk in ops.chunks(BATCH_SIZE) {
+            let batch = chunk.join("\n");
+            if let Err(e) = self.timed_query(&batch).await {
+                warn!("Call target resolution batch failed: {}", e);
+            }
+        }
+
+        debug!(
+            "Call target resolution completed: {} of {} orphans resolved",
+            resolved,
+            orphans.len()
+        );
+        Ok(resolved)
     }
 
     /// Link HTTP client calls to matching API endpoint definitions.

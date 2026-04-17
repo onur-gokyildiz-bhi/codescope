@@ -333,22 +333,29 @@ impl IndexingPipeline {
         results: Vec<ParseResult>,
         state: &IndexState,
     ) -> usize {
-        let mut file_count = 0;
+        // Collect corpus-wide, then bulk-insert once (chunked internally).
+        // Per-file inserts were the dominant hot path: 3 DB roundtrips per
+        // file × N files. Corpus-wide drops to ~total_records / BATCH_SIZE.
+        let file_count = results.len();
+        let mut all_entities: Vec<codescope_core::CodeEntity> = Vec::new();
+        let mut all_relations: Vec<codescope_core::CodeRelation> = Vec::new();
         for (entities, relations) in results {
-            if let Err(e) = builder.insert_entities(&entities).await {
-                tracing::warn!("Entity insert failed: {e}");
-                state
-                    .push_error(PathBuf::from("<phase2 entities>"), e.to_string())
-                    .await;
-            }
-            if let Err(e) = builder.insert_relations(&relations).await {
-                tracing::warn!("Relation insert failed: {e}");
-                state
-                    .push_error(PathBuf::from("<phase2 relations>"), e.to_string())
-                    .await;
-            }
-            file_count += 1;
+            all_entities.extend(entities);
+            all_relations.extend(relations);
             state.inc_done().await;
+        }
+
+        if let Err(e) = builder.insert_entities(&all_entities).await {
+            tracing::warn!("Entity bulk insert failed: {e}");
+            state
+                .push_error(PathBuf::from("<phase2 entities>"), e.to_string())
+                .await;
+        }
+        if let Err(e) = builder.insert_relations(&all_relations).await {
+            tracing::warn!("Relation bulk insert failed: {e}");
+            state
+                .push_error(PathBuf::from("<phase2 relations>"), e.to_string())
+                .await;
         }
         file_count
     }
@@ -414,6 +421,10 @@ impl IndexingPipeline {
         let mut jsonl_files = Vec::new();
         collect_jsonl_files(&project_dir, &mut jsonl_files);
 
+        // Collect conversation + memory data across all files, then bulk-insert once.
+        let mut all_entities: Vec<codescope_core::CodeEntity> = Vec::new();
+        let mut all_relations: Vec<codescope_core::CodeRelation> = Vec::new();
+
         let mut conv_count = 0;
         for jsonl_path in &jsonl_files {
             match codescope_core::conversation::parse_conversation(
@@ -422,12 +433,8 @@ impl IndexingPipeline {
                 &known_entities,
             ) {
                 Ok((entities, relations, _)) => {
-                    if let Err(e) = builder.insert_entities(&entities).await {
-                        tracing::warn!("Entity insert failed: {e}");
-                    }
-                    if let Err(e) = builder.insert_relations(&relations).await {
-                        tracing::warn!("Relation insert failed: {e}");
-                    }
+                    all_entities.extend(entities);
+                    all_relations.extend(relations);
                     conv_count += 1;
                 }
                 Err(e) => {
@@ -449,17 +456,20 @@ impl IndexingPipeline {
                             &self.repo,
                             &known_entities,
                         ) {
-                            if let Err(e) = builder.insert_entities(&ents).await {
-                                tracing::warn!("Entity insert failed: {e}");
-                            }
-                            if let Err(e) = builder.insert_relations(&rels).await {
-                                tracing::warn!("Relation insert failed: {e}");
-                            }
+                            all_entities.extend(ents);
+                            all_relations.extend(rels);
                             mem_count += 1;
                         }
                     }
                 }
             }
+        }
+
+        if let Err(e) = builder.insert_entities(&all_entities).await {
+            tracing::warn!("Conversation+memory entity bulk insert failed: {e}");
+        }
+        if let Err(e) = builder.insert_relations(&all_relations).await {
+            tracing::warn!("Conversation+memory relation bulk insert failed: {e}");
         }
 
         tracing::info!(
@@ -595,6 +605,8 @@ impl IndexingPipeline {
                 collect_jsonl_files(&project_dir, &mut jsonl_files);
 
                 let mut new_count = 0;
+                let mut new_entities: Vec<codescope_core::CodeEntity> = Vec::new();
+                let mut new_relations: Vec<codescope_core::CodeRelation> = Vec::new();
                 for jsonl_path in &jsonl_files {
                     let fname = jsonl_path
                         .file_name()
@@ -609,13 +621,17 @@ impl IndexingPipeline {
                             jsonl_path, &self.repo, &known,
                         )
                     {
-                        if let Err(e) = builder.insert_entities(&entities).await {
-                            tracing::warn!("Entity insert failed: {e}");
-                        }
-                        if let Err(e) = builder.insert_relations(&relations).await {
-                            tracing::warn!("Relation insert failed: {e}");
-                        }
+                        new_entities.extend(entities);
+                        new_relations.extend(relations);
                         new_count += 1;
+                    }
+                }
+                if new_count > 0 {
+                    if let Err(e) = builder.insert_entities(&new_entities).await {
+                        tracing::warn!("Conversation entity bulk insert failed: {e}");
+                    }
+                    if let Err(e) = builder.insert_relations(&new_relations).await {
+                        tracing::warn!("Conversation relation bulk insert failed: {e}");
                     }
                 }
 

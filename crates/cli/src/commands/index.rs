@@ -139,48 +139,64 @@ pub async fn run(
     .await?;
 
     let (results, files_skipped) = parse_results;
+    let parse_duration = parse_start.elapsed();
     println!(
         "  Parsed {} files, {} unchanged ({:.1}s)",
         results.len(),
         files_skipped,
-        parse_start.elapsed().as_secs_f64()
+        parse_duration.as_secs_f64()
     );
 
-    // Phase 4: Batch insert results into DB (async, sequential for DB safety)
+    // Phase 4: Batch insert results into DB.
+    //
+    // Collect all entities and relations from all files into flat Vecs,
+    // then bulk-insert in one pass (chunked internally by GraphBuilder).
+    // Previously we called insert_entities/insert_relations per-file, which
+    // turned each file into 3 DB roundtrips (delete + entities + relations).
+    // For 237 files that was 711 roundtrips dominating total time (~27s).
+    // Corpus-wide bulk drops to ~(total_entities + total_relations) / 50.
     let insert_start = Instant::now();
-    let mut total_entities = 0usize;
-    let mut total_relations = 0usize;
+    let mut all_entities: Vec<codescope_core::CodeEntity> = Vec::new();
+    let mut all_relations: Vec<codescope_core::CodeRelation> = Vec::new();
     let mut files_processed = 0usize;
     let mut errors = Vec::new();
 
     for (rel_path, result) in results {
         match result {
             Ok((entities, relations)) => {
-                // Delete old entities for incremental re-index
+                // Incremental: delete old entities for changed files.
+                // Keep this per-file — deletes scale with CHANGED files, not
+                // total, so it's not usually a bottleneck.
                 if !clean {
                     if let Err(e) = builder.delete_file_entities(&rel_path, repo_name).await {
                         tracing::warn!("Delete entities failed: {e}");
                     }
                 }
 
-                let ent_count = entities.len();
-                let rel_count = relations.len();
-
-                builder.insert_entities(&entities).await?;
-                builder.insert_relations(&relations).await?;
-
-                total_entities += ent_count;
-                total_relations += rel_count;
+                all_entities.extend(entities);
+                all_relations.extend(relations);
                 files_processed += 1;
 
                 if files_processed.is_multiple_of(100) {
-                    println!("  ... {} files indexed", files_processed);
+                    println!("  ... {} files parsed", files_processed);
                 }
             }
             Err(e) => {
                 errors.push(format!("{}: {}", rel_path, e));
             }
         }
+    }
+
+    let total_entities = all_entities.len();
+    let total_relations = all_relations.len();
+
+    if total_entities > 0 || total_relations > 0 {
+        println!(
+            "  Bulk insert: {} entities + {} relations...",
+            total_entities, total_relations
+        );
+        builder.insert_entities(&all_entities).await?;
+        builder.insert_relations(&all_relations).await?;
     }
 
     let total_time = start_time.elapsed();
@@ -195,10 +211,7 @@ pub async fn run(
     }
     println!("  Entities extracted: {}", total_entities);
     println!("  Relations created:  {}", total_relations);
-    println!(
-        "  Parse time:         {:.1}s",
-        parse_start.elapsed().as_secs_f64()
-    );
+    println!("  Parse time:         {:.1}s", parse_duration.as_secs_f64());
     println!(
         "  Insert time:        {:.1}s",
         insert_start.elapsed().as_secs_f64()
