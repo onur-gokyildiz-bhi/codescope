@@ -51,6 +51,14 @@ impl GraphBuilder {
             // the N UPSERTs pays its own commit cost. This is the same
             // pattern that gave us ~3× on the relations path (see
             // `insert_relations`).
+            //
+            // Note: we tried `INSERT INTO table [...] ON DUPLICATE KEY UPDATE`
+            // as an additional optimization but measured no speedup on this
+            // workload (vs. this UPSERT+txn path) AND hit a correctness issue:
+            // Rust codebases have same-name fns in different impl blocks that
+            // collapse to the same sanitize_id, which trips the unique qname
+            // index and rolls back the whole batch. UPSERT handles same-id
+            // writes implicitly (last-write-wins), so we keep it.
             let mut query = String::with_capacity(chunk.len() * 512 + 64);
             query.push_str("BEGIN TRANSACTION;\n");
 
