@@ -4,6 +4,32 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-04-17
+
+4.5× indexing speedup and large-project MCP reliability fixes.
+
+### Performance
+- **INSERT RELATION bulk path:** replace multi-statement `RELATE` with SurrealDB's documented `INSERT RELATION INTO edge [array]` wrapped in an explicit `BEGIN TRANSACTION ... COMMIT TRANSACTION`. Measured 2.9× on the insert phase for edge-heavy workloads. Falls back to per-edge `RELATE` if the bulk path fails so nothing is silently dropped.
+- **Explicit transactions on entity UPSERTs:** wrap each UPSERT batch in `BEGIN/COMMIT`. SurrealDB's default is per-statement transactions, so without an explicit txn boundary every UPSERT pays its own commit cost. Additional 1.8× on top of the relations fix. Combined total: **4.5× speedup** (28.9s → 6.4s on graph-rag, 237 files / 13k relations). 10k-file extrapolation: 16 min → 4.5 min.
+- **Corpus-wide bulk insert:** collapse per-file `insert_entities` / `insert_relations` calls in both the CLI `index` path and the MCP server's `phase2_insert_results`. The flat-Vec collection is a prerequisite for the bulk query forms above and also unifies the conversation + memory auto-index paths.
+- **In-memory call resolution:** replace the SurrealQL `FOR $o IN $orphans` loop in `resolve_call_targets` with a two-bulk-SELECT + Rust HashMap match + batched `DELETE + RELATE`. Scales linearly instead of O(N²) inside the embedded engine. Matters most on very large graphs.
+- **Configurable query scale:** new env vars `CODESCOPE_QUERY_TIMEOUT_SECS` (default 60, was hardcoded 30) and `CODESCOPE_QUERY_DEFAULT_LIMIT` (default 500). Default `LIMIT` added to ~15 previously unbounded `SELECT` queries in `explore`, `file_context`, `type_hierarchy`, `find_all_references`, `find_http_calls`, `find_endpoint_callers`, `backlinks`, and friends. `count()` queries and `raw_query` intentionally untouched.
+- **Configurable parser file size limit:** 512 KB → 2 MB default (covers generated CUDA kernels, LLVM IR dumps, kernel registries). Override with `CODESCOPE_MAX_FILE_SIZE_BYTES`. Skipped files now emit a `tracing::warn!` with path, size, and limit instead of disappearing silently.
+
+### Fixed
+- **MCP reconnect on large projects:** auto-index is now background by default with a readiness gate on every tool handler. Previously blocking-by-default auto-index could exceed the MCP client's handshake timeout on large repos, causing `Failed to reconnect to codescope` after install. Tools now return `{"status":"indexing","progress":"347/2100 files","elapsed_secs":12}` while the build is in flight instead of empty arrays. Opt into the old blocking behavior with `--auto-index-blocking` or `CODESCOPE_AUTO_INDEX_BLOCKING=1` for one-off CLI runs on small repos.
+- **Transactional phase0:** parse-before-wipe staging — a mid-parse failure no longer leaves the DB silently empty. If phase1 fails the state transitions to `Failed` with the real error (surfaced via `index_status`), not to `Idle` with zero records.
+- **Surfaced parse errors:** `IndexState` now collects read/parse errors into a capped `Vec<(PathBuf, String)>` (1000 entries) and exposes the count via `index_status`. Previous `.filter_map(.ok())` / `.unwrap_or_default()` calls silently swallowed every failure.
+- **File-based logging in stdio MCP mode:** tracing output writes to `$XDG_STATE_HOME/codescope/logs/mcp-{pid}-{ts}.log` on Linux/macOS, `%LOCALAPPDATA%\codescope\logs\...` on Windows. stdout stays JSON-RPC-clean. A one-line stderr notice records the log path so the host forwards it if possible.
+- **`index_status` MCP tool:** new tool returning `{state, files_total, files_indexed, files_skipped, errors_count, running_time_secs}`. Lets agents distinguish "indexing" from "no data" without guessing.
+
+### Added
+- **`codescope` agent + related skills:** new project-local agents (parser-specialist, graph-architect, release-captain, lsp-bridge-lead, mcp-tool-curator, knowledge-librarian, web-ui-designer, bench-champion, doctor-diagnostician, project-maintainer, context-optimizer) and skills (codescope, demo, lint-all, mcp-test, ship, status, tool-audit, cs-ask / cs-callers / cs-file / cs-impact / cs-search / cs-stats). Distributes ownership of the major subsystems to named agents so Ada doesn't become the bottleneck.
+- **`/mcp-test` skill:** end-to-end MCP server verification — spawn stdio server, list tools, invoke each one, verify response shape.
+
+### Internal
+- CI clippy clean against Rust 1.95 (new lints: `manual_checked_ops`, `unnecessary_sort_by`, `collapsible_match`, etc.). RocksDB engine was evaluated and measured 1.5× SLOWER than SurrealKv on our edge-heavy workload — keeping SurrealKv. Entity `INSERT INTO [...] ON DUPLICATE KEY UPDATE` was attempted but tripped the unique `fn_qname` index when same-name fns in different impl blocks collapsed to the same sanitize_id; reverted to UPSERT + BEGIN/COMMIT. Both dead-ends filed in the knowledge graph so the experiment isn't re-run.
+
 ## [0.7.7] - 2026-04-14
 
 OpenTelemetry observability and scalable 3D graph clustering for large repos.
