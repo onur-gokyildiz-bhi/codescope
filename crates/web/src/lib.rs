@@ -14,7 +14,16 @@ use codescope_core::daemon::DaemonState;
 use codescope_core::graph::query::GraphQuery;
 
 enum ProjectSource {
-    Single(surrealdb::Surreal<surrealdb::engine::local::Db>),
+    /// Backing DB for the CLI-provided path (primary repo). We also cache
+    /// lazily-opened DBs for other repos discovered under `~/.codescope/db/`
+    /// so `/api/projects` isn't a dead end in single mode.
+    Single {
+        primary_repo: String,
+        primary_db: surrealdb::Surreal<surrealdb::engine::local::Db>,
+        extra_dbs: tokio::sync::Mutex<
+            std::collections::HashMap<String, surrealdb::Surreal<surrealdb::engine::local::Db>>,
+        >,
+    },
     Multi(Arc<DaemonState>),
 }
 
@@ -25,7 +34,54 @@ pub struct AppState {
 impl AppState {
     async fn resolve_query(&self, repo: Option<&str>) -> Result<GraphQuery, (StatusCode, String)> {
         match &self.source {
-            ProjectSource::Single(db) => Ok(GraphQuery::new(db.clone())),
+            ProjectSource::Single {
+                primary_repo,
+                primary_db,
+                extra_dbs,
+            } => {
+                let requested = repo.filter(|r| !r.is_empty());
+                // Fast path: no repo param or same as primary.
+                if requested.is_none() || requested == Some(primary_repo.as_str()) {
+                    return Ok(GraphQuery::new(primary_db.clone()));
+                }
+                let name = requested.unwrap().to_string();
+                {
+                    let cache = extra_dbs.lock().await;
+                    if let Some(db) = cache.get(&name) {
+                        return Ok(GraphQuery::new(db.clone()));
+                    }
+                }
+                // Lazy-open a secondary DB from `~/.codescope/db/<name>/`.
+                let path = dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    .join(".codescope")
+                    .join("db")
+                    .join(&name);
+                if !path.is_dir() {
+                    return Err((
+                        StatusCode::NOT_FOUND,
+                        format!("Project DB '{}' not found at {}", name, path.display()),
+                    ));
+                }
+                let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
+                    path.to_string_lossy().as_ref(),
+                )
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to open DB '{}': {}", name, e),
+                    )
+                })?;
+                db.use_ns("codescope")
+                    .use_db(&name)
+                    .await
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                let _ = codescope_core::graph::schema::init_schema(&db).await;
+                let cloned = db.clone();
+                extra_dbs.lock().await.insert(name, cloned);
+                Ok(GraphQuery::new(db))
+            }
             ProjectSource::Multi(daemon) => {
                 let repo_name = match repo {
                     Some(r) if !r.is_empty() => r.to_string(),
@@ -46,6 +102,31 @@ impl AppState {
             }
         }
     }
+}
+
+/// Enumerate every project with a persisted DB under `~/.codescope/db/`.
+/// Used by `api_projects` in single mode so the frontend's project switcher
+/// works even when the user started `codescope web` with a single path.
+fn discover_local_projects() -> Vec<String> {
+    let db_root = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".codescope")
+        .join("db");
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&db_root) {
+        for e in entries.flatten() {
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(name) = e.file_name().to_str() {
+                    // Hidden helpers like `.tmp` or the archive sentinel are skipped.
+                    if !name.starts_with('.') {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 #[derive(Deserialize)]
@@ -75,7 +156,11 @@ fn build_routes() -> Router<Arc<AppState>> {
 /// Build the web API router from an existing DB connection (single-project mode).
 pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) -> Router {
     let state = Arc::new(AppState {
-        source: ProjectSource::Single(db),
+        source: ProjectSource::Single {
+            primary_repo: String::new(),
+            primary_db: db,
+            extra_dbs: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        },
     });
     build_routes().with_state(state)
 }
@@ -194,7 +279,11 @@ pub async fn run_web(
     }
 
     let state = Arc::new(AppState {
-        source: ProjectSource::Single(db),
+        source: ProjectSource::Single {
+            primary_repo: repo_name.clone(),
+            primary_db: db,
+            extra_dbs: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        },
     });
 
     let app = build_routes().with_state(state);
@@ -258,8 +347,22 @@ async fn api_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             let active = daemon.active_repos().await;
             Json(serde_json::json!({ "projects": discovered, "active": active })).into_response()
         }
-        ProjectSource::Single(_) => {
-            Json(serde_json::json!({ "projects": [], "active": [] })).into_response()
+        ProjectSource::Single { primary_repo, .. } => {
+            // Single mode can still browse every other indexed repo under
+            // `~/.codescope/db/`. Secondary DBs are opened lazily on first
+            // query (see resolve_query's extra_dbs cache).
+            let mut discovered = discover_local_projects();
+            // Ensure the primary repo is present even if the user's custom
+            // --db-path points outside `~/.codescope/db/`.
+            if !primary_repo.is_empty() && !discovered.iter().any(|p| p == primary_repo) {
+                discovered.insert(0, primary_repo.clone());
+            }
+            let active = if primary_repo.is_empty() {
+                Vec::<String>::new()
+            } else {
+                vec![primary_repo.clone()]
+            };
+            Json(serde_json::json!({ "projects": discovered, "active": active })).into_response()
         }
     }
 }

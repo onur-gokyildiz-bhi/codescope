@@ -14,9 +14,14 @@ export default function ProjectSwitcher() {
     try {
       const data = await api.projects();
       const projects: string[] = data.projects || [];
+      const active: string[] = data.active || [];
       setAvailableProjects(projects);
       if (!currentProject() && projects.length > 0) {
-        setCurrentProject(projects[0]);
+        // Prefer the currently-active repo (the one the server was launched
+        // with) over the first alphabetical project — otherwise the graph
+        // loads the wrong repo on first paint.
+        const preferred = active.find((r) => projects.includes(r)) ?? projects[0];
+        setCurrentProject(preferred);
       }
       setLoaded(true);
     } catch { /* intentionally ignored: not in daemon mode (stdio) — switcher stays hidden */ }
