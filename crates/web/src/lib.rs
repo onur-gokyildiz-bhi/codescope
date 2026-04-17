@@ -776,17 +776,29 @@ async fn api_graph(
                         for batch in arr {
                             for row in batch.as_array().unwrap_or(&vec![]) {
                                 let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                                let title = row.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("decision");
-                                if id.is_empty() { continue; }
-                                let tags_val = row.get("tags").and_then(|v| v.as_array()).map(|a| {
-                                    a.iter()
-                                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
-                                        .collect::<Vec<_>>()
-                                });
-                                let content_val = row.get("content").and_then(|v| v.as_str()).map(|s| {
-                                    if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() }
-                                });
+                                let title =
+                                    row.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                                let kind = row
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("decision");
+                                if id.is_empty() {
+                                    continue;
+                                }
+                                let tags_val =
+                                    row.get("tags").and_then(|v| v.as_array()).map(|a| {
+                                        a.iter()
+                                            .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                                            .collect::<Vec<_>>()
+                                    });
+                                let content_val =
+                                    row.get("content").and_then(|v| v.as_str()).map(|s| {
+                                        if s.len() > 200 {
+                                            format!("{}…", &s[..200])
+                                        } else {
+                                            s.to_string()
+                                        }
+                                    });
                                 nodes.push(GraphNode {
                                     id: id.to_string(),
                                     name: title.to_string(),
@@ -815,7 +827,10 @@ async fn api_graph(
                             for row in batch.as_array().unwrap_or(&vec![]) {
                                 let src = row.get("source").and_then(|v| v.as_str()).unwrap_or("");
                                 let tgt = row.get("target").and_then(|v| v.as_str()).unwrap_or("");
-                                let kind = row.get("kind").and_then(|v| v.as_str()).unwrap_or("links_to");
+                                let kind = row
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("links_to");
                                 if !src.is_empty() && !tgt.is_empty() {
                                     edges.push(GraphEdge {
                                         source: src.to_string(),
