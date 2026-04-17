@@ -711,13 +711,10 @@ async fn api_graph(
                                 .filter_map(|t| t.as_str().map(|s| s.to_string()))
                                 .collect::<Vec<_>>()
                         });
-                        let content_val = row.get("content").and_then(|v| v.as_str()).map(|s| {
-                            if s.len() > 200 {
-                                format!("{}…", &s[..200])
-                            } else {
-                                s.to_string()
-                            }
-                        });
+                        let content_val = row
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .map(|s| truncate_chars(s, 200));
                         let src_url = row
                             .get("source_url")
                             .and_then(|v| v.as_str())
@@ -791,14 +788,10 @@ async fn api_graph(
                                             .filter_map(|t| t.as_str().map(|s| s.to_string()))
                                             .collect::<Vec<_>>()
                                     });
-                                let content_val =
-                                    row.get("content").and_then(|v| v.as_str()).map(|s| {
-                                        if s.len() > 200 {
-                                            format!("{}…", &s[..200])
-                                        } else {
-                                            s.to_string()
-                                        }
-                                    });
+                                let content_val = row
+                                    .get("content")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| truncate_chars(s, 200));
                                 nodes.push(GraphNode {
                                     id: id.to_string(),
                                     name: title.to_string(),
@@ -842,6 +835,15 @@ async fn api_graph(
                         }
                     }
                 }
+
+                // 3d-force-graph chokes on orphan edges (source/target not
+                // present in nodes list). Happens when LIMIT on functions
+                // truncates the node set while call/contains edges still
+                // reference the full graph. Drop any edge whose endpoints
+                // aren't in the emitted node set.
+                let node_ids: std::collections::HashSet<String> =
+                    nodes.iter().map(|n| n.id.clone()).collect();
+                edges.retain(|e| node_ids.contains(&e.source) && node_ids.contains(&e.target));
 
                 let mut data = GraphData {
                     nodes,
@@ -1005,6 +1007,27 @@ async fn api_graph(
             links: edges,
         })
         .into_response()
+    }
+}
+
+/// Truncate a string to at most `max_chars` Unicode scalar values, appending
+/// an ellipsis when truncated. Byte-slicing multi-byte codepoints (e.g. Turkish
+/// 'ı', 'ş') caused panics in /api/graph on conversation bodies — this is the
+/// safe replacement.
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let mut count = 0usize;
+    let mut end = s.len();
+    for (i, _) in s.char_indices() {
+        if count == max_chars {
+            end = i;
+            break;
+        }
+        count += 1;
+    }
+    if end < s.len() {
+        format!("{}…", &s[..end])
+    } else {
+        s.to_string()
     }
 }
 

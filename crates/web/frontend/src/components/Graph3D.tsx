@@ -273,12 +273,8 @@ export default function Graph3D() {
         if (k === 'calls') return 0.8;
         return 0;
       })
-      .linkLineDash((l: any) => {
-        const k = l.kind;
-        if (k === 'supports' || k === 'contradicts' || k === 'related_to') return [4, 2];
-        if (k === 'decided_about' || k === 'solves_for' || k === 'co_discusses') return [4, 2];
-        return null;
-      })
+      // NOTE: 3d-force-graph 1.80 has no .linkLineDash — removed. Knowledge
+      // vs code edges stay distinguishable via linkColor + linkWidth alone.
       .linkDirectionalParticles((l: any) => {
         if (l.kind === 'calls') return 2;
         if (l.kind === 'supports') return 1;

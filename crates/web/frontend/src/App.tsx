@@ -15,6 +15,7 @@ import Graph3D from './components/Graph3D';
 import CirclePack from './components/CirclePack';
 import HotspotChart from './components/HotspotChart';
 import ClusterView from './components/ClusterView';
+import ArchiveView from './components/ArchiveView';
 import CommandPalette from './components/CommandPalette';
 import FileTree from './components/FileTree';
 import SourceViewer from './components/SourceViewer';
@@ -38,6 +39,7 @@ export default function App() {
     registerShortcut('2', () => setViewMode('pack'));
     registerShortcut('3', () => setViewMode('hotspot'));
     registerShortcut('4', () => setViewMode('cluster'));
+    registerShortcut('5', () => setViewMode('archive'));
     registerShortcut('escape', () => {
       setShowPalette(false);
       setShowShortcuts(false);
@@ -83,6 +85,9 @@ export default function App() {
         </Show>
         <Show when={viewMode() === 'cluster'}>
           <ClusterView />
+        </Show>
+        <Show when={viewMode() === 'archive'}>
+          <ArchiveView />
         </Show>
 
         <Show when={viewMode() === 'graph'}>
