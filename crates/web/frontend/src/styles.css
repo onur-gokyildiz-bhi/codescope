@@ -858,24 +858,158 @@ body::before {
 }
 .collapsible-header:hover { background: var(--surface-hover); }
 
+/* ─── Header search button (replaces the read-only input) ────────── */
+.header-search-btn {
+  flex: 1;
+  max-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-family: var(--font-body);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition);
+  text-align: left;
+}
+.header-search-btn:hover { border-color: rgba(255,255,255,0.15); color: var(--text); }
+.header-search-btn:focus { border-color: var(--accent); }
+.header-search-placeholder { flex: 1; color: var(--text-dim); }
+
+/* View button label */
+.view-btn { display: flex; align-items: center; gap: 5px; }
+.view-btn-label { font-size: var(--font-xs); }
+
+/* Header button label */
+.header-btn { display: flex; align-items: center; gap: 5px; }
+.header-btn-label { font-size: var(--font-xs); }
+
+/* Settings button */
+.settings-btn { display: flex; align-items: center; justify-content: center; }
+
+/* Mobile menu button — hidden on desktop */
+.mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.mobile-menu-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.18); }
+
+/* Stat pills as buttons */
+.stat-pill { cursor: pointer; }
+.stat-pill:hover { border-color: rgba(255,255,255,0.2); color: var(--text); background: var(--surface-hover); }
+
+/* ─── Kobalte Tab Indicator ───────────────────────────────────────── */
+.inspector-tabs-root { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.inspector-tab-indicator {
+  position: absolute;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: transform var(--transition), width var(--transition);
+}
+.conv-tab-indicator {
+  position: absolute;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: transform var(--transition), width var(--transition);
+}
+/* Kobalte sets data-selected on active trigger */
+.inspector-tab[data-selected] { color: var(--accent); border-bottom-color: var(--accent); }
+.conv-tab[data-selected] { color: var(--accent); border-bottom-color: var(--accent); }
+/* Kobalte tab list needs position:relative for indicator */
+.inspector-tabs { position: relative; }
+.conv-tabs { position: relative; }
+
+/* Inspector tab bar: horizontal scroll + snap + fade edges */
+.inspector-tabs {
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.inspector-tabs::-webkit-scrollbar { display: none; }
+.inspector-tab { scroll-snap-align: start; }
+
 /* ─── Responsive ─────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .header { flex-wrap: wrap; gap: var(--space-2); }
-  .header-search { max-width: 100%; order: 10; flex-basis: 100%; }
-  .float-panel.left, .float-panel.right {
+@media (max-width: 900px) {
+  /* Compress stats — hide on mobile */
+  .stats-badge { display: none; }
+
+  /* Mobile menu button visible */
+  .mobile-menu-btn { display: flex; }
+
+  /* Header view labels hidden — icon only */
+  .view-btn-label { display: none; }
+  .header-btn-label { display: none; }
+
+  /* File panel becomes a drawer from the left */
+  .float-panel.left {
+    position: fixed;
+    top: 48px; bottom: 0;
+    left: 0; width: 280px;
+    max-height: none;
+    border-radius: 0;
+    transform: translateX(0);
+    z-index: 110;
+    animation: slideInLeft 0.25s cubic-bezier(0.16,1,0.3,1);
+  }
+
+  /* Right panel / NodeInspector becomes a bottom sheet */
+  .right-panel {
+    position: fixed;
+    top: auto; bottom: 0;
+    left: 0; right: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    animation: slideInBottom 0.25s cubic-bezier(0.16,1,0.3,1);
+  }
+  /* Drag handle hint */
+  .right-panel::before {
+    content: '';
+    display: block;
+    width: 36px; height: 4px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+    margin: 8px auto 0;
+    flex-shrink: 0;
+  }
+
+  .float-panel.right {
     position: fixed; top: auto; bottom: 0;
     left: 0; right: 0; width: 100%;
     max-height: 50vh;
     border-radius: var(--radius) var(--radius) 0 0;
-    animation: none;
-  }
-  .right-panel {
-    position: fixed; top: auto; bottom: 0;
-    left: 0; right: 0; width: 100%;
-    max-height: 60vh;
-    border-radius: var(--radius) var(--radius) 0 0;
-    animation: none;
+    animation: slideInBottom 0.25s cubic-bezier(0.16,1,0.3,1);
   }
   .source-container { width: 100vw; margin: 0; height: 100vh; }
   .source-symbols { display: none; }
+}
+
+@media (max-width: 768px) {
+  .header-search-btn { display: none; }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideInBottom {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }

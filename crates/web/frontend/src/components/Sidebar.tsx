@@ -1,6 +1,7 @@
 import { createSignal, createEffect, Show, For } from 'solid-js';
 import { selectedNode, setSelectedNode, setCenterNode, setShowSidebar, setErrorMsg } from '../store';
 import { api } from '../api';
+import { X } from 'lucide-solid';
 
 function isKnowledge(kind: string): boolean {
   return kind?.startsWith('knowledge:') ?? false;
@@ -42,7 +43,7 @@ export default function Sidebar() {
     <>
       <div class="panel-header">
         <span>{selectedNode()?.name ?? 'Details'}</span>
-        <button class="panel-close" onClick={close}>&times;</button>
+        <button class="panel-close" onClick={close} aria-label="Close"><X size={14} stroke-width={1.75} /></button>
       </div>
       <div class="panel-body">
         <Show when={selectedNode()}>

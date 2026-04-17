@@ -125,7 +125,7 @@ export default function CommandPalette() {
                 onClick={() => activate(item)}
                 onMouseEnter={() => setSelected(i())}
               >
-                <span>{item.name}</span>
+                <span style={{ 'font-family': 'var(--font-mono)', 'font-size': 'var(--font-sm)' }}>{item.name}</span>
                 <span class="palette-item-meta">
                   <Show when={item.confidence}>
                     <span class={`confidence-dot confidence-${item.confidence}`} />

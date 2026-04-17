@@ -31,6 +31,9 @@ export const [centerGravity, setCenterGravity] = createSignal(0.1);
 // Stats
 export const [stats, setStats] = createSignal<any>(null);
 
+// Filter
+export const [kindFilter, setKindFilter] = createSignal<string | null>(null);
+
 // Loading & errors
 export const [loading, setLoading] = createSignal(false);
 export const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
