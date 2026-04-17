@@ -46,7 +46,13 @@ impl GraphBuilder {
         let mut total = 0;
 
         for chunk in entities.chunks(BATCH_SIZE) {
-            let mut query = String::with_capacity(chunk.len() * 512);
+            // Wrap the batch in an explicit transaction. SurrealDB's default
+            // is per-statement transactions, so without BEGIN/COMMIT each of
+            // the N UPSERTs pays its own commit cost. This is the same
+            // pattern that gave us ~3× on the relations path (see
+            // `insert_relations`).
+            let mut query = String::with_capacity(chunk.len() * 512 + 64);
+            query.push_str("BEGIN TRANSACTION;\n");
 
             for entity in chunk {
                 let table = escape_table(entity.kind.table_name());
@@ -54,6 +60,8 @@ impl GraphBuilder {
                 let set_clause = build_entity_set(entity);
                 query.push_str(&format!("UPSERT {}:{} {};\n", table, id, set_clause));
             }
+
+            query.push_str("COMMIT TRANSACTION;");
 
             match self.timed_query(&query).await {
                 Ok(_response) => {
