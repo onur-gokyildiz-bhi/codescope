@@ -84,103 +84,101 @@ impl GraphBuilder {
         Ok(total)
     }
 
-    /// Insert relations in batches using multi-statement RELATE.
+    /// Insert relations via `INSERT RELATION INTO edge [array]` — the
+    /// SurrealDB-documented bulk path for edge insertion.
     ///
-    /// Groups up to BATCH_SIZE relations per DB round-trip.
-    /// Falls back to individual inserts on batch failure.
+    /// Previously we emitted one RELATE statement per edge (batched in
+    /// multi-statement strings of 50). Each statement ran as its own
+    /// transaction and the edge-table index was updated per-edge. Issue
+    /// #1601 on the SurrealDB repo documents this as a known pain point
+    /// at scale.
+    ///
+    /// New approach: group by edge table, emit one INSERT RELATION per
+    /// chunk with an array literal, wrap in BEGIN/COMMIT. Falls back to
+    /// per-statement RELATE on batch failure.
     pub async fn insert_relations(&self, relations: &[CodeRelation]) -> Result<usize> {
+        use std::collections::HashMap;
+
         if relations.is_empty() {
             return Ok(0);
         }
 
+        // Group by edge table — INSERT RELATION targets a single table per statement.
+        let mut by_edge: HashMap<&str, Vec<&CodeRelation>> = HashMap::new();
+        for rel in relations {
+            by_edge.entry(rel.kind.table_name()).or_default().push(rel);
+        }
+
         let mut total = 0;
 
-        for chunk in relations.chunks(BATCH_SIZE) {
-            let mut query = String::with_capacity(chunk.len() * 256);
+        for (edge_name, edge_rels) in by_edge {
+            let edge = escape_table(edge_name);
 
-            for rel in chunk {
-                let from_table = escape_table(&rel.from_table);
-                let from_id = sanitize_id(&rel.from_entity);
-                let edge = escape_table(rel.kind.table_name());
-                let to_table = escape_table(&rel.to_table);
-                let to_id = sanitize_id(&rel.to_entity);
+            for chunk in edge_rels.chunks(BATCH_SIZE) {
+                let mut objects = Vec::with_capacity(chunk.len());
+                for rel in chunk {
+                    let from_table = escape_table(&rel.from_table);
+                    let from_id = sanitize_id(&rel.from_entity);
+                    let to_table = escape_table(&rel.to_table);
+                    let to_id = sanitize_id(&rel.to_entity);
 
-                let meta_set = rel
-                    .metadata
-                    .as_ref()
-                    .map(build_meta_set)
-                    .unwrap_or_default();
+                    let meta_fields = rel
+                        .metadata
+                        .as_ref()
+                        .map(build_meta_object_fields)
+                        .unwrap_or_default();
 
-                query.push_str(&format!(
-                    "RELATE {}:{}->{}->{}:{}{};\n",
-                    from_table, from_id, edge, to_table, to_id, meta_set
-                ));
-            }
-
-            let has_calls = chunk.iter().any(|r| r.kind == crate::RelationKind::Calls);
-            match self.timed_query(&query).await {
-                Ok(mut response) => {
-                    // Check each statement result for errors
-                    let mut batch_ok = true;
-                    for (i, rel) in chunk.iter().enumerate() {
-                        let r: Result<Option<serde_json::Value>, _> = response.take(i);
-                        if let Err(e) = r {
-                            if has_calls && batch_ok {
-                                warn!("Statement {} in batch failed: {}", i, e);
-                                warn!(
-                                    "  Relation: {:?} {} -> {}",
-                                    rel.kind, rel.from_entity, rel.to_entity
-                                );
-                                warn!("  Query sample: {}", &query[..query.len().min(500)]);
-                            }
-                            batch_ok = false;
-                        }
-                    }
-                    total += chunk.len();
-                    if has_calls {
-                        let call_count = chunk
-                            .iter()
-                            .filter(|r| r.kind == crate::RelationKind::Calls)
-                            .count();
-                        debug!("Batch with {} calls, ok={}", call_count, batch_ok);
-                    }
+                    // `{ in: from:id, out: to:id, meta_k: meta_v, ... }`
+                    objects.push(format!(
+                        "{{ in: {}:{}, out: {}:{}{} }}",
+                        from_table, from_id, to_table, to_id, meta_fields
+                    ));
                 }
-                Err(e) => {
-                    if has_calls {
-                        warn!("Batch with calls FAILED: {}", e);
-                        // Log the first calls relation for debugging
-                        if let Some(call) =
-                            chunk.iter().find(|r| r.kind == crate::RelationKind::Calls)
-                        {
-                            warn!("  Sample call: {} -> {}", call.from_entity, call.to_entity);
-                        }
-                    }
-                    debug!("Batch relate failed ({}), falling back to individual", e);
-                    for rel in chunk {
-                        let from_table = escape_table(&rel.from_table);
-                        let from_id = sanitize_id(&rel.from_entity);
-                        let edge = escape_table(rel.kind.table_name());
-                        let to_table = escape_table(&rel.to_table);
-                        let to_id = sanitize_id(&rel.to_entity);
-                        let meta_set = rel
-                            .metadata
-                            .as_ref()
-                            .map(build_meta_set)
-                            .unwrap_or_default();
-                        let q = format!(
-                            "RELATE {}:{}->{}->{}:{}{};",
-                            from_table, from_id, edge, to_table, to_id, meta_set
+
+                // Single-statement bulk edge insert wrapped in an explicit
+                // transaction — without BEGIN/COMMIT each statement in a
+                // multi-statement query runs in its own transaction, per
+                // SurrealDB docs on transactions.
+                let query = format!(
+                    "BEGIN TRANSACTION;\nINSERT RELATION INTO {} [{}];\nCOMMIT TRANSACTION;",
+                    edge,
+                    objects.join(",\n")
+                );
+
+                match self.timed_query(&query).await {
+                    Ok(_) => total += chunk.len(),
+                    Err(e) => {
+                        debug!(
+                            "Bulk INSERT RELATION failed on {} ({}), falling back to per-edge RELATE",
+                            edge_name, e
                         );
-                        match self.db.query(&q).await {
-                            Ok(_) => total += 1,
-                            Err(e2) => {
-                                warn!(
-                                    "Relation failed {} -[{}]-> {}: {}",
-                                    rel.from_entity,
-                                    rel.kind.table_name(),
-                                    rel.to_entity,
-                                    e2
-                                );
+                        // Fallback: original RELATE statements, one-by-one.
+                        for rel in chunk {
+                            let from_table = escape_table(&rel.from_table);
+                            let from_id = sanitize_id(&rel.from_entity);
+                            let edge_inner = escape_table(rel.kind.table_name());
+                            let to_table = escape_table(&rel.to_table);
+                            let to_id = sanitize_id(&rel.to_entity);
+                            let meta_set = rel
+                                .metadata
+                                .as_ref()
+                                .map(build_meta_set)
+                                .unwrap_or_default();
+                            let q = format!(
+                                "RELATE {}:{}->{}->{}:{}{};",
+                                from_table, from_id, edge_inner, to_table, to_id, meta_set
+                            );
+                            match self.db.query(&q).await {
+                                Ok(_) => total += 1,
+                                Err(e2) => {
+                                    warn!(
+                                        "Relation fallback failed {} -[{}]-> {}: {}",
+                                        rel.from_entity,
+                                        rel.kind.table_name(),
+                                        rel.to_entity,
+                                        e2
+                                    );
+                                }
                             }
                         }
                     }
@@ -643,6 +641,22 @@ fn build_meta_set(meta: &serde_json::Value) -> String {
         } else {
             format!(" SET {}", parts.join(", "))
         }
+    } else {
+        String::new()
+    }
+}
+
+/// Build the leading comma-prefixed `, key: value, key: value` suffix for an
+/// inline object literal (used inside `INSERT RELATION INTO edge [{ ... }]`).
+/// Returns empty string when metadata is missing or empty. Leading comma keeps
+/// concatenation with the fixed `in`/`out` prefix clean at the call site.
+fn build_meta_object_fields(meta: &serde_json::Value) -> String {
+    if let Some(obj) = meta.as_object() {
+        if obj.is_empty() {
+            return String::new();
+        }
+        let parts: Vec<String> = obj.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+        format!(", {}", parts.join(", "))
     } else {
         String::new()
     }
