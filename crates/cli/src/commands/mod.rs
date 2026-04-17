@@ -6,6 +6,7 @@ pub mod embed;
 pub mod history;
 pub mod hotspots;
 pub mod index;
+pub mod ingest_conversations;
 pub mod init;
 pub mod install;
 pub mod languages;

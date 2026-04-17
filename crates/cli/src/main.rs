@@ -160,6 +160,14 @@ async fn main() -> Result<()> {
             let repo_name = repo.unwrap_or_else(|| global_repo.clone());
             commands::migrate::run(&repo_name, cli.db_path).await?;
         }
+        Commands::IngestConversations {
+            dir,
+            scope,
+            repo,
+            full,
+        } => {
+            commands::ingest_conversations::run(dir, scope, repo, full).await?;
+        }
     }
 
     Ok(())

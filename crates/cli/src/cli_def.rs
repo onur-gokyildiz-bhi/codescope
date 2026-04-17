@@ -182,6 +182,26 @@ pub enum Commands {
         /// Override the repo name (defaults to current directory / --repo flag)
         repo: Option<String>,
     },
+
+    /// Bulk-ingest Claude Code conversation transcripts (.jsonl) into the
+    /// knowledge graph. Walks a directory tree for *.jsonl, parses each via
+    /// the conversation classifier (decisions, problems, solutions, topics),
+    /// and inserts into the global DB (default) or a specific project DB.
+    /// Incremental by default — skips files already indexed (hash match).
+    IngestConversations {
+        /// Directory to scan recursively. Default: ~/.claude/projects
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// DB target: "global" (cross-project) or "project" (needs --repo).
+        #[arg(long, default_value = "global")]
+        scope: String,
+        /// Project repo name (required when scope=project).
+        #[arg(long)]
+        repo: Option<String>,
+        /// Re-parse every file regardless of prior hash match.
+        #[arg(long)]
+        full: bool,
+    },
 }
 
 #[derive(Subcommand)]
