@@ -1102,15 +1102,13 @@ async fn api_conversations(
         Err(e) => return (e.0, e.1).into_response(),
     };
     let query = "\
-        SELECT name, body, kind, timestamp, file_path FROM decision ORDER BY timestamp DESC LIMIT 50; \
-        SELECT name, body, kind, timestamp, file_path FROM problem ORDER BY timestamp DESC LIMIT 50; \
-        SELECT name, body, kind, timestamp, file_path FROM solution ORDER BY timestamp DESC LIMIT 50; \
-        SELECT name, body, kind, timestamp FROM conv_topic ORDER BY timestamp DESC LIMIT 30; \
-        SELECT name, qualified_name, file_path, body FROM conversation ORDER BY name LIMIT 20; \
-        SELECT out.name AS entity, in.name AS segment, 'decided_about' AS rel \
-            FROM decided_about LIMIT 50; \
-        SELECT out.name AS entity, in.name AS segment, 'discussed_in' AS rel \
-            FROM discussed_in LIMIT 50;";
+        SELECT id, name, body, kind, timestamp, file_path FROM decision ORDER BY timestamp DESC LIMIT 80; \
+        SELECT id, name, body, kind, timestamp, file_path FROM problem ORDER BY timestamp DESC LIMIT 80; \
+        SELECT id, name, body, kind, timestamp, file_path FROM solution ORDER BY timestamp DESC LIMIT 80; \
+        SELECT id, name, body, kind, timestamp FROM conv_topic ORDER BY timestamp DESC LIMIT 50; \
+        SELECT id, name, qualified_name, file_path, body FROM conversation ORDER BY name LIMIT 30; \
+        SELECT id, title AS name, content AS body, kind, confidence, tags, source_url \
+            FROM knowledge LIMIT 80;";
 
     match gq.raw_query(query).await {
         Ok(result) => {
@@ -1122,8 +1120,7 @@ async fn api_conversations(
                 "solutions",
                 "topics",
                 "sessions",
-                "code_decisions",
-                "code_discussions",
+                "knowledge",
             ];
             if let Some(arr) = items {
                 for (i, key) in keys.iter().enumerate() {

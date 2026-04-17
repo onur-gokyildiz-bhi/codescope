@@ -1297,6 +1297,219 @@ body::before {
   margin: 18px 0;
 }
 
+/* --- Tag chips (sidebar + detail + filter bar) --- */
+.archive-tags-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px 8px;
+}
+.archive-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  color: var(--text-dim, #64748b);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+.archive-tag-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-0, #e5e7eb);
+}
+.archive-tag-chip.active {
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: var(--accent-teal, #00e5ff);
+}
+.archive-tag-count {
+  font-size: 10px;
+  color: var(--text-dim, #64748b);
+  margin-left: 2px;
+}
+
+/* --- Active filter pills row --- */
+.archive-active-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-dim, #1e293b);
+  background: rgba(0, 229, 255, 0.03);
+  flex-wrap: wrap;
+}
+.archive-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--accent-teal, #00e5ff);
+}
+.archive-filter-chip button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 2px;
+}
+
+/* --- Sort button + inline action + search clear --- */
+.archive-sort-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim, #64748b);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.archive-sort-btn:hover {
+  color: var(--text-0, #e5e7eb);
+  background: rgba(255, 255, 255, 0.04);
+}
+.archive-inline-action {
+  background: transparent;
+  border: none;
+  color: var(--accent-teal, #00e5ff);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+.archive-search-clear {
+  /* override previous '×' version — now accepts text label "clear N" */
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+  color: var(--text-dim, #64748b);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.archive-search-clear:hover {
+  color: var(--text-0, #e5e7eb);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* --- Item tags strip (in list) --- */
+.archive-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.archive-item-tag {
+  font-size: 10px;
+  color: var(--accent-violet, #a371f7);
+  background: rgba(163, 113, 247, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+}
+.archive-item-conf {
+  color: var(--accent-lime, #7cff5c);
+}
+
+/* --- Detail header: tags + actions row + clickable source --- */
+.archive-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+.archive-detail-conf {
+  color: var(--accent-lime, #7cff5c);
+  margin-left: 6px;
+  font-weight: 400;
+}
+.archive-detail-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.archive-source-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent-teal, #00e5ff);
+  cursor: pointer;
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  padding: 0;
+  border-bottom: 1px dotted rgba(0, 229, 255, 0.4);
+}
+.archive-source-btn:hover {
+  border-bottom-color: currentColor;
+}
+
+/* --- Related entries section --- */
+.archive-related {
+  margin-top: 32px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-dim, #1e293b);
+}
+.archive-related-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim, #64748b);
+  margin: 0 0 10px 0;
+}
+.archive-related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.archive-related-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-0, #e5e7eb);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+.archive-related-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.archive-related-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.archive-related-time {
+  color: var(--text-dim, #64748b);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
 /* Responsive: collapse to single column on narrow viewports */
 @media (max-width: 960px) {
   .archive-view {
@@ -1312,7 +1525,9 @@ body::before {
     border-right: none;
     border-bottom: 1px solid var(--border-dim, #1e293b);
   }
-  .archive-sidebar-header { display: none; }
+  .archive-sidebar-header,
+  .archive-tags-chips { display: none; }
   .archive-cat { width: auto; flex-shrink: 0; }
   .archive-list { border-right: none; border-bottom: 1px solid var(--border-dim, #1e293b); max-height: 40vh; }
+  .archive-detail-actions { flex-wrap: wrap; }
 }
