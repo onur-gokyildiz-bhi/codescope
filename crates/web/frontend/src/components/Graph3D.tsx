@@ -7,15 +7,64 @@ import {
   projectVersion, loading, setLoading, setErrorMsg,
 } from '../store';
 import { api } from '../api';
-import { kindColor, moduleColor, edgeColor, DIM_COLOR, DIM_EDGE, HIGHLIGHT_EDGE } from '../utils/colors';
+import { moduleColor, DIM_COLOR, DIM_EDGE, HIGHLIGHT_EDGE } from '../utils/colors';
 
 const MAX_VISIBLE_NODES = 500;
 
+// ─── Cyberpunk color palette ──────────────────────────────────────
+const KIND_COLORS: Record<string, string> = {
+  function:  '#00e5ff',   // neon cyan
+  method:    '#00e5ff',
+  class:     '#ff3df5',   // magenta
+  struct:    '#ff3df5',
+  interface: '#ff88fb',
+  file:      '#7cff5c',   // lime green
+  module:    '#a371f7',   // violet
+  cluster:   '#a371f7',
+  enum:      '#ffb347',   // amber
+  trait:     '#ffb347',
+  type:      '#ffd080',
+  macro:     '#00e5ff',
+  constant:  '#7cff5c',
+  variable:  '#64748b',
+};
+
+const KNOWLEDGE_COLORS: Record<string, string> = {
+  concept:    '#ffb347',
+  entity:     '#a371f7',
+  source:     '#00e5ff',
+  claim:      '#ffd080',
+  decision:   '#ff3df5',
+  pattern:    '#7cff5c',
+  problem:    '#ff6b6b',
+  correction: '#00e5ff',
+  default:    '#a371f7',
+};
+
 function isKnowledge(kind: string): boolean {
-  return kind.startsWith('knowledge:');
+  return kind?.startsWith('knowledge:');
 }
 
-// Rank nodes for LOD: clusters first, then by caller_count (if present), then by kind priority.
+function kindColor(n: any): string {
+  if (isKnowledge(n.kind || '')) {
+    const sub = (n.kind || '').split(':')[1] || 'default';
+    return KNOWLEDGE_COLORS[sub] || KNOWLEDGE_COLORS.default;
+  }
+  return KIND_COLORS[n.kind] || '#64748b';
+}
+
+function edgeColor(l: any): string {
+  const k = l.kind;
+  if (k === 'calls')       return 'rgba(0,229,255,0.6)';
+  if (k === 'supports')    return 'rgba(124,255,92,0.7)';
+  if (k === 'contradicts') return 'rgba(255,61,245,0.7)';
+  if (k === 'related_to')  return 'rgba(163,113,247,0.6)';
+  if (k === 'imports')     return 'rgba(255,179,71,0.5)';
+  if (k === 'contains')    return 'rgba(100,116,139,0.4)';
+  return 'rgba(100,116,139,0.3)';
+}
+
+// ─── LOD ─────────────────────────────────────────────────────────
 function importanceScore(n: any): number {
   if (n.kind === 'cluster') return 1e9;
   const callers = typeof n.caller_count === 'number' ? n.caller_count : 0;
@@ -31,9 +80,8 @@ function applyLOD(data: { nodes: any[]; links: any[] }): { nodes: any[]; links: 
   const nodes = data.nodes || [];
   const links = data.links || [];
   const total = nodes.length;
-  if (total <= MAX_VISIBLE_NODES) {
-    return { nodes, links, total };
-  }
+  if (total <= MAX_VISIBLE_NODES) return { nodes, links, total };
+
   const sorted = [...nodes].sort((a, b) => importanceScore(b) - importanceScore(a));
   const kept = sorted.slice(0, MAX_VISIBLE_NODES);
   const keepIds = new Set(kept.map(n => n.id));
@@ -51,17 +99,17 @@ export default function Graph3D() {
   const [totalNodes, setTotalNodes] = createSignal(0);
 
   onMount(async () => {
-    // Load ForceGraph3D + three together so THREE is guaranteed before any node render.
     const [ForceGraph3D, THREE] = await Promise.all([
       import('3d-force-graph').then(m => m.default),
       import('three'),
     ]);
+
     graph = ForceGraph3D()(container)
-      .backgroundColor('#0d1117')
+      .backgroundColor('#07080c')
       .nodeVal((n: any) => {
-        if (n.kind === 'cluster') return 12;
-        if (isKnowledge(n.kind)) return 4;
-        const s = n.kind === 'file' ? 2 : n.kind === 'class' ? 1.5 : 1;
+        if (n.kind === 'cluster') return 14;
+        if (isKnowledge(n.kind || '')) return 4;
+        const s = n.kind === 'file' ? 2.2 : n.kind === 'class' ? 1.8 : 1;
         return s * s;
       })
       .nodeColor((n: any) => {
@@ -70,30 +118,64 @@ export default function Graph3D() {
           const connected = getConnected(hov);
           return connected.has(n.id) ? getNodeColor(n) : DIM_COLOR;
         }
+        const sel = selectedNode();
+        if (sel && n.id === sel.id) return '#ffffff';
         return getNodeColor(n);
       })
       .nodeLabel((n: any) => {
-        if (isKnowledge(n.kind)) {
+        if (isKnowledge(n.kind || '')) {
           const sub = n.kind.split(':')[1] || 'knowledge';
-          return `${sub}: ${n.name}${n.confidence ? ` (${n.confidence})` : ''}`;
+          return `<span style="font-family:Inter,sans-serif;font-size:12px">${sub}: <b>${n.name}</b>${n.confidence ? ` (${n.confidence})` : ''}</span>`;
         }
-        return `${n.kind}: ${n.name}`;
+        return `<span style="font-family:Inter,sans-serif;font-size:12px">${n.kind}: <b>${n.name}</b></span>`;
       })
       .nodeThreeObject((n: any) => {
-        if (!isKnowledge(n.kind)) return undefined;
         try {
-          const geo = new THREE.OctahedronGeometry(4);
-          const mat = new THREE.MeshLambertMaterial({
-            color: getNodeColor(n),
-            transparent: true,
-            opacity: 0.85,
-          });
-          return new THREE.Mesh(geo, mat);
+          // Knowledge nodes: octahedron
+          if (isKnowledge(n.kind || '')) {
+            const geo = new THREE.OctahedronGeometry(4);
+            const mat = new THREE.MeshLambertMaterial({
+              color: getNodeColor(n),
+              transparent: true,
+              opacity: 0.9,
+            });
+            return new THREE.Mesh(geo, mat);
+          }
+          // Cluster nodes: larger icosahedron in violet
+          if (n.kind === 'cluster') {
+            const geo = new THREE.IcosahedronGeometry(8, 0);
+            const mat = new THREE.MeshLambertMaterial({
+              color: '#a371f7',
+              transparent: true,
+              opacity: 0.85,
+            });
+            return new THREE.Mesh(geo, mat);
+          }
+          // Selected node: glow ring
+          if (selectedNode()?.id === n.id) {
+            const group = new THREE.Group();
+            const baseSz = n.kind === 'file' ? 3 : n.kind === 'class' ? 2.5 : 2;
+            const geo = new THREE.SphereGeometry(baseSz, 12, 8);
+            const mat = new THREE.MeshLambertMaterial({ color: getNodeColor(n) });
+            group.add(new THREE.Mesh(geo, mat));
+            // outer glow ring
+            const ringGeo = new THREE.RingGeometry(baseSz + 1.5, baseSz + 2.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+              color: getNodeColor(n),
+              transparent: true,
+              opacity: 0.6,
+              side: THREE.DoubleSide,
+            });
+            group.add(new THREE.Mesh(ringGeo, ringMat));
+            return group;
+          }
+          return undefined; // default sphere
         } catch (e) {
           setErrorMsg(String(e));
           return undefined;
         }
       })
+      .nodeThreeObjectExtend(false)
       .linkColor((l: any) => {
         const hov = hoveredNode();
         if (hov) {
@@ -104,10 +186,11 @@ export default function Graph3D() {
         }
         return edgeColor(l);
       })
-      .linkOpacity(0.4)
+      .linkOpacity(0.5)
       .linkWidth((l: any) => {
         const k = l.kind;
         if (k === 'supports' || k === 'contradicts' || k === 'related_to') return 1.5;
+        if (k === 'calls') return 0.8;
         return 0;
       })
       .linkLineDash((l: any) => {
@@ -122,11 +205,12 @@ export default function Graph3D() {
         return 0;
       })
       .linkDirectionalParticleSpeed(0.005)
+      .linkDirectionalParticleWidth(1.5)
       .linkDirectionalParticleColor((l: any) => edgeColor(l))
       .onNodeHover((node: any) => setHoveredNode(node))
       .onNodeClick((node: any) => {
         setSelectedNode(node);
-        if (!isKnowledge(node.kind)) {
+        if (!isKnowledge(node.kind || '')) {
           setCenterNode(node.name);
         }
       })
@@ -137,9 +221,36 @@ export default function Graph3D() {
       .d3VelocityDecay(0.3)
       .warmupTicks(80)
       .cooldownTicks(120);
+
+    // Post-processing: bloom via postprocessing library
+    try {
+      const { EffectComposer, RenderPass, EffectPass, BloomEffect, KernelSize } = await import('postprocessing');
+
+      const renderer = graph.renderer();
+      const scene = graph.scene();
+      const camera = graph.camera();
+
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+
+      const bloomEffect = new BloomEffect({
+        intensity: 1.0,
+        luminanceThreshold: 0.6,
+        luminanceSmoothing: 0.3,
+        kernelSize: KernelSize.MEDIUM,
+      });
+      composer.addPass(new EffectPass(camera, bloomEffect));
+
+      // Override render loop
+      graph.onEngineTick(() => {
+        composer.render();
+        return false;
+      });
+    } catch {
+      // bloom unavailable — graph still works without it
+    }
   });
 
-  // Load graph data on mount and on project switch
   createEffect(async () => {
     projectVersion();
     const center = centerNode();
@@ -224,7 +335,7 @@ export default function Graph3D() {
       </Show>
       <Show when={totalNodes() > MAX_VISIBLE_NODES}>
         <div class="lod-indicator">
-          Showing {MAX_VISIBLE_NODES} of {totalNodes()} nodes. Use cluster mode or search to see more.
+          Showing {MAX_VISIBLE_NODES} of {totalNodes()} nodes — use cluster mode or search to navigate
         </div>
       </Show>
     </div>
