@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use serde::Deserialize;
-use surrealdb::engine::local::Db;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
+
+use crate::DbHandle;
 
 /// Configurable query timeout. Set `CODESCOPE_QUERY_TIMEOUT_SECS` to override.
 /// Default: 60 seconds (up from the old hardcoded 30s).
@@ -42,7 +42,7 @@ fn timeout_err(hint: &str, timeout: Duration) -> anyhow::Error {
 
 /// High-level graph query interface
 pub struct GraphQuery {
-    db: Surreal<Db>,
+    db: DbHandle,
 }
 
 #[derive(Debug, serde::Serialize, Deserialize, SurrealValue)]
@@ -59,7 +59,7 @@ pub struct SearchResult {
 }
 
 impl GraphQuery {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: DbHandle) -> Self {
         Self { db }
     }
 
