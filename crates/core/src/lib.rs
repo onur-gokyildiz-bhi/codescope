@@ -8,10 +8,13 @@
 pub mod conversation;
 pub mod crossrepo;
 pub mod daemon;
+pub mod db;
 pub mod embeddings;
 pub mod graph;
 pub mod parser;
 pub mod temporal;
+
+pub use db::{connect_admin, connect_path, connect_repo, DbHandle};
 
 use serde::{Deserialize, Serialize};
 

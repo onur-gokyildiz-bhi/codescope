@@ -15,7 +15,7 @@ categories = ["development-tools", "command-line-utilities"]
 
 [workspace.dependencies]
 # Database
-surrealdb = { version = "3.0", default-features = false, features = ["kv-surrealkv"] }
+surrealdb = { version = "3.0", default-features = false, features = ["kv-surrealkv", "protocol-ws"] }
 
 # Parsing
 tree-sitter = "0.25"
