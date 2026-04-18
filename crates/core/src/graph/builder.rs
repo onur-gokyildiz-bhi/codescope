@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use crate::DbHandle;
 use tracing::{debug, warn};
 
 use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};
@@ -17,11 +16,11 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Builds the code knowledge graph in SurrealDB
 pub struct GraphBuilder {
-    db: Surreal<Db>,
+    db: DbHandle,
 }
 
 impl GraphBuilder {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: DbHandle) -> Self {
         Self { db }
     }
 

@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 codescope-core = { path = "../core" }
-surrealdb = { workspace = true }
+surrealdb = { workspace = true, features = ["kv-mem"] }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

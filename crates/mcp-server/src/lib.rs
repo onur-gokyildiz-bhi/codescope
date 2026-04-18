@@ -133,11 +133,7 @@ pub async fn run_stdio_with_options(
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let db = match surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-        db_path.to_string_lossy().as_ref(),
-    )
-    .await
-    {
+    let db = match codescope_core::connect_path(&db_path).await {
         Ok(db) => db,
         Err(e) => {
             let _ = std::fs::OpenOptions::new()
@@ -147,10 +143,9 @@ pub async fn run_stdio_with_options(
                     use std::io::Write;
                     writeln!(f, "  DB ERROR: {}", e)
                 });
-            return Err(e.into());
+            return Err(e);
         }
     };
-    db.use_ns("codescope").use_db(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
     codescope_core::graph::migrations::migrate_to_current(&db).await?;
 

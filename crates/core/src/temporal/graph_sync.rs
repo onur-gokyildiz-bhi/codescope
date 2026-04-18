@@ -1,18 +1,17 @@
 use anyhow::Result;
-use surrealdb::engine::local::Db;
+use crate::DbHandle;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 use tracing::{debug, info};
 
 use super::{ChangeType, CommitInfo};
 
 /// Syncs git history into the SurrealDB graph
 pub struct TemporalGraphSync {
-    db: Surreal<Db>,
+    db: DbHandle,
 }
 
 impl TemporalGraphSync {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: DbHandle) -> Self {
         Self { db }
     }
 

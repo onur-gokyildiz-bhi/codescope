@@ -16,10 +16,9 @@ use codescope_core::graph::builder::GraphBuilder;
 use codescope_core::{CodeEntity, CodeRelation};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use surrealdb::engine::local::Db;
-use surrealdb::engine::local::SurrealKv;
+use codescope_core::DbHandle;
+use codescope_core::connect_path;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 
 pub async fn run(
     dir: Option<PathBuf>,
@@ -45,7 +44,7 @@ pub async fn run(
     }
 
     // Resolve target DB + repo name
-    let (db, target_repo, target_label): (Surreal<Db>, String, String) = match scope.as_str() {
+    let (db, target_repo, target_label): (DbHandle, String, String) = match scope.as_str() {
         "global" | "g" => {
             let db = codescope_mcp::helpers::connect_global_db()
                 .await
@@ -58,16 +57,15 @@ pub async fn run(
             let r = repo.ok_or_else(|| {
                 anyhow::anyhow!("--repo required when scope=project (project DB target)")
             })?;
-            let path = dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".codescope")
-                .join("db")
-                .join(&r);
-            std::fs::create_dir_all(&path)?;
-            let db = Surreal::new::<SurrealKv>(path.to_string_lossy().as_ref())
-                .await
-                .with_context(|| format!("failed to open project DB at {}", path.display()))?;
-            db.use_ns("codescope").use_db(&r).await?;
+            let db = connect_path(
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".codescope")
+                    .join("db")
+                    .join(&r),
+            )
+            .await
+            .with_context(|| format!("failed to open project DB for {}", r))?;
             codescope_core::graph::schema::init_schema(&db).await?;
             let lbl = format!("project ({})", r);
             (db, r.clone(), lbl)
@@ -222,7 +220,7 @@ fn collect_jsonl_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// Standalone variant of `codescope_mcp::helpers::check_conversation_hash` —
 /// inlined to avoid widening that helper's `pub(crate)` visibility just for
 /// this CLI command.
-async fn check_conversation_hash(db: &Surreal<Db>, file_name: &str) -> Result<Option<String>> {
+async fn check_conversation_hash(db: &DbHandle, file_name: &str) -> Result<Option<String>> {
     #[derive(serde::Deserialize, SurrealValue)]
     struct HashRecord {
         hash: Option<String>,

@@ -1,13 +1,17 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+
+use crate::{connect_repo, DbHandle};
 
 /// Shared daemon state — manages DB connections for all projects.
-/// Each project gets its own SurrealKv directory under `base_db_path/<repo>/`.
+///
+/// Post R1-v2 this holds SurrealDB **remote** clients; the `surreal` server
+/// is the sole owner of on-disk data at `~/.codescope/surreal-data/`. The
+/// `base_db_path` is retained purely so `discover_repos()` can still walk
+/// the legacy per-repo directories (used by migration + backward compat).
 pub struct DaemonState {
-    dbs: tokio::sync::RwLock<HashMap<String, Surreal<Db>>>,
+    dbs: tokio::sync::RwLock<HashMap<String, DbHandle>>,
     base_db_path: PathBuf,
 }
 
@@ -19,9 +23,10 @@ impl DaemonState {
         }
     }
 
-    /// Create a DaemonState pre-populated with a single project — used by stdio mode
-    /// so both stdio and daemon modes share the same DB-management codepath.
-    pub fn with_initial(base_db_path: PathBuf, repo_name: String, db: Surreal<Db>) -> Self {
+    /// Create a DaemonState pre-populated with a single project — used by
+    /// stdio mode so both stdio and daemon modes share the same
+    /// DB-management codepath.
+    pub fn with_initial(base_db_path: PathBuf, repo_name: String, db: DbHandle) -> Self {
         let mut map = HashMap::new();
         map.insert(repo_name, db);
         Self {
@@ -30,10 +35,12 @@ impl DaemonState {
         }
     }
 
-    /// Get or create a DB connection for a repo.
-    /// Each repo has its own SurrealKv directory — no lock contention.
-    pub async fn get_db(&self, repo_name: &str) -> Result<Surreal<Db>> {
-        // Check cache first
+    /// Get or open a DB connection for a repo.
+    ///
+    /// All repos live inside the single `surreal` server under NS=`codescope`,
+    /// DB=<repo>. No filesystem lock contention — the server handles it.
+    pub async fn get_db(&self, repo_name: &str) -> Result<DbHandle> {
+        // Cache check
         {
             let dbs = self.dbs.read().await;
             if let Some(db) = dbs.get(repo_name) {
@@ -41,25 +48,10 @@ impl DaemonState {
             }
         }
 
-        // Open new DB for this repo
-        let db_path = self.base_db_path.join(repo_name);
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        tracing::info!(
-            "Opening DB for repo '{}' at {}",
-            repo_name,
-            db_path.display()
-        );
-
-        let db =
-            Surreal::new::<surrealdb::engine::local::SurrealKv>(db_path.to_string_lossy().as_ref())
-                .await?;
-        db.use_ns("codescope").use_db(repo_name).await?;
+        tracing::info!("Opening remote DB client for repo '{}'", repo_name);
+        let db = connect_repo(repo_name).await?;
         crate::graph::schema::init_schema(&db).await?;
 
-        // Cache it
         self.dbs
             .write()
             .await
@@ -68,8 +60,10 @@ impl DaemonState {
         Ok(db)
     }
 
-    /// Discover all repos available on disk (scans base_db_path for directories).
-    /// Skips hidden directories (starting with `.`).
+    /// Discover repos available on disk (legacy per-repo dirs under
+    /// `base_db_path`). Kept for migration + backward compat; once every
+    /// consumer uses `get_db` directly this can go away in favour of
+    /// asking the server via `INFO FOR KV`.
     pub fn discover_repos(&self) -> Vec<String> {
         let mut repos = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&self.base_db_path) {
@@ -87,7 +81,7 @@ impl DaemonState {
         repos
     }
 
-    /// List repos that are currently loaded (active DB connections).
+    /// List repos that currently have open (cached) connections.
     pub async fn active_repos(&self) -> Vec<String> {
         self.dbs.read().await.keys().cloned().collect()
     }

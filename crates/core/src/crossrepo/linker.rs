@@ -1,13 +1,12 @@
 use anyhow::Result;
 use serde::Deserialize;
-use surrealdb::engine::local::Db;
+use crate::DbHandle;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 use tracing::{debug, info};
 
 /// Links entities across multiple repositories by resolving cross-repo imports.
 pub struct CrossRepoLinker {
-    db: Surreal<Db>,
+    db: DbHandle,
 }
 
 #[derive(Debug, Deserialize, SurrealValue)]
@@ -25,7 +24,7 @@ struct FileMatch {
 }
 
 impl CrossRepoLinker {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: DbHandle) -> Self {
         Self { db }
     }
 

@@ -108,13 +108,10 @@ async fn main() -> Result<()> {
 
     // --- Phase 2: Index benchmark ---
     println!("[2/4] Indexing benchmark...");
-    let db_path = std::env::temp_dir().join(format!("codescope-bench-{}", repo_name));
-    let _ = std::fs::remove_dir_all(&db_path); // Clean start
-
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-        db_path.to_string_lossy().as_ref(),
-    )
-    .await?;
+    // Bench uses an in-memory Surreal engine so it stays hermetic — doesn't
+    // depend on the bundled server being up, doesn't pollute the shared
+    // data store, and doesn't contend with other codescope sessions.
+    let db = surrealdb::engine::any::connect("memory").await?;
     db.use_ns("bench").use_db("code").await?;
     schema::init_schema(&db).await?;
 
@@ -161,8 +158,8 @@ async fn main() -> Result<()> {
     let files_per_sec = files_indexed as f64 / index_time.as_secs_f64();
     let entities_per_sec = entities_total as f64 / index_time.as_secs_f64();
 
-    // Get DB size
-    let db_size = dir_size(&db_path);
+    // In-memory bench engine — no on-disk footprint to measure.
+    let db_size = 0u64;
 
     let index_metrics = IndexMetrics {
         total_files,
@@ -434,8 +431,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Cleanup temp DB
-    let _ = std::fs::remove_dir_all(&db_path);
+    // In-memory engine — nothing on disk to clean up.
 
     println!("\nBenchmark complete.");
     Ok(())

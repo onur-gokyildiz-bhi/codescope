@@ -1,11 +1,10 @@
 //! Unified knowledge graph tool: save, search, link, lint — dispatched via action param.
 //! General-purpose knowledge management beyond code — concepts, entities, sources, claims.
 
+use codescope_core::DbHandle;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
 
 use crate::helpers::{connect_global_db, GLOBAL_REPO};
 use crate::params::KnowledgeParams;
@@ -30,7 +29,7 @@ fn parse_scope(raw: Option<&str>) -> Scope {
 
 /// Run the core save-query against a given DB/repo. Returns Ok on success.
 async fn save_to_db(
-    db: &Surreal<Db>,
+    db: &DbHandle,
     repo: &str,
     id: &str,
     title: &str,
@@ -68,7 +67,7 @@ async fn save_to_db(
 
 /// Search one DB for knowledge entities. Returns the raw rows.
 async fn search_db(
-    db: &Surreal<Db>,
+    db: &DbHandle,
     query_str: &str,
     kind_filter: &str,
     limit: usize,
@@ -318,7 +317,7 @@ impl GraphRagServer {
                 // Select DB by scope. For "both" we link in the global DB (link
                 // semantics don't cross DBs anyway — edges must live with nodes).
                 let use_global = matches!(scope, Scope::Global | Scope::Both);
-                let link_db: Surreal<Db> = if use_global {
+                let link_db: DbHandle = if use_global {
                     match connect_global_db().await {
                         Ok(d) => d,
                         Err(e) => return format!("Error opening global DB: {}", e),
@@ -376,7 +375,7 @@ impl GraphRagServer {
 
                 // Lint runs against the chosen DB (default: project). "both" falls back to project.
                 let use_global = matches!(scope, Scope::Global);
-                let lint_db: Surreal<Db> = if use_global {
+                let lint_db: DbHandle = if use_global {
                     match connect_global_db().await {
                         Ok(d) => d,
                         Err(e) => return format!("Error opening global DB: {}", e),
@@ -509,7 +508,7 @@ mod tests {
         use surrealdb::engine::local::Mem;
 
         // Two project DBs simulating two different repos.
-        let project_a: Surreal<Db> = Surreal::new::<Mem>(()).await.unwrap();
+        let project_a: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
         project_a
             .use_ns("codescope")
             .use_db("repo_a")
@@ -519,7 +518,7 @@ mod tests {
             .await
             .unwrap();
 
-        let project_b: Surreal<Db> = Surreal::new::<Mem>(()).await.unwrap();
+        let project_b: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
         project_b
             .use_ns("codescope")
             .use_db("repo_b")
@@ -530,7 +529,7 @@ mod tests {
             .unwrap();
 
         // A shared in-memory "global" DB stands in for ~/.codescope/db/_global.
-        let global: Surreal<Db> = Surreal::new::<Mem>(()).await.unwrap();
+        let global: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
         global
             .use_ns("codescope")
             .use_db(GLOBAL_REPO)

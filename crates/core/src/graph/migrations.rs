@@ -14,8 +14,7 @@
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use crate::DbHandle;
 
 use super::schema::{get_schema_version, set_schema_version, SCHEMA_VERSION};
 
@@ -24,7 +23,7 @@ pub struct Migration {
     pub from_version: u32,
     pub to_version: u32,
     pub description: &'static str,
-    pub run: for<'a> fn(&'a Surreal<Db>) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>,
+    pub run: for<'a> fn(&'a DbHandle) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>,
 }
 
 /// Registered migrations, in ascending order. To add a new one, append an
@@ -51,6 +50,31 @@ pub fn migrations() -> Vec<Migration> {
                 Ok(())
             }),
         },
+        // v2 → v3: add ORDER BY / sort indexes for hot-path timestamp + language
+        // queries (Linnaeus audit). `DEFINE INDEX IF NOT EXISTS` is safe on
+        // existing DBs, so the migration just replays the DEFINE statements.
+        Migration {
+            from_version: 2,
+            to_version: 3,
+            description: "Add sort/ORDER BY indexes (knowledge.updated_at, *.timestamp, file.language)",
+            run: |db| {
+                Box::pin(async move {
+                    db.query(
+                        "
+                        DEFINE INDEX IF NOT EXISTS know_updated_at ON knowledge FIELDS updated_at;
+                        DEFINE INDEX IF NOT EXISTS decision_timestamp ON decision FIELDS timestamp;
+                        DEFINE INDEX IF NOT EXISTS problem_timestamp ON problem FIELDS timestamp;
+                        DEFINE INDEX IF NOT EXISTS solution_timestamp ON solution FIELDS timestamp;
+                        DEFINE INDEX IF NOT EXISTS conv_topic_timestamp ON conv_topic FIELDS timestamp;
+                        DEFINE INDEX IF NOT EXISTS conversation_timestamp ON conversation FIELDS timestamp;
+                        DEFINE INDEX IF NOT EXISTS file_language ON file FIELDS language;
+                        ",
+                    )
+                    .await?;
+                    Ok(())
+                })
+            },
+        },
     ]
 }
 
@@ -58,7 +82,7 @@ pub fn migrations() -> Vec<Migration> {
 /// each registered migration in order. Returns the final version.
 ///
 /// Safe to call on every connect — idempotent once the DB is at current.
-pub async fn migrate_to_current(db: &Surreal<Db>) -> Result<u32> {
+pub async fn migrate_to_current(db: &DbHandle) -> Result<u32> {
     let mut current = get_schema_version(db).await.unwrap_or(0);
     let target = SCHEMA_VERSION;
 

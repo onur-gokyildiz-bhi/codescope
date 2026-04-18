@@ -22,8 +22,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use codescope_core::DbHandle;
 
 use crate::collect_jsonl_files;
 use crate::helpers;
@@ -34,7 +33,7 @@ use codescope_core::graph::builder::GraphBuilder;
 
 /// Orchestrates background indexing for `run_stdio`. Owns shared state.
 pub struct IndexingPipeline {
-    pub db: Surreal<Db>,
+    pub db: DbHandle,
     pub repo: String,
     pub path: PathBuf,
     pub mcp: GraphRagServer,
@@ -46,7 +45,7 @@ type ParseResult = (
 );
 
 impl IndexingPipeline {
-    pub fn new(db: Surreal<Db>, repo: String, path: PathBuf, mcp: GraphRagServer) -> Arc<Self> {
+    pub fn new(db: DbHandle, repo: String, path: PathBuf, mcp: GraphRagServer) -> Arc<Self> {
         Arc::new(Self {
             db,
             repo,

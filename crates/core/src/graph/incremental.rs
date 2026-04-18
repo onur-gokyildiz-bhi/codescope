@@ -1,18 +1,17 @@
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use surrealdb::engine::local::Db;
+use crate::DbHandle;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 use tracing::{debug, info};
 
 /// Handles incremental indexing — only re-parse files that changed
 pub struct IncrementalIndexer {
-    db: Surreal<Db>,
+    db: DbHandle,
 }
 
 impl IncrementalIndexer {
-    pub fn new(db: Surreal<Db>) -> Self {
+    pub fn new(db: DbHandle) -> Self {
         Self { db }
     }
 

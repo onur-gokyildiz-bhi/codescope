@@ -1,12 +1,11 @@
 use anyhow::Result;
 use serde::Deserialize;
-use surrealdb::engine::local::Db;
+use crate::DbHandle;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 
 /// Current schema version. Bump when adding a new migration in `migrations.rs`.
 /// Version 0 = legacy DBs without meta:schema row.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize, SurrealValue)]
 struct SchemaMetaRow {
@@ -15,14 +14,14 @@ struct SchemaMetaRow {
 
 /// Read the current schema_version recorded in the `meta` table.
 /// Returns 0 if no `meta:schema` row exists (old / uninitialized DB).
-pub async fn get_schema_version(db: &Surreal<Db>) -> Result<u32> {
+pub async fn get_schema_version(db: &DbHandle) -> Result<u32> {
     // Returns Option<SchemaMetaRow>
     let row: Option<SchemaMetaRow> = db.select(("meta", "schema")).await?;
     Ok(row.map(|r| r.version).unwrap_or(0))
 }
 
 /// Persist the schema_version to the `meta:schema` row (UPSERT).
-pub async fn set_schema_version(db: &Surreal<Db>, version: u32) -> Result<()> {
+pub async fn set_schema_version(db: &DbHandle, version: u32) -> Result<()> {
     db.query("UPSERT meta:schema SET version = $v")
         .bind(("v", version))
         .await?;
@@ -30,7 +29,7 @@ pub async fn set_schema_version(db: &Surreal<Db>, version: u32) -> Result<()> {
 }
 
 /// Initialize the SurrealDB schema for the knowledge graph
-pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
+pub async fn init_schema(db: &DbHandle) -> Result<()> {
     db.query(
         "
         -- === CODE ENTITY TABLES ===
@@ -352,6 +351,17 @@ pub async fn init_schema(db: &Surreal<Db>) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS db_file_repo ON db_entity FIELDS file_path, repo;
         DEFINE INDEX IF NOT EXISTS infra_file_repo ON infra FIELDS file_path, repo;
         DEFINE INDEX IF NOT EXISTS pkg_file_repo ON package FIELDS file_path, repo;
+
+        -- === ORDER BY / SORT INDEXES (hot-path timestamp + language filters) ===
+        -- Added in SCHEMA_VERSION = 3. See graph/migrations.rs.
+
+        DEFINE INDEX IF NOT EXISTS know_updated_at ON knowledge FIELDS updated_at;
+        DEFINE INDEX IF NOT EXISTS decision_timestamp ON decision FIELDS timestamp;
+        DEFINE INDEX IF NOT EXISTS problem_timestamp ON problem FIELDS timestamp;
+        DEFINE INDEX IF NOT EXISTS solution_timestamp ON solution FIELDS timestamp;
+        DEFINE INDEX IF NOT EXISTS conv_topic_timestamp ON conv_topic FIELDS timestamp;
+        DEFINE INDEX IF NOT EXISTS conversation_timestamp ON conversation FIELDS timestamp;
+        DEFINE INDEX IF NOT EXISTS file_language ON file FIELDS language;
 
         -- === FULL-TEXT SEARCH INDEXES (speeds up name search queries) ===
 

@@ -1,27 +1,26 @@
 use std::path::Path;
 use std::sync::Arc;
-use surrealdb::engine::local::Db;
-use surrealdb::engine::local::SurrealKv;
+use codescope_core::DbHandle;
+use codescope_core::connect_path;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 
 /// Sentinel repo name used for entities stored in the cross-project global DB.
 pub const GLOBAL_REPO: &str = "_global";
 
-/// Connect to (or lazily create) the cross-project global knowledge DB.
+/// Connect to the cross-project global knowledge DB.
 ///
-/// This is a separate SurrealKV file at `~/.codescope/db/_global/` so it doesn't
-/// contend with per-project DB locks. The schema is initialised on each call —
-/// `init_schema` is idempotent.
-pub async fn connect_global_db() -> anyhow::Result<Surreal<Db>> {
-    let path = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".codescope")
-        .join("db")
-        .join(GLOBAL_REPO);
-    std::fs::create_dir_all(&path)?;
-    let db = Surreal::new::<SurrealKv>(path.to_string_lossy().as_ref()).await?;
-    db.use_ns("codescope").use_db(GLOBAL_REPO).await?;
+/// Post R1-v2 this is simply `NS=codescope, DB=_global` inside the shared
+/// surreal server — no filesystem path, no per-process lock, just a named
+/// database in the same backend every other repo shares.
+pub async fn connect_global_db() -> anyhow::Result<DbHandle> {
+    let db = connect_path(
+        dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".codescope")
+            .join("db")
+            .join(GLOBAL_REPO),
+    )
+    .await?;
     codescope_core::graph::schema::init_schema(&db).await?;
     Ok(db)
 }
@@ -92,7 +91,7 @@ pub fn derive_scope_from_file_path(file_path: &str) -> String {
 
 /// Load known entity names from the graph for conversation-to-code linking.
 /// Queries all 11 entity tables to maximize linking coverage.
-pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
+pub(crate) async fn load_known_entities(db: &DbHandle) -> Vec<String> {
     let query = "SELECT name, qualified_name FROM `function`; \
                  SELECT name, qualified_name FROM class; \
                  SELECT path AS name, path AS qualified_name FROM file; \
@@ -143,7 +142,7 @@ pub(crate) async fn load_known_entities(db: &Surreal<Db>) -> Vec<String> {
 
 /// Check if a conversation file is already indexed by comparing stored hash
 pub(crate) async fn check_conversation_hash(
-    db: &Surreal<Db>,
+    db: &DbHandle,
     file_name: &str,
 ) -> anyhow::Result<Option<String>> {
     #[derive(serde::Deserialize, SurrealValue)]
@@ -184,7 +183,7 @@ pub fn find_claude_project_dir(codebase_path: &Path, repo_name: &str) -> std::pa
 
 /// Build a concise conversation context summary from indexed conversations.
 /// This gets injected into ServerInfo.instructions so Claude sees it automatically.
-pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> String {
+pub(crate) async fn build_context_summary(db: &DbHandle, repo: &str) -> String {
     let mut sections = Vec::new();
 
     // Recent decisions (last 15), ordered by tier (critical first) then timestamp
@@ -319,7 +318,7 @@ pub(crate) async fn build_context_summary(db: &Surreal<Db>, repo: &str) -> Strin
 
 /// Generate CONTEXT.md in ~/.codescope/projects/{repo}/ to avoid project bloat.
 /// Falls back to {project}/.claude/CONTEXT.md if home dir is unavailable.
-pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &Path) {
+pub async fn generate_context_md(db: &DbHandle, repo: &str, codebase_path: &Path) {
     let summary = build_context_summary(db, repo).await;
     let insights = build_post_index_insights(db, repo).await;
 
@@ -367,7 +366,7 @@ pub async fn generate_context_md(db: &Surreal<Db>, repo: &str, codebase_path: &P
 
 /// Build a compact project profile from indexed data.
 /// Analyzes tech stack, architecture, naming convention, scale, and key patterns.
-pub(crate) async fn build_project_profile(db: &Surreal<Db>, repo: &str) -> String {
+pub(crate) async fn build_project_profile(db: &DbHandle, repo: &str) -> String {
     let mut lines = Vec::new();
 
     // 1. Tech Stack Detection — language distribution from functions
@@ -617,7 +616,7 @@ pub(crate) async fn build_project_profile(db: &Surreal<Db>, repo: &str) -> Strin
 
 /// Post-index project insights — auto-generated recommendations after indexing.
 /// Returned as markdown and injected into CONTEXT.md + MCP server instructions.
-pub(crate) async fn build_post_index_insights(db: &Surreal<Db>, repo: &str) -> String {
+pub(crate) async fn build_post_index_insights(db: &DbHandle, repo: &str) -> String {
     let mut insights = Vec::new();
 
     // Project Profile at the top
@@ -760,7 +759,7 @@ pub(crate) async fn build_post_index_insights(db: &Surreal<Db>, repo: &str) -> S
 }
 
 /// Create cross-session topic links: sessions discussing the same code entity get co_discusses edges
-pub(crate) async fn link_cross_session_topics(db: &Surreal<Db>, _repo: &str) -> usize {
+pub(crate) async fn link_cross_session_topics(db: &DbHandle, _repo: &str) -> usize {
     // Find code entities discussed in multiple sessions
     let query = "SELECT out AS entity, array::group(in) AS sessions \
                  FROM discussed_in \

@@ -16,8 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use codescope_core::graph::query::GraphQuery;
-use surrealdb::engine::local::{Db, SurrealKv};
-use surrealdb::Surreal;
+use codescope_core::{connect_path, DbHandle};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
@@ -51,16 +50,10 @@ impl Backend {
         }
     }
 
-    /// Connect to ~/.codescope/db/<repo>/ and stash a GraphQuery handle.
+    /// Open a GraphQuery handle for `repo` via the shared surreal server.
     async fn connect_db(&self, repo: &str) -> anyhow::Result<()> {
-        let path = default_db_path(repo);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        let db: Surreal<Db> = Surreal::new::<SurrealKv>(path.to_string_lossy().as_ref()).await?;
-        db.use_ns("codescope").use_db(repo).await?;
+        let db = codescope_core::connect_repo(repo).await?;
         let gq = Arc::new(GraphQuery::new(db));
-
         let mut st = self.state.write().await;
         st.gq = Some(gq);
         Ok(())
@@ -106,8 +99,12 @@ impl LanguageServer for Backend {
                 // We advertise UTF-16 explicitly so clients know what we
                 // expect for `Position::character` offsets.
                 position_encoding: Some(PositionEncodingKind::UTF16),
+                // We advertise FULL sync (rather than INCREMENTAL) because we
+                // don't maintain an in-memory text buffer — `did_change` only
+                // logs for now, and `word_at_position_from_uri` reads from
+                // disk. FULL is the honest match for that behavior.
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
+                    TextDocumentSyncKind::FULL,
                 )),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -210,6 +207,7 @@ impl LanguageServer for Backend {
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
 
         let Some(word) = word_at_position_from_uri(&uri, pos) else {
             return Ok(None);
@@ -226,15 +224,33 @@ impl LanguageServer for Backend {
             st.workspace_root.clone()
         };
 
-        let locations: Vec<Location> = results
-            .into_iter()
-            .filter_map(|r| {
-                let file = r.file_path?;
+        let mut locations: Vec<Location> = Vec::new();
+
+        // Per the LSP spec, when `context.include_declaration` is true the
+        // response should include the declaration site(s) alongside the
+        // callers.
+        if include_declaration {
+            let defs = gq.find_function(&word).await.unwrap_or_default();
+            for r in defs {
+                if let Some(file) = r.file_path {
+                    let line = r.start_line.unwrap_or(0);
+                    let end = r.end_line.unwrap_or(line);
+                    if let Some(loc) = location_for_entity(ws_root.as_deref(), &file, line, end) {
+                        locations.push(loc);
+                    }
+                }
+            }
+        }
+
+        for r in results {
+            if let Some(file) = r.file_path {
                 let line = r.start_line.unwrap_or(0);
                 let end = r.end_line.unwrap_or(line);
-                location_for_entity(ws_root.as_deref(), &file, line, end)
-            })
-            .collect();
+                if let Some(loc) = location_for_entity(ws_root.as_deref(), &file, line, end) {
+                    locations.push(loc);
+                }
+            }
+        }
 
         Ok(Some(locations))
     }
@@ -256,9 +272,25 @@ impl LanguageServer for Backend {
         };
 
         let results = gq.find_function(&word).await.unwrap_or_default();
-        let Some(r) = results.into_iter().next() else {
+        if results.is_empty() {
             return Ok(None);
-        };
+        }
+
+        // Disambiguate when multiple entities share a name: prefer the one
+        // whose [start_line, end_line] range contains the cursor line. LSP
+        // positions are 0-based; codescope stores 1-based lines, so add 1
+        // before comparing. Fall back to the first match if nothing overlaps
+        // (e.g. cursor is on a declaration line outside any stored range).
+        let cursor_line_1based = pos.line.saturating_add(1);
+        let best_idx = results
+            .iter()
+            .position(|e| match (e.start_line, e.end_line) {
+                (Some(s), Some(end)) => cursor_line_1based >= s && cursor_line_1based <= end,
+                (Some(s), None) => cursor_line_1based == s,
+                _ => false,
+            })
+            .unwrap_or(0);
+        let r = results.into_iter().nth(best_idx).unwrap();
 
         let mut md = String::new();
         md.push_str(&format!("**{}**", r.name.as_deref().unwrap_or(&word)));
@@ -313,6 +345,8 @@ impl LanguageServer for Backend {
                 let line = r.start_line.unwrap_or(0);
                 let end = r.end_line.unwrap_or(line);
                 let loc = location_for_entity(ws_root.as_deref(), &file, line, end)?;
+                // `search_functions` only queries the `function` table, so
+                // every hit here is a function/method.
                 #[allow(deprecated)]
                 Some(SymbolInformation {
                     name: r.name.unwrap_or_else(|| "?".into()),

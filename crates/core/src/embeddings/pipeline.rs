@@ -1,7 +1,6 @@
 use anyhow::Result;
-use surrealdb::engine::local::Db;
+use crate::DbHandle;
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, ToSql};
-use surrealdb::Surreal;
 use tracing::{debug, info, warn};
 
 /// Format a RecordId as "table:key" string (equivalent to surrealdb v2 Thing::to_string())
@@ -77,12 +76,12 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 /// Embeds code entities and stores vectors in SurrealDB
 pub struct EmbeddingPipeline {
-    db: Surreal<Db>,
+    db: DbHandle,
     provider: Box<dyn EmbeddingProvider>,
 }
 
 impl EmbeddingPipeline {
-    pub fn new(db: Surreal<Db>, provider: Box<dyn EmbeddingProvider>) -> Self {
+    pub fn new(db: DbHandle, provider: Box<dyn EmbeddingProvider>) -> Self {
         Self { db, provider }
     }
 

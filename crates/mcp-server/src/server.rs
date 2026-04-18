@@ -3,8 +3,7 @@ use rmcp::model::*;
 use rmcp::{tool_handler, tool_router, ServerHandler};
 use std::path::PathBuf;
 use std::sync::Arc;
-use surrealdb::engine::local::Db;
-use surrealdb::Surreal;
+use codescope_core::DbHandle;
 
 use crate::daemon::DaemonState;
 use crate::helpers::build_context_summary;
@@ -13,7 +12,7 @@ use crate::index_state::IndexState;
 /// Active project context — DB handle + metadata
 #[derive(Clone)]
 pub struct ProjectCtx {
-    pub db: Surreal<Db>,
+    pub db: DbHandle,
     pub repo_name: String,
     pub codebase_path: PathBuf,
 }
@@ -54,7 +53,7 @@ impl GraphRagServer {
     /// Create for stdio mode — single project pre-loaded.
     /// Internally builds a single-project DaemonState so both stdio and daemon
     /// share the same DB-management codepath.
-    pub fn new(db: Surreal<Db>, repo_name: String, codebase_path: PathBuf) -> Self {
+    pub fn new(db: DbHandle, repo_name: String, codebase_path: PathBuf) -> Self {
         // Use the parent dir of the DB as the daemon base path
         let base_db_path = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -222,7 +221,7 @@ impl GraphRagServer {
     /// Build a hot cache of recent knowledge entities (~500 words) so agents
     /// start each session with awareness of what's in the knowledge graph.
     async fn build_knowledge_hot_cache(
-        db: &surrealdb::Surreal<surrealdb::engine::local::Db>,
+        db: &DbHandle,
     ) -> String {
         let query =
             "SELECT title, kind, confidence FROM knowledge ORDER BY updated_at DESC LIMIT 15";

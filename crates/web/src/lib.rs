@@ -19,9 +19,9 @@ enum ProjectSource {
     /// so `/api/projects` isn't a dead end in single mode.
     Single {
         primary_repo: String,
-        primary_db: surrealdb::Surreal<surrealdb::engine::local::Db>,
+        primary_db: codescope_core::DbHandle,
         extra_dbs: tokio::sync::Mutex<
-            std::collections::HashMap<String, surrealdb::Surreal<surrealdb::engine::local::Db>>,
+            std::collections::HashMap<String, codescope_core::DbHandle>,
         >,
     },
     Multi(Arc<DaemonState>),
@@ -63,20 +63,14 @@ impl AppState {
                         format!("Project DB '{}' not found at {}", name, path.display()),
                     ));
                 }
-                let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-                    path.to_string_lossy().as_ref(),
-                )
-                .await
-                .map_err(|e| {
+                // Open via the shared surreal server — no filesystem lock
+                // worries now that the server owns the data.
+                let db = codescope_core::connect_repo(&name).await.map_err(|e| {
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("failed to open DB '{}': {}", name, e),
                     )
                 })?;
-                db.use_ns("codescope")
-                    .use_db(&name)
-                    .await
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
                 let _ = codescope_core::graph::schema::init_schema(&db).await;
                 let cloned = db.clone();
                 extra_dbs.lock().await.insert(name, cloned);
@@ -154,7 +148,7 @@ fn build_routes() -> Router<Arc<AppState>> {
 }
 
 /// Build the web API router from an existing DB connection (single-project mode).
-pub fn build_web_router(db: surrealdb::Surreal<surrealdb::engine::local::Db>) -> Router {
+pub fn build_web_router(db: codescope_core::DbHandle) -> Router {
     let state = Arc::new(AppState {
         source: ProjectSource::Single {
             primary_repo: String::new(),
@@ -198,21 +192,15 @@ pub async fn run_web(
             .join(&repo_name)
     });
 
-    // Connect to SurrealDB
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let db = surrealdb::Surreal::new::<surrealdb::engine::local::SurrealKv>(
-        db_path.to_string_lossy().as_ref(),
-    )
-    .await?;
-    db.use_ns("codescope").use_db(&repo_name).await?;
+    // Connect via the shared surreal server.
+    let db = codescope_core::connect_repo(&repo_name).await?;
     codescope_core::graph::schema::init_schema(&db).await?;
     codescope_core::graph::migrations::migrate_to_current(&db).await?;
     println!(
-        "DB: {} (ns: codescope, db: {})",
-        db_path.display(),
-        repo_name
+        "DB: ns=codescope db={} (via {})",
+        repo_name,
+        std::env::var("CODESCOPE_DB_URL")
+            .unwrap_or_else(|_| codescope_core::db::DEFAULT_URL.to_string())
     );
 
     // Auto-index if requested

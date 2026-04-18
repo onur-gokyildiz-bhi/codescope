@@ -1,6 +1,7 @@
 //! File watcher — monitors codebase for changes and triggers incremental re-index.
 //! Uses `notify` with debouncing (2s) to avoid rapid-fire re-indexes.
 
+use codescope_core::DbHandle;
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
@@ -66,7 +67,7 @@ pub fn start_watcher(codebase_path: &Path) -> anyhow::Result<mpsc::Receiver<Vec<
 /// Spawn a background task that listens for file changes and re-indexes them.
 pub fn spawn_reindex_task(
     mut rx: mpsc::Receiver<Vec<PathBuf>>,
-    db: surrealdb::Surreal<surrealdb::engine::local::Db>,
+    db: DbHandle,
     repo_name: String,
     codebase_path: PathBuf,
 ) {
