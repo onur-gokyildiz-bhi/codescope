@@ -167,6 +167,18 @@ for bin in codescope codescope-mcp codescope-web; do
     fi
 done
 
+# R8 — surreal binary goes to ~/.codescope/bin/ where the supervisor
+# looks first, rather than into $INSTALL_DIR. Keeps the general bin
+# dir clean (users didn't ask for a SurrealDB CLI directly).
+SURREAL_BIN_PATH=$(find "$TEMP_DIR" -name "surreal" -type f 2>/dev/null | head -1 || true)
+if [ -n "$SURREAL_BIN_PATH" ]; then
+    SURREAL_DIR="${HOME}/.codescope/bin"
+    mkdir -p "$SURREAL_DIR"
+    cp "$SURREAL_BIN_PATH" "$SURREAL_DIR/surreal"
+    chmod +x "$SURREAL_DIR/surreal"
+    echo "    + surreal -> $SURREAL_DIR"
+fi
+
 echo "  Installed $INSTALLED binaries to $INSTALL_DIR"
 
 # Check PATH

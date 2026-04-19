@@ -10,10 +10,61 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # R8 — pinned version of the bundled surreal server. Bump in
+  # lockstep with the surrealdb crate version in Cargo.toml workspace
+  # deps, and regenerate release archives.
+  SURREAL_VERSION: "v3.0.5"
 
 jobs:
+  preflight:
+    name: Pre-flight checks (fmt + clippy + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev perl make
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend (needed for web crate compile)
+        run: |
+          cd crates/web/frontend
+          npm ci
+          npm run build
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-preflight-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
   build:
     name: Build ${{ matrix.target }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -80,9 +131,39 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.target }}-release-
 
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} -p codescope -p codescope-mcp -p codescope-web
+        run: cargo build --release --target ${{ matrix.target }} -p codescope -p codescope-mcp -p codescope-web -p codescope-lsp
         env:
           RUST_MIN_STACK: "16777216"
+
+      - name: Download surreal binary (Unix)
+        # R8 — bundle the surreal server next to codescope. The
+        # supervisor (`codescope start`) looks here first, then
+        # PATH.
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p surreal-dl
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu)   slug="linux-amd64" ;;
+            aarch64-apple-darwin)       slug="darwin-arm64" ;;
+            x86_64-apple-darwin)        slug="darwin-amd64" ;;
+            *) echo "no surreal build for ${{ matrix.target }}"; exit 1 ;;
+          esac
+          url="https://github.com/surrealdb/surrealdb/releases/download/${SURREAL_VERSION}/surreal-${SURREAL_VERSION}.${slug}.tgz"
+          echo "Fetching $url"
+          curl -fsSL "$url" | tar xz -C surreal-dl
+          chmod +x surreal-dl/surreal
+          surreal-dl/surreal --version
+
+      - name: Download surreal binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ver = $env:SURREAL_VERSION
+          $url = "https://github.com/surrealdb/surrealdb/releases/download/$ver/surreal-$ver.windows-amd64.exe"
+          Write-Host "Fetching $url"
+          New-Item -ItemType Directory -Force -Path surreal-dl | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile surreal-dl/surreal.exe -UseBasicParsing
+          & surreal-dl\surreal.exe --version
 
       - name: Prepare artifacts (Unix)
         if: runner.os != 'Windows'
@@ -91,6 +172,8 @@ jobs:
           cp target/${{ matrix.target }}/release/codescope dist/
           cp target/${{ matrix.target }}/release/codescope-mcp dist/
           cp target/${{ matrix.target }}/release/codescope-web dist/
+          cp target/${{ matrix.target }}/release/codescope-lsp dist/
+          cp surreal-dl/surreal dist/
           cp README.md LICENSE dist/
           cd dist
           tar czf ../codescope-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
@@ -103,6 +186,8 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/codescope.exe" dist/
           Copy-Item "target/${{ matrix.target }}/release/codescope-mcp.exe" dist/
           Copy-Item "target/${{ matrix.target }}/release/codescope-web.exe" dist/
+          Copy-Item "target/${{ matrix.target }}/release/codescope-lsp.exe" dist/
+          Copy-Item "surreal-dl/surreal.exe" dist/
           Copy-Item README.md dist/
           Copy-Item LICENSE dist/
           Compress-Archive -Path dist/* -DestinationPath "codescope-${{ github.ref_name }}-${{ matrix.target }}.zip"
@@ -116,6 +201,7 @@ jobs:
   # Separate job for aarch64 Linux — multiarch cross-compilation
   build-aarch64-linux:
     name: Build aarch64-unknown-linux-gnu
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -164,7 +250,7 @@ jobs:
           restore-keys: ubuntu-aarch64-unknown-linux-gnu-release-
 
       - name: Build release binaries
-        run: cargo build --release --target aarch64-unknown-linux-gnu -p codescope -p codescope-mcp -p codescope-web
+        run: cargo build --release --target aarch64-unknown-linux-gnu -p codescope -p codescope-mcp -p codescope-web -p codescope-lsp
         env:
           RUST_MIN_STACK: "16777216"
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -174,12 +260,22 @@ jobs:
           AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_LIB_DIR: /usr/lib/aarch64-linux-gnu
           AARCH64_UNKNOWN_LINUX_GNU_OPENSSL_INCLUDE_DIR: /usr/include/aarch64-linux-gnu
 
+      - name: Download surreal binary (linux-arm64)
+        run: |
+          mkdir -p surreal-dl
+          url="https://github.com/surrealdb/surrealdb/releases/download/${SURREAL_VERSION}/surreal-${SURREAL_VERSION}.linux-arm64.tgz"
+          echo "Fetching $url"
+          curl -fsSL "$url" | tar xz -C surreal-dl
+          chmod +x surreal-dl/surreal
+
       - name: Prepare artifacts
         run: |
           mkdir -p dist
           cp target/aarch64-unknown-linux-gnu/release/codescope dist/
           cp target/aarch64-unknown-linux-gnu/release/codescope-mcp dist/
           cp target/aarch64-unknown-linux-gnu/release/codescope-web dist/
+          cp target/aarch64-unknown-linux-gnu/release/codescope-lsp dist/
+          cp surreal-dl/surreal dist/
           cp README.md LICENSE dist/
           cd dist
           tar czf ../codescope-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz *
@@ -225,6 +321,7 @@ jobs:
           - **codescope** — CLI: index, search, query, init, install
           - **codescope-mcp** — MCP server for AI agents (Claude Code, Cursor, Zed, etc.)
           - **codescope-web** — Web UI with interactive graph visualization
+          - **codescope-lsp** — Language Server Protocol implementation for editors
 
           ### One-line install
 

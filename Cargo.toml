@@ -13,6 +13,13 @@ homepage = "https://github.com/onurgokyildiz/codescope"
 keywords = ["code-analysis", "graph-database", "mcp", "rag", "surrealdb"]
 categories = ["development-tools", "command-line-utilities"]
 
+# R8 — pinned bundled surreal server version. The release workflow
+# reads `SURREAL_VERSION` from env; this metadata exists so readers of
+# Cargo.toml (and future `codescope status` drift checks) have a
+# single source of truth.
+[workspace.metadata.surreal]
+version = "3.0.5"
+
 [workspace.dependencies]
 # Database
 surrealdb = { version = "3.0", default-features = false, features = ["kv-surrealkv", "protocol-ws"] }

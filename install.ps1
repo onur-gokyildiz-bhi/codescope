@@ -5,6 +5,8 @@
 $ErrorActionPreference = "Stop"
 $REPO = "onur-gokyildiz-bhi/codescope"
 
+try {
+
 Write-Host ""
 Write-Host "  Codescope Installer" -ForegroundColor Cyan
 Write-Host "  ===================" -ForegroundColor Cyan
@@ -90,6 +92,20 @@ foreach ($bin in @("codescope.exe", "codescope-mcp.exe", "codescope-web.exe")) {
     }
 }
 
+# R8 — surreal server binary lives in ~/.codescope/bin/ where the
+# supervisor expects to find it first. Keeping it out of $INSTALL_DIR
+# avoids polluting the user's general bin with a SurrealDB binary
+# they didn't ask for directly.
+$surrealSrc = Join-Path $tempExtract "surreal.exe"
+if (Test-Path $surrealSrc) {
+    $surrealDir = Join-Path $HOME ".codescope\bin"
+    if (-not (Test-Path $surrealDir)) {
+        New-Item -ItemType Directory -Force -Path $surrealDir | Out-Null
+    }
+    Copy-Item $surrealSrc "$surrealDir\surreal.exe" -Force
+    $installed += "surreal.exe (-> $surrealDir)"
+}
+
 # Cleanup
 Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
 Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
@@ -124,3 +140,27 @@ Write-Host "  Codescope starts automatically with 52 MCP tools." -ForegroundColo
 Write-Host ""
 Write-Host "  NOTE: Restart your terminal for PATH changes to take effect." -ForegroundColor Yellow
 Write-Host ""
+
+} catch {
+    Write-Host ""
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host "  |   Codescope installation failed          |" -ForegroundColor Red
+    Write-Host "  +==========================================+" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+    if ($_.InvocationInfo -and $_.InvocationInfo.ScriptLineNumber) {
+        Write-Host "  At line: $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host "  Things to check:" -ForegroundColor Yellow
+    Write-Host "    * Internet connectivity (we download from github.com)"
+    Write-Host "    * GitHub API rate limit — wait a few minutes and retry"
+    Write-Host "    * File permissions on $env:USERPROFILE\.local\bin"
+    Write-Host "    * Antivirus / SmartScreen blocking the download or binary"
+    Write-Host "    * PowerShell execution policy (try: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned)"
+    Write-Host ""
+    Write-Host "  If the problem persists, download manually from:" -ForegroundColor Cyan
+    Write-Host "    https://github.com/$REPO/releases/latest"
+    Write-Host ""
+    exit 1
+}
