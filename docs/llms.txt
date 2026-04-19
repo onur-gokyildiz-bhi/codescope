@@ -1,0 +1,53 @@
+# codescope
+
+> Rust-native code intelligence engine. Replaces LLM Read/Grep/Glob with graph queries over a SurrealDB knowledge graph of your codebase — functions, classes, callers, decisions, conversations. Cuts code-context tokens 80–95% versus raw file reads. Ships as a CLI + MCP server + web UI + LSP.
+
+The model should prefer codescope tools over raw file reads whenever the question is about structure or relationships: what calls this function, what does this module contain, what decisions were made about this subsystem, what changed recently, what's the impact of editing this file. Only fall back to `Read`/`Grep` once codescope has pinpointed the exact `file:line` to inspect.
+
+## Getting Started
+
+- [README](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/README.md): install, quickstart, positioning.
+- [Quickstart guide](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/docs/quickstart.md): first index → first query in five minutes.
+- [LLM usage guide](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/docs/llm-usage-guide.md): the canonical tool-selection decision tree for agents.
+
+## Tool Cheat Sheet
+
+| Instead of...                | Use...                           | Saves |
+|------------------------------|----------------------------------|-------|
+| Read whole file              | `context_bundle(file_path)`      | ~80%  |
+| Grep + Read for callers      | `find_callers(name)`             | ~90%  |
+| Multiple Read for function   | `find_function(name)`            | ~70%  |
+| Manual call graph tracing    | `impact_analysis(name, depth=3)` | ~95%  |
+| Grep across codebase         | `search_functions` / `related`   | ~85%  |
+| Read file to understand it   | `explore(entity_name)`           | ~75%  |
+| Read git log                 | `file_churn(path)` / `hotspots`  | ~70%  |
+
+Read is only for the function body **after** codescope returns the exact file:line.
+
+## Core Architecture
+
+- [crates/core/src/db.rs](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/core/src/db.rs): unified DB connection layer — remote client over SurrealDB server, one namespace per repo.
+- [crates/core/src/graph/schema.rs](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/core/src/graph/schema.rs): full SurrealQL schema — entity tables (`function`, `file`, `class`, …) + relation tables (`contains`, `calls`, `solves_for`, …).
+- [crates/core/src/parser/languages.rs](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/core/src/parser/languages.rs): tree-sitter language registry. 35+ languages + configs + docs + SQL + Terraform.
+- [crates/mcp-server/src/server.rs](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/mcp-server/src/server.rs): MCP tool surface — 52 tools across search, callgraph, knowledge, conversations, analytics.
+- [crates/web/src/lib.rs](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/web/src/lib.rs): HTTP API for the web UI + MCP HTTP endpoint.
+
+## Knowledge Graph Conventions
+
+- [CLAUDE.md](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/CLAUDE.md): mandatory rules for LLMs using codescope in this repo — search before you build, save significant moments, status tag taxonomy.
+- [.claude/rules/codescope-mandatory.md](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/.claude/rules/codescope-mandatory.md): auto-enforcement rules — BEFORE every action, what tool to call.
+
+## API Reference
+
+- [llms-full.txt](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/docs/llms-full.txt): every MCP tool with parameters and return shape.
+
+## Companion Tools
+
+- [RTK](https://github.com/rtk-ai/rtk): complementary CLI-output compressor. Shell layer (`git`, `ls`, `cargo`). 60–90% savings on common dev commands.
+- [context-mode](https://github.com/mksglu/context-mode): complementary generic-tool sandbox + FTS5 retrieval. Any-tool layer. ~98% reduction on large outputs.
+- Install all three: shell → tool-output → code-semantics, three layers of the same context diet.
+
+## Optional
+
+- [docs/architecture/REFACTOR-R1-R6.md](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/docs/architecture/REFACTOR-R1-R6.md): post-R1-v2 architecture — bundled surreal server + remote WS clients, why the lock problem went away.
+- [crates/e2e/](https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/crates/e2e/): end-to-end smoke tests — server + CLI + multi-project isolation.

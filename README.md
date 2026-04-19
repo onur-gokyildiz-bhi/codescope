@@ -85,6 +85,30 @@ These are **graph traversal questions**. Vector search gives you fuzzy matches. 
 
 Embeddings stay as a **secondary index** for natural-language queries where structure doesn't help. But the **primary index is the graph** — the same way developers actually walk through code.
 
+### Think in Code, Not in Data
+
+Treat your LLM as a **code generator**, not a data processor. "Read 40 files to count functions" is the 2023 playbook. "Write a query that counts functions and returns the number" is codescope.
+
+```
+Without codescope:  Read main.rs + user.rs + … (40 files, 150K tokens)  → "I count 247 functions"
+With codescope:     impact_analysis(User::email, depth=3)  →  {"callers": 12, "tests_affected": 3}
+                    ↑ one query, 800 tokens, deterministic
+```
+
+Every codescope tool is a structured query — `find_callers`, `impact_analysis`, `knowledge_search`, `code_health` — that the LLM programs, and the graph executes. The model stops scrolling output and starts thinking about the answer.
+
+### Three-Layer Context Diet
+
+Codescope is the code-semantics layer. For full coverage, pair with:
+
+| Layer | Tool | Covers | Typical savings |
+|-------|------|--------|-----------------|
+| Shell output | [RTK](https://github.com/rtk-ai/rtk) | `git status`, `ls`, `cargo build`, `npm test`, … | 60–90% |
+| Generic tool output | [context-mode](https://github.com/mksglu/context-mode) | Any MCP tool (Playwright, GitHub API, log tails, web fetches) via FTS5 sandbox | ~98% |
+| **Code semantics** | **codescope** | Functions, callers, impact, decisions, conversations — the structured-reasoning layer | 80–95% |
+
+Install all three and your model spends tokens on thinking, not on scrolling tool output.
+
 ---
 
 ## Install

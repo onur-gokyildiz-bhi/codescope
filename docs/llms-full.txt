@@ -1,0 +1,212 @@
+# codescope — Full MCP Tool Reference
+
+> The LLM-facing spec for every codescope tool. Paired with
+> [llms.txt](./llms.txt) for discovery. Generated from the tool
+> source; when the source changes, update this file too.
+
+All tools live behind a single MCP server (`codescope-mcp`) and are
+available over stdio or HTTP (see README for wiring to Claude Code,
+Cursor, Gemini CLI, VS Code Copilot, Codex, …).
+
+---
+
+## Routing rules (mandatory)
+
+```
+BEFORE reading a file          → context_bundle(file_path)
+BEFORE grepping callers        → find_callers(name) / find_callees(name)
+BEFORE searching functions     → search (mode=fuzzy) / find_function(name)
+BEFORE tracing impact          → impact_analysis(name, depth=3)
+BEFORE exploring connections   → explore(name) / search (mode=backlinks)
+BEFORE reading git history     → file_churn(path) / hotspot_detection
+BEFORE implementing anything   → knowledge_search(topic) — check status:done
+AFTER completing a feature     → knowledge_save(…, tags=[status:done, …])
+AFTER user correction          → capture_insight(kind=correction)
+AFTER bug >5 min to find       → capture_insight(kind=problem)
+```
+
+Read is ONLY for function bodies after codescope returned the
+exact `file:line`.
+
+---
+
+## Tool catalogue
+
+### Admin / lifecycle
+
+- `project(action, repo, codebase_path, auto_index)` — open a
+  project in daemon mode, or list open projects.
+- `index_status()` — files indexed, errors, running time, state
+  (idle / indexing / ready / failed). Call after a tool returns
+  an "indexing in progress" response.
+- `index_codebase(path)` — index source files into the knowledge
+  graph.
+
+### Search
+
+- `search(query, mode, limit)` — unified code graph search.
+  Modes: `fuzzy`, `exact`, `file`, `cross_type`, `neighborhood`,
+  `backlinks`.
+- `find_function(name)` — locate a specific function by name
+  (direct lookup, exact or partial).
+- `find_class(name)` — same for classes / structs / interfaces.
+
+### Call graph
+
+- `find_callers(name)` — direct callers of a function (1-hop).
+  Use `impact_analysis` for transitive.
+- `find_callees(name)` — direct callees (1-hop). Use
+  `search(mode=neighborhood)` for full neighborhood.
+- `impact_analysis(name, depth=3)` — transitive blast radius via
+  BFS. Shows callers, importers, implementors.
+- `inheritance(name)` — type inheritance graph: parents, subtypes,
+  interfaces, implementors.
+
+### Exploration
+
+- `context_bundle(file_path)` — file context bundle: functions,
+  callers, classes, imports, decisions. Use before Read.
+- `explore(name)` — full neighborhood around an entity (code +
+  knowledge + conversations).
+- `graph_stats()` — code graph counts: files, functions, classes,
+  relationships.
+
+### Knowledge
+
+- `knowledge_save(title, content, kind, tags, scope)` — save a
+  decision, problem, solution, concept, or claim.
+- `knowledge_search(query, kind?)` — full-text search over
+  saved knowledge. Run **before** implementing anything to check
+  if `status:done` entries exist.
+- `knowledge_link(from, to, relation)` — RELATE two knowledge
+  entries. Rejects duplicate (from, to, relation).
+- `knowledge_lint()` — find orphan nodes, missing cross-refs,
+  stale claims, contradictions.
+
+### Memory / insights
+
+- `capture_insight(kind, title, content)` — record a significant
+  moment. Kinds: `decision`, `problem`, `solution`, `correction`,
+  `learning`, `concept`.
+- `memory(action, …)` — save / search / pin decisions, problems,
+  solutions across sessions.
+- `adr(action, …)` — manage Architecture Decision Records. Actions:
+  `list`, `get`, `create`, `update`.
+
+### Conversations
+
+- `conversations(action, query, limit)` — conversation memory.
+  Index Claude Code transcripts, search decisions / problems,
+  walk an entity's timeline across sessions.
+
+### Temporal / git
+
+- `sync_history()` — sync git commits into the graph. Required
+  before `hotspots` / `code_health`.
+- `code_health(action)` — hotspots, churn, coupling,
+  review_diff. Uses git + graph together.
+- `recent_changes()` — functions / classes touched since last
+  index.
+- `contributors(action)` — expertise map, reviewer suggestions,
+  team coding patterns.
+
+### Refactor / quality
+
+- `edit_preflight(file_path, edit)` — does this edit align with
+  team coding patterns?
+- `refactor(action, …)` — refactor ops (rename references, find
+  unused, safe-delete check).
+- `quality_check(mode, rule?)` — quality lint
+  (`dead_code`, `smells`, or custom SurrealQL).
+
+### HTTP / cross-service
+
+- `http_analysis(mode, url?)` — find client calls for an
+  endpoint, or code that exposes a URL. Cross-service trace.
+
+### Embeddings / semantic search
+
+- `embed_functions(provider?)` — generate vector embeddings for
+  unembedded functions.
+- `semantic_search(query, limit)` — search code by meaning, not
+  just name.
+
+### Analytics / export
+
+- `community_detection()` — code communities, bridge modules,
+  central nodes.
+- `export_obsidian(out_path)` — export the graph as an Obsidian
+  vault with wikilinks.
+- `api_changelog()` — which public APIs changed since last index.
+- `propose_structure(description)` — suggest directory structure
+  for a new project.
+
+### Skills
+
+- `skills(action, …)` — skills graph ops: index a markdown
+  folder, traverse by name, generate notes.
+
+### Raw / escape hatches
+
+- `raw_query(surql)` — raw SurrealQL. Backtick `` `function` ``
+  (reserved word). Prefer dedicated tools first.
+- `ask(question)` — natural-language question about the codebase
+  (auto-extracts search terms, dispatches to the right tool).
+- `list_languages()` — list supported programming languages.
+- `retrieve_archive(id)` — retrieve the full output of an
+  archived large result by retrieval ID.
+
+---
+
+## Workflow cheatsheet
+
+### Opening a new codebase
+
+1. `project(action=init, repo=<name>, codebase_path=<abs>, auto_index=true)`
+2. Poll `index_status()` until state=`ready`.
+3. `graph_stats()` — confirm the graph has content.
+
+### Answering "how does X work?"
+
+1. `search(query=X, mode=fuzzy)` — locate the entity.
+2. `context_bundle(file_path)` — get its file context.
+3. Read only the function body at the returned `file:line`.
+
+### Answering "what breaks if I change X?"
+
+1. `find_function(X)` — locate.
+2. `impact_analysis(X, depth=3)` — transitive callers.
+3. For each caller, `context_bundle` on its file to judge risk.
+
+### Recording a decision
+
+1. `knowledge_search(topic)` — does a `status:done` entry already
+   exist? If yes, ask user before reimplementing.
+2. After work lands:
+   `knowledge_save(title, content, kind=decision,
+   tags=[status:done, v0.7.10, <area>, shipped:2026-04-19])`
+
+---
+
+## Known error codes (R2 contract)
+
+Non-2xx HTTP bodies and tool error strings follow:
+
+```json
+{ "ok": false,
+  "error": { "code": "...", "message": "...", "hint": "..." } }
+```
+
+Codes:
+- `db_unreachable` — `codescope start` hasn't run / the surreal
+  server is down.
+- `db_version_drift` — installed surreal binary differs from the
+  one the current server was launched with.
+- `db_corrupt` — ask the user to run
+  `codescope repair --repo <name>`.
+- `repo_not_found` — suggest `codescope index <path> --repo <name>`.
+- `invalid_input` — argument shape mismatch.
+- `timeout` — retry with a narrower scope.
+- `index_not_ready` — call `index_status()` and wait.
+- `no_project` — daemon mode without `project(action=init, …)`.
+- `internal` — unexpected; surface the `message` to the user.
