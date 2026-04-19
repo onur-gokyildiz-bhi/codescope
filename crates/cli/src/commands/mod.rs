@@ -11,6 +11,7 @@ pub mod init;
 pub mod install;
 pub mod languages;
 pub mod migrate;
+pub mod migrate_to_server;
 pub mod query;
 pub mod review;
 pub mod search;

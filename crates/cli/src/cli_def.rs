@@ -183,6 +183,21 @@ pub enum Commands {
         repo: Option<String>,
     },
 
+    /// Migrate legacy per-repo SurrealKV dirs (~/.codescope/db/<repo>/) into
+    /// the unified `surreal` server. Dry-run by default; pass --execute to
+    /// actually perform the copy. Originals are preserved as `<repo>.old/`.
+    MigrateToServer {
+        /// Migrate only this repo. Default: every dir under ~/.codescope/db/.
+        #[arg(long)]
+        repo: Option<String>,
+        /// Actually perform the migration (default: dry-run, prints plan only).
+        #[arg(long)]
+        execute: bool,
+        /// Delete the `.old/` backup after verify succeeds. Default: keep.
+        #[arg(long)]
+        delete_backup: bool,
+    },
+
     /// Bulk-ingest Claude Code conversation transcripts (.jsonl) into the
     /// knowledge graph. Walks a directory tree for *.jsonl, parses each via
     /// the conversation classifier (decisions, problems, solutions, topics),
