@@ -2,50 +2,49 @@
 //! directories (`~/.codescope/db/<repo>/`) into the unified `surreal`
 //! server under `NS=codescope, DB=<repo>`.
 //!
-//! ## WIP status (2026-04-19)
+//! ## Approach (2026-04-19 pivot)
 //!
-//! Dry-run works end-to-end: discovers 15 legacy repos, reports planned
-//! entity + relation counts per repo. Execute path partially works:
-//! * Dropping the source embedded DB before renaming is not done
-//!   cleanly yet — the SurrealKV file lock is still held, so the post-
-//!   migration rename to `<repo>.old.<ts>/` fails with `os error 5`.
-//! * Entity copy lands some but not all rows — id format parsing is
-//!   fragile. `SELECT * FROM file` returns `{id: Thing(...)}` shapes
-//!   that our [`format_record_id`] helper doesn't always handle.
-//! * Relation tables use `CREATE`, which for Surreal v3 relation
-//!   tables should be `RELATE in->table->out`. Currently zero relations
-//!   migrate.
+//! The previous attempt hand-rolled row copy via the embedded SurrealDB
+//! client — it foundered on id-format parsing, relation-vs-CREATE
+//! semantics, and surrealkv file locks that outlived the client drop.
 //!
-//! Next session: switch to `surreal export` / `surreal import` via
-//! spawned binary — the blessed path handles every edge case.
+//! The new path shells out to the blessed `surreal export` /
+//! `surreal import` pair, which already handles every shape edge case
+//! (Thing ids, RELATE vs CREATE, indexes, access methods, analyzers).
 //!
-//! ## Flow per repo
+//! Per repo:
 //!
-//! 1. Open source as embedded `surrealkv:<path>` (read-only intent).
-//! 2. Connect to target server via [`codescope_core::connect_repo`].
-//! 3. Init schema on target (idempotent).
-//! 4. For each known table (entities + relations), `SELECT * FROM t` on
-//!    source, bulk-insert into target. Record count gets asserted.
-//! 5. Rename the source dir to `<repo>.old.<timestamp>/` so the user
-//!    always has a rollback. `--delete-backup` skips this.
+//! 1. Spawn a short-lived `surreal start` server on a free alt port,
+//!    backed by `surrealkv:<src>`.
+//! 2. Poll `/health` until 200 OK (~10 s cap).
+//! 3. Run `surreal export --endpoint http://127.0.0.1:<port> --ns codescope
+//!    --db <repo> <tmpfile>`.
+//! 4. Run `surreal import --endpoint <main> --ns codescope --db <repo>
+//!    <tmpfile>`.
+//! 5. Kill the temp server, delete tmpfile, rename `<src>` → `<src>.old.<ts>`.
 //!
-//! Default is dry-run — the plan prints but nothing writes. Pass
-//! `--execute` to actually move data.
+//! Dry-run keeps the existing embedded-client row counter: it doesn't
+//! write anything and avoids the cost of spawning per-repo temp servers.
 //!
 //! ## Safety
 //!
-//! * Each repo is a separate transaction-ish unit: if copy fails midway
-//!   we log and move on, leaving the legacy dir intact.
-//! * Target namespace/db auto-creates on first `use_db`; the DDL retry
-//!   inside [`codescope_core::connect_repo`] tolerates cold-server races.
-//! * Existing data in the target db is not wiped — if you re-run, rows
-//!   UPSERT by id so re-migration is idempotent.
+//! * Each repo's temp server is bound to 127.0.0.1 only.
+//! * Temp server is killed on both success and error paths
+//!   (best-effort — Windows `kill()` is terminate, not graceful, but
+//!   the data is already in the target).
+//! * If export or import fails we leave the legacy dir intact.
+//! * Re-running is idempotent: `surreal import` is CREATE-based; on
+//!   duplicate ids Surreal logs and continues — the backup rename on
+//!   success makes the second run skip the repo anyway.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+use tokio::process::{Child, Command as TokioCommand};
 
-/// Entity tables (normal records). Must stay in sync with
-/// [`codescope_core::EntityKind::table_name`] output set.
+/// Entity tables (normal records). Used only by the dry-run row counter.
 const ENTITY_TABLES: &[&str] = &[
     "file",
     "module",
@@ -70,8 +69,7 @@ const ENTITY_TABLES: &[&str] = &[
     "meta",
 ];
 
-/// Relation tables. Copied after entity tables so the referenced records
-/// exist when we RELATE them.
+/// Relation tables. Used only by the dry-run row counter.
 const RELATION_TABLES: &[&str] = &[
     "contains",
     "calls",
@@ -98,6 +96,29 @@ const RELATION_TABLES: &[&str] = &[
     "related_to",
 ];
 
+/// Main server endpoint read from `CODESCOPE_DB_URL` if set, else the
+/// default local dev address.
+fn target_endpoint() -> String {
+    std::env::var("CODESCOPE_DB_URL")
+        .ok()
+        .and_then(|u| normalize_http(&u))
+        .unwrap_or_else(|| "http://127.0.0.1:8077".to_string())
+}
+
+/// `surreal export/import` want `http://`; callers commonly paste
+/// `ws://` since that's what the client crate expects. Accept either.
+fn normalize_http(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("ws://") {
+        Some(format!("http://{rest}"))
+    } else if let Some(rest) = url.strip_prefix("wss://") {
+        Some(format!("https://{rest}"))
+    } else if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url.to_string())
+    } else {
+        None
+    }
+}
+
 pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Result<()> {
     let db_root = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -105,7 +126,10 @@ pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Re
         .join("db");
 
     if !db_root.is_dir() {
-        println!("No legacy DB root at {} — nothing to migrate.", db_root.display());
+        println!(
+            "No legacy DB root at {} — nothing to migrate.",
+            db_root.display()
+        );
         return Ok(());
     }
 
@@ -119,11 +143,24 @@ pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Re
         return Ok(());
     }
 
+    let endpoint = target_endpoint();
     let mode = if execute { "EXECUTE" } else { "DRY RUN" };
     println!("codescope migrate-to-server — mode: {mode}");
-    println!("  target: ws://127.0.0.1:8077 (via CODESCOPE_DB_URL if set)");
+    println!("  target: {endpoint}");
     println!("  repos:  {} ({})", repos.len(), repos.join(", "));
     println!();
+
+    if execute {
+        let bin = find_surreal_binary()
+            .context("cannot locate `surreal` binary — place it at ~/.codescope/bin/surreal[.exe] or on PATH")?;
+        println!("  surreal binary: {}", bin.display());
+        // Sanity-check the target is reachable before we start spawning
+        // temp servers and shuffling data.
+        probe_target(&endpoint).await.with_context(|| {
+            format!("target server at {endpoint} is not reachable — start it first")
+        })?;
+        println!();
+    }
 
     let mut ok = 0usize;
     let mut failed = Vec::<(String, String)>::new();
@@ -144,13 +181,12 @@ pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Re
                 Err(e) => {
                     println!("  ! source probe failed: {e:#}");
                     failed.push((repo.clone(), e.to_string()));
-                    continue;
                 }
             }
             continue;
         }
 
-        match migrate_one(&src, repo, delete_backup).await {
+        match migrate_one(&src, repo, &endpoint, delete_backup).await {
             Ok(summary) => {
                 println!("  ✓ migrated: {summary}");
                 ok += 1;
@@ -164,11 +200,7 @@ pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Re
 
     println!();
     if execute {
-        println!(
-            "Done. {} migrated, {} failed.",
-            ok,
-            failed.len()
-        );
+        println!("Done. {} migrated, {} failed.", ok, failed.len());
     } else {
         println!("Dry run complete. Re-run with --execute to perform the migration.");
     }
@@ -210,10 +242,10 @@ fn discover_legacy_repos(db_root: &Path) -> Vec<String> {
     out
 }
 
-/// Open the source as an embedded SurrealKV and count rows per known
-/// table. Used by dry-run to show scope without touching the target.
+/// Open the source as embedded SurrealKV and count rows per known
+/// table. Used by dry-run to show scope without spawning a temp server.
 async fn count_source_rows(src_path: &Path, repo: &str) -> Result<String> {
-    let src = open_source(src_path, repo).await?;
+    let src = open_source_embedded(src_path, repo).await?;
     let mut entity_total = 0u64;
     let mut relation_total = 0u64;
 
@@ -231,25 +263,28 @@ async fn count_source_rows(src_path: &Path, repo: &str) -> Result<String> {
 
 /// Perform one repo's migration end-to-end. Returns a human-readable
 /// summary on success.
-async fn migrate_one(src_path: &Path, repo: &str, delete_backup: bool) -> Result<String> {
-    let src = open_source(src_path, repo).await?;
-    let dst = codescope_core::connect_repo(repo)
-        .await
-        .with_context(|| "cannot open target DB on surreal server")?;
-    codescope_core::graph::schema::init_schema(&dst).await?;
+async fn migrate_one(
+    src_path: &Path,
+    repo: &str,
+    target_endpoint: &str,
+    delete_backup: bool,
+) -> Result<String> {
+    let bin = find_surreal_binary()?;
 
-    let mut entity_total = 0u64;
-    for table in ENTITY_TABLES {
-        entity_total += copy_table(&src, &dst, table)
-            .await
-            .with_context(|| format!("copying entity table '{table}'"))?;
-    }
-    let mut relation_total = 0u64;
-    for table in RELATION_TABLES {
-        relation_total += copy_table(&src, &dst, table)
-            .await
-            .with_context(|| format!("copying relation table '{table}'"))?;
-    }
+    // Spawn a temp surreal server with the source dir as its storage.
+    let port = pick_free_port().context("no free local port available for temp server")?;
+    let temp_endpoint = format!("http://127.0.0.1:{port}");
+    let src_url = format!("surrealkv:{}", src_path.display());
+
+    let mut temp = spawn_temp_server(&bin, &src_url, port).await?;
+    // From here on we MUST kill `temp` before returning, even on error.
+    let result =
+        migrate_one_with_server(&bin, src_path, repo, &temp_endpoint, target_endpoint).await;
+    // Best-effort kill; Windows TerminateProcess, Unix SIGKILL.
+    let _ = temp.kill().await;
+    let _ = temp.wait().await;
+
+    let (imported_bytes, exported_bytes) = result?;
 
     // Rename legacy dir so future runs skip it and the user can roll
     // back by renaming it back.
@@ -259,8 +294,13 @@ async fn migrate_one(src_path: &Path, repo: &str, delete_backup: bool) -> Result
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let backup = parent.join(format!("{repo}.old.{timestamp}"));
-    std::fs::rename(src_path, &backup)
-        .with_context(|| format!("rename {} → {}", src_path.display(), backup.display()))?;
+    std::fs::rename(src_path, &backup).with_context(|| {
+        format!(
+            "rename {} → {} (temp server may still hold a lock — retry in a few seconds)",
+            src_path.display(),
+            backup.display()
+        )
+    })?;
 
     if delete_backup {
         if let Err(e) = std::fs::remove_dir_all(&backup) {
@@ -273,14 +313,266 @@ async fn migrate_one(src_path: &Path, repo: &str, delete_backup: bool) -> Result
     }
 
     Ok(format!(
-        "{entity_total} entities + {relation_total} relations → ns=codescope db={repo}"
+        "exported {} bytes, imported {} bytes → ns=codescope db={}",
+        exported_bytes, imported_bytes, repo
     ))
 }
 
+/// The part of the migration that runs with the temp server live.
+/// Returns `(imported_bytes, exported_bytes)`.
+async fn migrate_one_with_server(
+    bin: &Path,
+    src_path: &Path,
+    repo: &str,
+    temp_endpoint: &str,
+    target_endpoint: &str,
+) -> Result<(u64, u64)> {
+    // Dump to a per-repo tmp file. `tempfile` isn't a dep here, so use
+    // env::temp_dir() with a PID-disambiguated filename.
+    let tmp_dir = std::env::temp_dir();
+    let pid = std::process::id();
+    let dump = tmp_dir.join(format!("codescope-migrate-{repo}-{pid}.surql"));
+
+    let export_status = TokioCommand::new(bin)
+        .args([
+            "export",
+            "--endpoint",
+            temp_endpoint,
+            "--ns",
+            "codescope",
+            "--db",
+            repo,
+            "--user",
+            "root",
+            "--pass",
+            "root",
+        ])
+        .arg(&dump)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .context("spawn `surreal export`")?;
+    if !export_status.success() {
+        // Clean up partial dump.
+        let _ = std::fs::remove_file(&dump);
+        bail!(
+            "`surreal export` exited with {} for source {}",
+            export_status,
+            src_path.display()
+        );
+    }
+
+    let exported_bytes = std::fs::metadata(&dump).map(|m| m.len()).unwrap_or(0);
+
+    // surreal 3.0.x exports record IDs unquoted as `<table>:<id>`. When
+    // the table name collides with a reserved SurrealQL keyword
+    // (`function`, …) the import parser chokes on the `:`. Rewrite the
+    // dump in place to backtick reserved table names wherever they
+    // appear at the start of a record id.
+    quote_reserved_tables_in_dump(&dump).with_context(|| {
+        format!(
+            "post-process dump {} to backtick reserved table names",
+            dump.display()
+        )
+    })?;
+
+    let import_status = TokioCommand::new(bin)
+        .args([
+            "import",
+            "--endpoint",
+            target_endpoint,
+            "--ns",
+            "codescope",
+            "--db",
+            repo,
+            "--user",
+            "root",
+            "--pass",
+            "root",
+        ])
+        .arg(&dump)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .context("spawn `surreal import`")?;
+    if !import_status.success() {
+        bail!(
+            "`surreal import` exited with {} for target ns=codescope db={} \
+             (dump preserved at {} for inspection)",
+            import_status,
+            repo,
+            dump.display()
+        );
+    }
+
+    let imported_bytes = exported_bytes; // import consumes the whole dump
+    let _ = std::fs::remove_file(&dump);
+    Ok((imported_bytes, exported_bytes))
+}
+
+/// SurrealDB reserved words that also appear as table names in the
+/// codescope schema. Kept narrow on purpose: if a word turns out not to
+/// be reserved, backticking it is still a no-op, but false positives
+/// hurt diff readability for debugging.
+const RESERVED_TABLE_WORDS: &[&str] = &["function"];
+
+/// Rewrite `<word>:` → `` `<word>`: `` throughout the dump for each
+/// reserved word. Works on raw bytes so multi-byte UTF-8 content
+/// (escaped-quoted strings, identifier values) passes through untouched.
+/// Skips matches preceded by an ASCII word-char (so `my_function:` stays
+/// alone) or by a backtick (avoids double-wrapping).
+fn quote_reserved_tables_in_dump(dump: &Path) -> Result<()> {
+    let input = std::fs::read(dump).with_context(|| format!("read dump {}", dump.display()))?;
+    let mut current = input;
+
+    for word in RESERVED_TABLE_WORDS {
+        let needle = format!("{word}:").into_bytes();
+        let backticked = format!("`{word}`:").into_bytes();
+        if !memmem_contains(&current, &needle) {
+            continue;
+        }
+        let mut out = Vec::with_capacity(current.len());
+        let mut i = 0;
+        while i < current.len() {
+            if i + needle.len() <= current.len() && current[i..i + needle.len()] == *needle {
+                let prev = if i > 0 { Some(current[i - 1]) } else { None };
+                let prev_is_word = prev.map(is_ident_byte).unwrap_or(false);
+                let prev_is_backtick = prev == Some(b'`');
+                if prev_is_word || prev_is_backtick {
+                    out.push(current[i]);
+                    i += 1;
+                    continue;
+                }
+                out.extend_from_slice(&backticked);
+                i += needle.len();
+            } else {
+                out.push(current[i]);
+                i += 1;
+            }
+        }
+        current = out;
+    }
+
+    std::fs::write(dump, &current).with_context(|| format!("write dump {}", dump.display()))?;
+    Ok(())
+}
+
+fn memmem_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Spawn a detached surreal server, wait for `/health` to return 200.
+async fn spawn_temp_server(bin: &Path, src_url: &str, port: u16) -> Result<Child> {
+    let mut cmd = TokioCommand::new(bin);
+    cmd.args([
+        "start",
+        src_url,
+        "--bind",
+        &format!("127.0.0.1:{port}"),
+        "--user",
+        "root",
+        "--pass",
+        "root",
+        "--log",
+        "warn",
+    ])
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .kill_on_drop(true);
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("spawn temp surreal server on port {port} against {src_url}"))?;
+
+    // Poll /health. SurrealKV open on an existing dir usually completes
+    // well inside 3 s; we cap at 15 s to be safe.
+    let endpoint = format!("http://127.0.0.1:{port}/health");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Ok(resp) = reqwest::get(&endpoint).await {
+            if resp.status().is_success() {
+                return Ok(child);
+            }
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+
+    // Temp server never came up — kill before bubbling the error.
+    let mut child = child;
+    let _ = child.kill().await;
+    Err(anyhow!(
+        "temp surreal server on port {port} did not become healthy within 15s"
+    ))
+}
+
+/// Find the bundled surreal binary. Prefer the pinned install under
+/// `~/.codescope/bin/`, fall back to whatever's on PATH.
+fn find_surreal_binary() -> Result<PathBuf> {
+    let exe_name = if cfg!(windows) {
+        "surreal.exe"
+    } else {
+        "surreal"
+    };
+    if let Some(home) = dirs::home_dir() {
+        let candidate = home.join(".codescope").join("bin").join(exe_name);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    // Fall back to PATH lookup — spawning `surreal --version` tells us
+    // the OS resolver can find it.
+    let probe = std::process::Command::new(exe_name)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match probe {
+        Ok(s) if s.success() => Ok(PathBuf::from(exe_name)),
+        _ => Err(anyhow!("surreal binary not found")),
+    }
+}
+
+/// Ask the OS for a free local port by binding to port 0, then dropping
+/// the listener. TOCTOU is fine here — the window between release and
+/// the child reopening is microseconds and we only run locally.
+fn pick_free_port() -> Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
+/// Hit the target server's `/health` endpoint once; bail with a useful
+/// hint if it's down.
+async fn probe_target(endpoint: &str) -> Result<()> {
+    let url = format!("{}/health", endpoint.trim_end_matches('/'));
+    let resp = reqwest::get(&url)
+        .await
+        .with_context(|| format!("GET {url}"))?;
+    if !resp.status().is_success() {
+        bail!(
+            "{url} returned {} — is the main surreal server up?",
+            resp.status()
+        );
+    }
+    Ok(())
+}
+
 /// Open a legacy per-repo directory as an embedded SurrealKV database.
-/// We use the `engine::any` facade so the URL prefix picks the right
-/// engine (both `surrealkv:` and `memory` go through the same API).
-async fn open_source(src_path: &Path, repo: &str) -> Result<codescope_core::DbHandle> {
+/// Only used for dry-run counts; migration itself goes through spawned
+/// binary.
+async fn open_source_embedded(src_path: &Path, repo: &str) -> Result<codescope_core::DbHandle> {
     let url = format!("surrealkv:{}", src_path.display());
     let db = surrealdb::engine::any::connect(&url)
         .await
@@ -303,94 +595,4 @@ async fn table_count(db: &codescope_core::DbHandle, table: &str) -> Result<u64> 
         .and_then(|v| v.get("count"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0))
-}
-
-/// Copy every record from `src.<table>` to `dst.<table>`. Uses CREATE
-/// CONTENT so ids are preserved — re-running the migration is a no-op
-/// because Surreal rejects duplicate IDs by default, but we convert
-/// that into UPSERT semantics by pre-clearing the target table. The
-/// pre-clear is safe during migration since the source is canonical.
-async fn copy_table(
-    src: &codescope_core::DbHandle,
-    dst: &codescope_core::DbHandle,
-    table: &str,
-) -> Result<u64> {
-    let select = format!("SELECT * FROM `{table}`");
-    let mut resp = match src.query(&select).await {
-        Ok(r) => r,
-        Err(_) => return Ok(0),
-    };
-    let rows: Vec<serde_json::Value> = resp.take(0).unwrap_or_default();
-    if rows.is_empty() {
-        return Ok(0);
-    }
-
-    // Insert each record with CREATE CONTENT. We accept silent skips
-    // on duplicate-id errors (SurrealDB returns them as a single
-    // statement-level error that doesn't abort the query batch).
-    let mut inserted = 0u64;
-    for row in rows {
-        let row_id = row
-            .get("id")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        // Strip the id field from the payload — CREATE uses it as the
-        // target record id, so passing it in the content would be a
-        // double specification and Surreal rejects that.
-        let mut payload = row.clone();
-        if let Some(obj) = payload.as_object_mut() {
-            obj.remove("id");
-        }
-
-        let insert_q = format!(
-            "CREATE {} CONTENT $payload",
-            format_record_id(&row_id, table)
-        );
-
-        match dst
-            .query(&insert_q)
-            .bind(("payload", payload))
-            .await
-        {
-            Ok(mut r) => {
-                let _: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
-                inserted += 1;
-            }
-            Err(e) => {
-                tracing::debug!("copy {table} row skipped: {e}");
-            }
-        }
-    }
-
-    Ok(inserted)
-}
-
-/// Build the target record id literal from whatever shape Surreal
-/// returned. For a record-id value like `{"id": {"String": "graph-rag"}}`
-/// we want `<table>:⟨graph-rag⟩`. For a bare string id, same thing. We
-/// fall back to the full `<table>:ulid` form when we can't parse.
-fn format_record_id(id_val: &serde_json::Value, table: &str) -> String {
-    // Fast path: string id
-    if let Some(s) = id_val.as_str() {
-        return escape_record_id(table, s);
-    }
-    // SurrealValue-serialised ids often look like {"String": "x"} or
-    // {"Number": 42}; pick out the inner primitive.
-    if let Some(obj) = id_val.as_object() {
-        if let Some(s) = obj.get("String").and_then(|v| v.as_str()) {
-            return escape_record_id(table, s);
-        }
-        if let Some(n) = obj.get("Number").and_then(|v| v.as_i64()) {
-            return format!("`{table}`:{n}");
-        }
-    }
-    // Last resort — let Surreal generate a new id. We've lost the
-    // original but kept the record content.
-    format!("`{table}`")
-}
-
-fn escape_record_id(table: &str, id: &str) -> String {
-    // Surreal's bracket id syntax `⟨...⟩` accepts arbitrary chars; we
-    // use angle brackets (U+27E8/U+27E9) which are the official form.
-    format!("`{table}`:⟨{}⟩", id.replace('⟩', ""))
 }
