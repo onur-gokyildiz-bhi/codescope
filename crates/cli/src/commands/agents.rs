@@ -36,6 +36,12 @@ pub enum Agent {
     Codex,
     /// Windsurf (Codeium) — `~/.codeium/windsurf/mcp_config.json`.
     Windsurf,
+    /// Kiro — `.kiro/settings/mcp.json` in project root.
+    Kiro,
+    /// Cline (VS Code extension) — `.vscode/cline_mcp_settings.json`.
+    Cline,
+    /// Antigravity — `~/.gemini/antigravity/mcp_config.json`.
+    Antigravity,
 }
 
 impl Agent {
@@ -48,6 +54,9 @@ impl Agent {
             Agent::VscodeCopilot => "VS Code Copilot",
             Agent::Codex => "Codex CLI",
             Agent::Windsurf => "Windsurf",
+            Agent::Kiro => "Kiro",
+            Agent::Cline => "Cline",
+            Agent::Antigravity => "Antigravity",
         }
     }
 }
@@ -144,8 +153,75 @@ pub fn write_config(
                 note: "Windsurf: Cascade → Settings → reload MCP config.".into(),
             })
         }
+        Agent::Kiro => {
+            // Project-local — matches Kiro's documented path.
+            let path = project_path.join(".kiro").join("settings").join("mcp.json");
+            std::fs::create_dir_all(path.parent().unwrap()).ok();
+            let body = stdio_or_http_json(mcp_binary, project_path, repo_name, daemon_port);
+            write_atomic(&path, &body)?;
+            Ok(WriteOutcome {
+                path,
+                note: "Kiro: Settings → search \"MCP\" → enable → reload.".into(),
+            })
+        }
+        Agent::Cline => {
+            // Cline reads from the VS Code extension settings dir.
+            // Per-project: `.vscode/cline_mcp_settings.json`.
+            let path = project_path.join(".vscode").join("cline_mcp_settings.json");
+            std::fs::create_dir_all(path.parent().unwrap()).ok();
+            let body = stdio_or_http_json(mcp_binary, project_path, repo_name, daemon_port);
+            write_atomic(&path, &body)?;
+            Ok(WriteOutcome {
+                path,
+                note: "Cline: open the Cline panel → MCP Servers tab → reload.".into(),
+            })
+        }
+        Agent::Antigravity => {
+            // Global Gemini settings dir + a GEMINI.md routing
+            // nudge (Antigravity has no hook support, so this is
+            // the only way to steer the model).
+            let path = home()?
+                .join(".gemini")
+                .join("antigravity")
+                .join("mcp_config.json");
+            std::fs::create_dir_all(path.parent().unwrap()).ok();
+            let body = stdio_or_http_json(mcp_binary, project_path, repo_name, daemon_port);
+            write_atomic(&path, &body)?;
+            // Drop GEMINI.md too — Antigravity auto-reads it.
+            let gemini_md = project_path.join("GEMINI.md");
+            if !gemini_md.exists() {
+                let _ = std::fs::write(&gemini_md, ANTIGRAVITY_GEMINI_MD);
+            }
+            Ok(WriteOutcome {
+                path,
+                note: "Antigravity: restart. GEMINI.md added for routing (no hook support).".into(),
+            })
+        }
     }
 }
+
+/// Minimal routing doc for Antigravity. Antigravity has no hook
+/// support, so we rely on a repo-local markdown file. The agent
+/// auto-loads GEMINI.md if present. Kept short: the tool cheat
+/// sheet is what matters; tone echoes llms.txt.
+const ANTIGRAVITY_GEMINI_MD: &str = "\
+# codescope routing (Antigravity)
+
+This project uses [codescope](https://github.com/onur-gokyildiz-bhi/codescope)
+for code context. Prefer codescope MCP tools over raw Read / Grep /
+Glob whenever the question is about structure or relationships.
+
+| Instead of… | Use… |
+|-------------|------|
+| Read whole file | `context_bundle(file_path)` |
+| Grep + Read for callers | `find_callers(name)` |
+| Manual call graph | `impact_analysis(name, depth=3)` |
+| Grep across codebase | `search_functions` / `search` |
+| Read file to understand | `explore(entity_name)` |
+
+Only fall back to Read for function *bodies* after codescope has
+returned the exact `file:line`.
+";
 
 // ── body builders ───────────────────────────────────────────────
 
@@ -315,6 +391,9 @@ pub fn parse_name(name: &str) -> Result<Agent> {
         "vscode-copilot" | "copilot" | "vscode" => Ok(Agent::VscodeCopilot),
         "codex" => Ok(Agent::Codex),
         "windsurf" => Ok(Agent::Windsurf),
+        "kiro" => Ok(Agent::Kiro),
+        "cline" => Ok(Agent::Cline),
+        "antigravity" => Ok(Agent::Antigravity),
         _ => bail!("unknown agent '{name}'"),
     }
 }

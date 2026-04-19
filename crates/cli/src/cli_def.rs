@@ -98,7 +98,8 @@ pub enum Commands {
         #[arg(long, default_value = "9877")]
         daemon_port: u16,
         /// Which agent to wire codescope into. Default: claude-code.
-        /// Accepts: claude-code | cursor | gemini-cli | vscode-copilot | codex | windsurf.
+        /// Accepts: claude-code | cursor | gemini-cli | vscode-copilot |
+        /// codex | windsurf | kiro | cline | antigravity.
         #[arg(long, default_value = "claude-code")]
         agent: String,
     },
