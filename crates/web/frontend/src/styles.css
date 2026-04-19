@@ -1539,29 +1539,32 @@ body::before {
    ============================================================ */
 
 .dream-layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: var(--space-4, 16px);
+  position: relative;
   height: 100%;
   width: 100%;
-  padding: var(--space-4, 16px);
-  box-sizing: border-box;
   overflow: hidden;
   background:
-    radial-gradient(circle at 70% 20%, rgba(163,113,247,0.10), transparent 60%),
-    radial-gradient(circle at 20% 80%, rgba(56,189,248,0.08), transparent 60%);
+    radial-gradient(circle at 70% 20%, rgba(163,113,247,0.14), transparent 60%),
+    radial-gradient(circle at 20% 80%, rgba(56,189,248,0.10), transparent 60%),
+    #07080c;
 }
 
 .dream-arcs {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 300px;
+  max-height: calc(100% - 32px);
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 12px);
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(15, 23, 42, 0.72);
   border: 1px solid var(--border-dim, #1e293b);
   border-radius: 12px;
   padding: var(--space-3, 12px);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
 }
 .dream-arcs-header {
   display: flex;
@@ -1635,15 +1638,21 @@ body::before {
 }
 
 .dream-stage {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 420px;
+  max-height: calc(100% - 32px);
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 12px);
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.72);
   border: 1px solid var(--border-dim, #1e293b);
   border-radius: 12px;
   padding: var(--space-4, 16px);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(10px);
 }
 .dream-stage-empty,
 .dream-status {

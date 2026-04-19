@@ -14,6 +14,7 @@ import { createEffect, createResource, createSignal, For, Show } from 'solid-js'
 import { Moon, PlayCircle, PauseCircle, SkipForward, SkipBack } from 'lucide-solid';
 import { api, type DreamArcSummary, type DreamScene } from '../api';
 import { currentProject } from '../store';
+import DreamGraph3D from './DreamGraph3D';
 
 export default function DreamPage() {
   const [activeArcId, setActiveArcId] = createSignal<string | null>(null);
@@ -86,6 +87,15 @@ export default function DreamPage() {
 
   return (
     <div class="dream-layout">
+      {/* Full-bleed 3D tour graph renders behind every panel */}
+      <Show when={(arcDetail()?.scenes.length ?? 0) > 0}>
+        <DreamGraph3D
+          scenes={arcDetail()!.scenes}
+          currentIndex={sceneIdx()}
+          onNodeClick={(i) => setSceneIdx(i)}
+        />
+      </Show>
+
       {/* Left — arc list */}
       <aside class="dream-arcs">
         <div class="dream-arcs-header">
