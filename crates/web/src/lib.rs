@@ -163,6 +163,8 @@ fn build_routes() -> Router<Arc<AppState>> {
         // Phase 3 Dream — narrated tours through the knowledge graph.
         .route("/api/dream/arcs", get(dream::api_dream_arcs))
         .route("/api/dream/arc/{id}", get(dream::api_dream_arc))
+        // CMX-01 insight — per-call analytics from ~/.codescope/insight.jsonl
+        .route("/api/insight", get(api_insight))
 }
 
 /// Build the web API router from an existing DB connection (single-project mode).
@@ -434,6 +436,29 @@ async fn api_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 /// Those must not leak into the project switcher.
 fn is_legacy_backup_dir(name: &str) -> bool {
     name.contains(".old.") || name.ends_with(".old")
+}
+
+/// CMX-01 insight endpoint — reads `~/.codescope/insight.jsonl`,
+/// returns the same `Summary` the CLI prints. Mirrors the shape
+/// the frontend Insight view expects; no repo scoping here since
+/// the events already carry their own repo field.
+async fn api_insight() -> impl IntoResponse {
+    let events = codescope_core::insight::load_all();
+    let summary = codescope_core::insight::summarise(&events);
+    // Also include the gain-counter headline so the UI can show a
+    // single "tokens saved" number without a second fetch.
+    let gain = codescope_core::gain::load().unwrap_or_default();
+    axum::response::Json(serde_json::json!({
+        "summary": summary,
+        "gain": {
+            "total_calls": gain.total_calls,
+            "tokens_per_call_est": codescope_core::gain::TOKENS_PER_CALL_EST,
+            "tokens_saved_est": gain.total_calls * codescope_core::gain::TOKENS_PER_CALL_EST,
+            "first_used": gain.first_used,
+            "last_used": gain.last_used,
+        }
+    }))
+    .into_response()
 }
 
 async fn api_stats(

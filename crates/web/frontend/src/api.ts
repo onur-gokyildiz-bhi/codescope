@@ -72,6 +72,25 @@ export const api = {
 
   dreamArc: (id: string) =>
     fetchJson<DreamArcDetail>(withRepo(`${BASE}/api/dream/arc/${encodeURIComponent(id)}`)),
+
+  insight: () => fetchJson<InsightResponse>(`${BASE}/api/insight`),
+};
+
+export type InsightResponse = {
+  summary: {
+    total_calls: number;
+    repos: Record<string, number>;
+    hours: Record<string, number>;
+    first_ts: number | null;
+    last_ts: number | null;
+  };
+  gain: {
+    total_calls: number;
+    tokens_per_call_est: number;
+    tokens_saved_est: number;
+    first_used: string | null;
+    last_used: string | null;
+  };
 };
 
 export type DreamArcSummary = {

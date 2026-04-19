@@ -26,6 +26,7 @@ import Legend from './components/Legend';
 import Minimap from './components/Minimap';
 import RightPanel from './components/RightPanel';
 import DreamPage from './components/DreamPage';
+import InsightPage from './components/InsightPage';
 
 export default function App() {
   onMount(() => {
@@ -39,6 +40,7 @@ export default function App() {
     registerShortcut('4', () => setViewMode('cluster'));
     registerShortcut('5', () => setViewMode('archive'));
     registerShortcut('6', () => setViewMode('dream'));
+    registerShortcut('7', () => setViewMode('insight'));
     registerShortcut('escape', () => {
       setShowPalette(false);
       setShowShortcuts(false);
@@ -86,6 +88,9 @@ export default function App() {
         </Show>
         <Show when={viewMode() === 'dream'}>
           <DreamPage />
+        </Show>
+        <Show when={viewMode() === 'insight'}>
+          <InsightPage />
         </Show>
 
         <Show when={viewMode() === 'graph'}>

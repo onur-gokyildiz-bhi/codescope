@@ -7,10 +7,10 @@ import {
 import ProjectSwitcher from './ProjectSwitcher';
 import {
   FolderTree, MessageSquare, Keyboard, Network,
-  CirclePlus, Flame, LayoutGrid, Search, Menu, Archive, Moon,
+  CirclePlus, Flame, LayoutGrid, Search, Menu, Archive, Moon, Activity,
 } from 'lucide-solid';
 
-type View = 'graph' | 'pack' | 'hotspot' | 'cluster' | 'archive' | 'dream';
+type View = 'graph' | 'pack' | 'hotspot' | 'cluster' | 'archive' | 'dream' | 'insight';
 
 const VIEW_META: { id: View; label: string; key: string; Icon: any }[] = [
   { id: 'graph',   label: 'Graph',    key: '1', Icon: Network    },
@@ -19,6 +19,7 @@ const VIEW_META: { id: View; label: string; key: string; Icon: any }[] = [
   { id: 'cluster', label: 'Clusters', key: '4', Icon: LayoutGrid },
   { id: 'archive', label: 'Archive',  key: '5', Icon: Archive    },
   { id: 'dream',   label: 'Dream',    key: '6', Icon: Moon       },
+  { id: 'insight', label: 'Insight',  key: '7', Icon: Activity   },
 ];
 
 export default function TopBar() {
