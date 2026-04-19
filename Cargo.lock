@@ -928,6 +928,7 @@ version = "0.7.10"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs 5.0.1",
  "fastembed",
  "git2",
  "hex",

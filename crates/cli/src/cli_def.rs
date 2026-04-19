@@ -200,6 +200,12 @@ pub enum Commands {
         delete_backup: bool,
     },
 
+    /// Show cumulative token-savings from MCP tool calls. Reads the
+    /// counter at `~/.codescope/gain.json` (written by the MCP
+    /// server every 30 s). Number is an estimate: total_calls ×
+    /// average tokens-saved-per-call.
+    Gain,
+
     /// Rebuild a corrupted repo's DB. Drops NS=codescope DB=<repo>
     /// on the running surreal server (no files touched on disk —
     /// the server handles that), then optionally re-indexes from

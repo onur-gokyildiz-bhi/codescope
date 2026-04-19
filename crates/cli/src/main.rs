@@ -210,6 +210,9 @@ async fn run() -> Result<()> {
         } => {
             commands::migrate_to_server::run(repo, execute, delete_backup).await?;
         }
+        Commands::Gain => {
+            commands::gain::run().await?;
+        }
         Commands::Repair { repo, reindex, yes } => {
             commands::repair::run(repo, reindex, yes).await?;
         }

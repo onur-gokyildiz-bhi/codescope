@@ -224,12 +224,29 @@ pub async fn run_stdio_with_options(
         });
     }
 
+    // Periodic gain-counter flush — every 30s we persist the
+    // in-memory tool-call count to `~/.codescope/gain.json` so
+    // `codescope gain` has fresh numbers without paying IO on the
+    // hot path. 30s is a compromise: lower loses data on a
+    // sudden kill, higher shows stale numbers.
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            if let Err(e) = codescope_core::gain::flush().await {
+                tracing::debug!("gain flush: {e}");
+            }
+        }
+    });
+
     let service = mcp_server.serve(rmcp::transport::stdio()).await?;
     tracing::info!("MCP server running on stdio");
     service.waiting().await?;
 
     // Graceful shutdown — give background tasks time to finish
     tracing::info!("MCP session ended, shutting down...");
+    // One final flush before we let the runtime drop — otherwise
+    // last-30s calls are lost.
+    let _ = codescope_core::gain::flush().await;
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // Flush any pending OpenTelemetry spans before exit. No-op if OTLP

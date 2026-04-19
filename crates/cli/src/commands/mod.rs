@@ -3,6 +3,7 @@
 pub mod daemon;
 pub mod doctor;
 pub mod embed;
+pub mod gain;
 pub mod history;
 pub mod hotspots;
 pub mod index;

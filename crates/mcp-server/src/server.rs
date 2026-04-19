@@ -208,6 +208,11 @@ impl GraphRagServer {
     /// `{ok:false, error:{code, message, hint}}` and can act on
     /// `error.hint`.
     pub(crate) async fn ctx(&self) -> Result<ProjectCtx, String> {
+        // Every tool call reaches here on its first awaited step,
+        // so instrumenting once here catches 99% of the surface
+        // without touching 52 individual tool handlers. The bump
+        // is a single relaxed atomic add — effectively free.
+        codescope_core::gain::record_call();
         if let Some(ctx) = self.project.read().await.clone() {
             return Ok(ctx);
         }

@@ -10,6 +10,7 @@ pub mod crossrepo;
 pub mod daemon;
 pub mod db;
 pub mod embeddings;
+pub mod gain;
 pub mod graph;
 pub mod parser;
 pub mod temporal;

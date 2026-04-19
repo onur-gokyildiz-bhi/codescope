@@ -25,6 +25,7 @@ walkdir = { workspace = true }
 ignore = { workspace = true }
 fastembed = { workspace = true }
 reqwest = { workspace = true }
+dirs = "5"
 
 # Tree-sitter language grammars
 tree-sitter-typescript = "0.23.2"
