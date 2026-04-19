@@ -68,38 +68,26 @@ pub async fn run(project_path: PathBuf, auto_fix: bool) -> Result<()> {
     }
     checks.push(mcp_check);
 
-    // 3. .claude/rules/codescope-mandatory.md
+    // 3. Routing rules — post-CMX-04 these are injected at MCP
+    // initialize via `ServerInfo.instructions`, so the on-disk file
+    // is optional. Report it as informational rather than a failure.
     let rule_path = project_path
         .join(".claude")
         .join("rules")
         .join("codescope-mandatory.md");
     if rule_path.exists() {
         checks.push(Check {
-            name: "Claude rule (codescope-mandatory)",
+            name: "Routing rules (legacy file)",
             status: Status::Pass,
-            detail: ".claude/rules/codescope-mandatory.md present".into(),
+            detail: "found .claude/rules/codescope-mandatory.md (optional — rules also injected at MCP init)".into(),
             fix: None,
         });
-    } else if auto_fix {
-        let rules_dir = project_path.join(".claude").join("rules");
-        let _ = std::fs::create_dir_all(&rules_dir);
-        let _ = std::fs::write(
-            &rule_path,
-            include_str!("../../../../.claude/rules/codescope-mandatory.md"),
-        );
-        checks.push(Check {
-            name: "Claude rule (codescope-mandatory)",
-            status: Status::Pass,
-            detail: "FIXED — created .claude/rules/codescope-mandatory.md".into(),
-            fix: None,
-        });
-        fixes_applied += 1;
     } else {
         checks.push(Check {
-            name: "Claude rule (codescope-mandatory)",
-            status: Status::Fail,
-            detail: "missing — Claude Code won't use codescope tools".into(),
-            fix: Some("Run: codescope doctor --fix\nOr: codescope init".into()),
+            name: "Routing rules (injected at MCP init)",
+            status: Status::Pass,
+            detail: "runtime injection active — no file needed in this repo".into(),
+            fix: None,
         });
     }
 
