@@ -1,20 +1,36 @@
 {
   "name": "codescope",
-  "version": "0.6.1",
-  "description": "Graph-first code intelligence for AI agents. Query knowledge graphs, trace call chains, analyze impact, search functions — all via MCP tools backed by SurrealDB. Teaches your agent to use codescope instead of reading raw files.",
+  "version": "0.7.10",
+  "description": "Graph-first code intelligence for AI agents. SurrealDB knowledge graph + 52 MCP tools replace Read/Grep/Glob with deterministic graph traversal. 80–95% fewer tokens on code context. Rust-native, fully local.",
   "author": {
     "name": "Onur Gokyildiz",
     "url": "https://github.com/onur-gokyildiz-bhi"
   },
+  "homepage": "https://github.com/onur-gokyildiz-bhi/codescope#readme",
   "repository": "https://github.com/onur-gokyildiz-bhi/codescope",
   "license": "MIT",
   "keywords": [
-    "code-analysis",
-    "graph-database",
     "mcp",
+    "code-intelligence",
+    "knowledge-graph",
     "surrealdb",
+    "rust",
+    "tree-sitter",
+    "graph-rag",
+    "semantic-search",
     "call-graph",
-    "impact-analysis",
-    "code-intelligence"
+    "impact-analysis"
+  ],
+  "mcpServers": {
+    "codescope": {
+      "command": "codescope-mcp",
+      "args": [
+        "${CLAUDE_PROJECT_DIR:-.}",
+        "--auto-index-background"
+      ]
+    }
+  },
+  "rules": [
+    "./.claude/rules/codescope-mandatory.md"
   ]
 }

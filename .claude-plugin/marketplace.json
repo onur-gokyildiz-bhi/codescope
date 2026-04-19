@@ -8,8 +8,8 @@
     {
       "name": "codescope",
       "source": "./",
-      "description": "Graph-first code intelligence skills for Claude Code",
-      "version": "0.6.1"
+      "description": "Graph-first code intelligence — 52 MCP tools, SurrealDB knowledge graph, 80–95% token reduction on code context.",
+      "version": "0.7.10"
     }
   ]
 }
