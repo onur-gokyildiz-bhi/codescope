@@ -5,6 +5,7 @@
 //! config files (JSON/YAML/TOML), docs (Markdown), SQL, Terraform, and more.
 
 #[allow(dead_code)] // Exposes fields for MCP tools and external consumers
+pub mod compact;
 pub mod conversation;
 pub mod crossrepo;
 pub mod daemon;

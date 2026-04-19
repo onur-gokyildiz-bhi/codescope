@@ -233,14 +233,20 @@ impl GraphQuery {
         }
 
         // If single statement, return flat array for backward compatibility
-        if all_results.len() <= 1 {
-            Ok(all_results
+        let mut out = if all_results.len() <= 1 {
+            all_results
                 .into_iter()
                 .next()
-                .unwrap_or(serde_json::Value::Array(vec![])))
+                .unwrap_or(serde_json::Value::Array(vec![]))
         } else {
-            Ok(serde_json::Value::Array(all_results))
-        }
+            serde_json::Value::Array(all_results)
+        };
+
+        // RTK-06 — optional response compaction. A single env-var
+        // check per call; the stripper is recursive but fast and
+        // no-op when `Level::None` (default).
+        crate::compact::apply(&mut out, crate::compact::Level::from_env());
+        Ok(out)
     }
 
     /// Get graph statistics — full knowledge graph overview
