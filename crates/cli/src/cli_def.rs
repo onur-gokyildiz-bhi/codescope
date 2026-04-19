@@ -214,6 +214,14 @@ pub enum Commands {
     /// sparkline of tool activity. Reads `~/.codescope/insight.jsonl`.
     Insight,
 
+    /// Self-update — download the latest GitHub release for the
+    /// host triple and replace the installed binaries in-place.
+    /// `--yes` skips the confirmation prompt.
+    Upgrade {
+        #[arg(long)]
+        yes: bool,
+    },
+
     /// Rebuild a corrupted repo's DB. Drops NS=codescope DB=<repo>
     /// on the running surreal server (no files touched on disk —
     /// the server handles that), then optionally re-indexes from

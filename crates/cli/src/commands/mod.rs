@@ -24,3 +24,4 @@ pub mod serve;
 pub mod stats;
 pub mod supervisor;
 pub mod sync_history;
+pub mod upgrade;
