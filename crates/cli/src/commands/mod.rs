@@ -18,4 +18,5 @@ pub mod search;
 pub mod semantic_search;
 pub mod serve;
 pub mod stats;
+pub mod supervisor;
 pub mod sync_history;

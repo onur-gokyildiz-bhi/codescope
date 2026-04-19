@@ -30,7 +30,10 @@ async fn two_repos_no_contention() -> anyhow::Result<()> {
     let mut ra = a.query("SELECT val FROM misc:tag").await?;
     let rows_a: Vec<serde_json::Value> = ra.take(0).unwrap_or_default();
     assert_eq!(
-        rows_a.first().and_then(|v| v.get("val")).and_then(|v| v.as_str()),
+        rows_a
+            .first()
+            .and_then(|v| v.get("val"))
+            .and_then(|v| v.as_str()),
         Some("in-alpha"),
         "alpha repo saw: {rows_a:?}"
     );
@@ -38,7 +41,10 @@ async fn two_repos_no_contention() -> anyhow::Result<()> {
     let mut rb = b.query("SELECT val FROM misc:tag").await?;
     let rows_b: Vec<serde_json::Value> = rb.take(0).unwrap_or_default();
     assert_eq!(
-        rows_b.first().and_then(|v| v.get("val")).and_then(|v| v.as_str()),
+        rows_b
+            .first()
+            .and_then(|v| v.get("val"))
+            .and_then(|v| v.as_str()),
         Some("in-beta"),
         "beta repo saw: {rows_b:?}"
     );

@@ -183,13 +183,13 @@ async fn run() -> Result<()> {
         Commands::Serve { port, bind } => {
             commands::serve::run(&bind, port).await?;
         }
-        Commands::Start { port } => {
+        Commands::DaemonStart { port } => {
             commands::daemon::start(port)?;
         }
-        Commands::Stop { port } => {
+        Commands::DaemonStop { port } => {
             commands::daemon::stop(port).await?;
         }
-        Commands::Status { port } => {
+        Commands::DaemonStatus { port } => {
             commands::daemon::status(port).await?;
         }
         Commands::Review {
@@ -209,6 +209,15 @@ async fn run() -> Result<()> {
             delete_backup,
         } => {
             commands::migrate_to_server::run(repo, execute, delete_backup).await?;
+        }
+        Commands::Start { port } => {
+            commands::supervisor::start(port).await?;
+        }
+        Commands::Stop => {
+            commands::supervisor::stop().await?;
+        }
+        Commands::Status => {
+            commands::supervisor::status().await?;
         }
         Commands::IngestConversations {
             dir,

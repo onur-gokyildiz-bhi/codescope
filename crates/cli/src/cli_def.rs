@@ -147,20 +147,22 @@ pub enum Commands {
         bind: String,
     },
 
-    /// Start daemon in background
-    Start {
+    /// Start the codescope daemon (web + MCP on port 9877) in
+    /// background. For the underlying surreal server, use
+    /// `codescope start` instead.
+    DaemonStart {
         #[arg(long, default_value = "9877")]
         port: u16,
     },
 
-    /// Stop running daemon
-    Stop {
+    /// Stop the codescope daemon.
+    DaemonStop {
         #[arg(long, default_value = "9877")]
         port: u16,
     },
 
-    /// Check daemon status
-    Status {
+    /// Check the codescope daemon status.
+    DaemonStatus {
         #[arg(long, default_value = "9877")]
         port: u16,
     },
@@ -197,6 +199,23 @@ pub enum Commands {
         #[arg(long)]
         delete_backup: bool,
     },
+
+    /// Start the bundled surreal server (idempotent). Writes a state
+    /// file at `~/.codescope/surreal.json` with pid / port / version so
+    /// subsequent `start`/`stop`/`status` commands know what's running.
+    Start {
+        /// Port to bind to. Default: 8077.
+        #[arg(long)]
+        port: Option<u16>,
+    },
+
+    /// Stop the bundled surreal server. No-op if nothing is recorded.
+    Stop,
+
+    /// Report the surreal server's current state without changing it.
+    /// Exits 0 with a single-line status keyword, suitable for
+    /// scripting: `running`, `not-running`, `stale-pid`, `unhealthy`.
+    Status,
 
     /// Bulk-ingest Claude Code conversation transcripts (.jsonl) into the
     /// knowledge graph. Walks a directory tree for *.jsonl, parses each via

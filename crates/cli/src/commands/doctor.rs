@@ -60,37 +60,13 @@ pub async fn run(project_path: PathBuf, auto_fix: bool) -> Result<()> {
     checks.push(check_binary("codescope"));
     checks.push(check_binary("codescope-mcp"));
 
-    // 2. .mcp.json exists
+    // 2. .mcp.json exists (and is valid JSON)
     let mcp_json = project_path.join(".mcp.json");
-    if mcp_json.exists() {
-        let content = std::fs::read_to_string(&mcp_json).unwrap_or_default();
-        if content.contains("codescope") {
-            checks.push(Check {
-                name: ".mcp.json",
-                status: Status::Pass,
-                detail: "exists with codescope entry".into(),
-                fix: None,
-            });
-        } else {
-            checks.push(Check {
-                name: ".mcp.json",
-                status: Status::Fail,
-                detail: "exists but missing codescope entry".into(),
-                fix: Some("Run: codescope init".into()),
-            });
-        }
-    } else {
-        let fix_msg = "Run: codescope init".to_string();
-        if auto_fix {
-            // Will be handled by codescope init later
-        }
-        checks.push(Check {
-            name: ".mcp.json",
-            status: Status::Fail,
-            detail: "missing".into(),
-            fix: Some(fix_msg),
-        });
+    let mcp_check = check_mcp_json(&mcp_json, &project_path, auto_fix);
+    if matches!(mcp_check.status, Status::Pass) && mcp_check.detail.starts_with("FIXED") {
+        fixes_applied += 1;
     }
+    checks.push(mcp_check);
 
     // 3. .claude/rules/codescope-mandatory.md
     let rule_path = project_path
@@ -253,6 +229,9 @@ pub async fn run(project_path: PathBuf, auto_fix: bool) -> Result<()> {
         }
     }
 
+    // R4 — surreal server supervisor state
+    checks.push(check_surreal_supervisor().await);
+
     // Print results
     let mut fails = 0;
     let mut warns = 0;
@@ -356,6 +335,68 @@ fn check_binary(name: &str) -> Check {
     }
 }
 
+fn check_mcp_json(mcp_json: &PathBuf, project_path: &PathBuf, auto_fix: bool) -> Check {
+    if mcp_json.exists() {
+        match std::fs::read_to_string(mcp_json) {
+            Ok(content) => {
+                if serde_json::from_str::<serde_json::Value>(&content).is_ok() {
+                    Check {
+                        name: ".mcp.json",
+                        status: Status::Pass,
+                        detail: ".mcp.json is valid".into(),
+                        fix: None,
+                    }
+                } else {
+                    Check {
+                        name: ".mcp.json",
+                        status: Status::Fail,
+                        detail: ".mcp.json contains invalid JSON".into(),
+                        fix: Some("Fix JSON syntax errors in .mcp.json".into()),
+                    }
+                }
+            }
+            Err(_) => Check {
+                name: ".mcp.json",
+                status: Status::Fail,
+                detail: "cannot read .mcp.json".into(),
+                fix: Some("Check file permissions or run: codescope init".into()),
+            },
+        }
+    } else if auto_fix {
+        // Create a minimal .mcp.json
+        let mcp_content = r#"{
+  "mcpServers": {
+    "codescope": {
+      "command": "codescope-mcp",
+      "args": []
+    }
+  }
+}
+"#;
+        match std::fs::write(mcp_json, mcp_content) {
+            Ok(_) => Check {
+                name: ".mcp.json",
+                status: Status::Pass,
+                detail: "FIXED — created .mcp.json".into(),
+                fix: None,
+            },
+            Err(_) => Check {
+                name: ".mcp.json",
+                status: Status::Fail,
+                detail: "failed to create .mcp.json".into(),
+                fix: Some("Check write permissions in project directory".into()),
+            },
+        }
+    } else {
+        Check {
+            name: ".mcp.json",
+            status: Status::Fail,
+            detail: "missing .mcp.json (MCP server config)".into(),
+            fix: Some("Run: codescope doctor --fix\nOr: codescope init".into()),
+        }
+    }
+}
+
 fn check_stale_processes() -> Check {
     let count = if cfg!(windows) {
         std::process::Command::new("tasklist")
@@ -412,6 +453,59 @@ fn check_stale_processes() -> Check {
                 "Kill stale: pkill -f codescope (Linux) or taskkill /f /im codescope.exe (Windows)"
                     .into(),
             ),
+        }
+    }
+}
+
+/// R4 — report the state of the surreal supervisor. Reads the same
+/// `~/.codescope/surreal.json` the supervisor writes; no side effects
+/// (doctor never starts/stops anything on its own).
+async fn check_surreal_supervisor() -> Check {
+    let state_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codescope")
+        .join("surreal.json");
+
+    let Ok(text) = std::fs::read_to_string(&state_path) else {
+        return Check {
+            name: "Surreal server (R4 supervisor)",
+            status: Status::Warn,
+            detail: "no state file — server has never been started by `codescope start`".into(),
+            fix: Some("Run: codescope start".into()),
+        };
+    };
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            return Check {
+                name: "Surreal server (R4 supervisor)",
+                status: Status::Fail,
+                detail: format!("state file is malformed: {e}"),
+                fix: Some(format!(
+                    "Delete {} and run `codescope start` again.",
+                    state_path.display()
+                )),
+            };
+        }
+    };
+    let port = v.get("port").and_then(|x| x.as_u64()).unwrap_or(0) as u16;
+    let pid = v.get("pid").and_then(|x| x.as_u64()).unwrap_or(0);
+
+    let url = format!("http://127.0.0.1:{port}/health");
+    let healthy = matches!(reqwest::get(&url).await, Ok(r) if r.status().is_success());
+    if healthy {
+        Check {
+            name: "Surreal server (R4 supervisor)",
+            status: Status::Pass,
+            detail: format!("running pid={pid} port={port}"),
+            fix: None,
+        }
+    } else {
+        Check {
+            name: "Surreal server (R4 supervisor)",
+            status: Status::Fail,
+            detail: format!("state says pid={pid} port={port} but /health is not responding"),
+            fix: Some("Run: codescope stop && codescope start".into()),
         }
     }
 }

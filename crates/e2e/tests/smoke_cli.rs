@@ -23,7 +23,11 @@ fn codescope_bin() -> std::path::PathBuf {
     p.pop();
     p.push("target");
     p.push("debug");
-    p.push(if cfg!(windows) { "codescope.exe" } else { "codescope" });
+    p.push(if cfg!(windows) {
+        "codescope.exe"
+    } else {
+        "codescope"
+    });
     p
 }
 
