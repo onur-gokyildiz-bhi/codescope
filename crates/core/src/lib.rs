@@ -12,6 +12,7 @@ pub mod db;
 pub mod embeddings;
 pub mod gain;
 pub mod graph;
+pub mod insight;
 pub mod parser;
 pub mod temporal;
 

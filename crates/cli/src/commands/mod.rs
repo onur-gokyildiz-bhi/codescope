@@ -10,6 +10,7 @@ pub mod hotspots;
 pub mod index;
 pub mod ingest_conversations;
 pub mod init;
+pub mod insight;
 pub mod install;
 pub mod languages;
 pub mod migrate;

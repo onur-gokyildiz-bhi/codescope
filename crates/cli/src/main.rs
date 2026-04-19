@@ -222,6 +222,9 @@ async fn run() -> Result<()> {
         Commands::Gain => {
             commands::gain::run().await?;
         }
+        Commands::Insight => {
+            commands::insight::run().await?;
+        }
         Commands::Repair { repo, reindex, yes } => {
             commands::repair::run(repo, reindex, yes).await?;
         }

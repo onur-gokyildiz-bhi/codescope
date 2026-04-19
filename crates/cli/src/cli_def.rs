@@ -210,6 +210,10 @@ pub enum Commands {
     /// average tokens-saved-per-call.
     Gain,
 
+    /// Per-call insight dashboard — counts by repo + hourly
+    /// sparkline of tool activity. Reads `~/.codescope/insight.jsonl`.
+    Insight,
+
     /// Rebuild a corrupted repo's DB. Drops NS=codescope DB=<repo>
     /// on the running surreal server (no files touched on disk —
     /// the server handles that), then optionally re-indexes from

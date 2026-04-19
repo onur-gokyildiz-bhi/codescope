@@ -214,6 +214,8 @@ impl GraphRagServer {
         // is a single relaxed atomic add — effectively free.
         codescope_core::gain::record_call();
         if let Some(ctx) = self.project.read().await.clone() {
+            // Insight event — fire-and-forget, no await.
+            codescope_core::insight::record_event(&ctx.repo_name);
             return Ok(ctx);
         }
         let pending = self.pending_repo.read().await.clone();
@@ -239,6 +241,7 @@ impl GraphRagServer {
                 // use CWD as a best-effort for tools that need a path.
                 codebase_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             };
+            codescope_core::insight::record_event(&ctx.repo_name);
             *self.project.write().await = Some(ctx.clone());
             return Ok(ctx);
         }
