@@ -1,5 +1,6 @@
 //! Command handler modules. Each subcommand lives in its own file.
 
+pub mod agents;
 pub mod daemon;
 pub mod doctor;
 pub mod embed;

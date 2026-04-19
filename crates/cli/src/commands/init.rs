@@ -3,11 +3,13 @@ use codescope_core::graph::builder::GraphBuilder;
 use codescope_core::parser::CodeParser;
 use std::path::PathBuf;
 
+use crate::commands::agents::{self, Agent};
 use crate::db::connect_db;
 
 pub async fn run(
     project_path: PathBuf,
     repo_name: &str,
+    agent: Agent,
     db_path: Option<PathBuf>,
     use_daemon: bool,
     daemon_port: u16,
@@ -31,117 +33,75 @@ pub async fn run(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| repo_name.to_string());
 
-    println!("🔧 Initializing Codescope for '{}'...\n", repo_name);
+    println!(
+        "🔧 Initializing Codescope for '{}' ({})...\n",
+        repo_name,
+        agent.display()
+    );
 
     // Step 1: Detect or start daemon, OR find stdio binary
     let mcp_json_path = project_path.join(".mcp.json");
-    let project_path_str = project_path.to_string_lossy().replace('\\', "\\\\");
+    let _project_path_str = project_path.to_string_lossy().replace('\\', "\\\\");
 
     let daemon_running = is_daemon_running(daemon_port);
 
-    let mcp_json = if use_daemon || daemon_running {
-        // Daemon mode — HTTP MCP config
-        if !daemon_running {
-            println!("🚀 Starting codescope daemon on port {}...", daemon_port);
-            if let Err(e) = crate::commands::daemon::start(daemon_port) {
-                eprintln!("⚠ Failed to start daemon: {e}. Falling back to stdio mode.");
-                return run_stdio_init(project_path, repo_name, db_path).await;
-            }
-            // Wait for daemon to be ready
-            for _ in 0..20 {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                if is_daemon_running(daemon_port) {
-                    break;
-                }
-            }
-        } else {
-            println!(
-                "✓ Daemon already running on port {} — using HTTP MCP config",
-                daemon_port
-            );
+    // Decide transport: HTTP if daemon is (or becomes) running,
+    // else stdio. This drives the `mcp_binary` arg to the agent
+    // writer below.
+    let use_http = use_daemon || daemon_running;
+    if use_http && !daemon_running {
+        println!("🚀 Starting codescope daemon on port {}...", daemon_port);
+        if let Err(e) = crate::commands::daemon::start(daemon_port) {
+            eprintln!("⚠ Failed to start daemon: {e}. Falling back to stdio mode.");
+            return run_stdio_init(project_path, repo_name, db_path, agent).await;
         }
-
-        format!(
-            r#"{{
-  "mcpServers": {{
-    "codescope": {{
-      "type": "http",
-      "url": "http://127.0.0.1:{}/mcp"
-    }}
-  }}
-}}
-"#,
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if is_daemon_running(daemon_port) {
+                break;
+            }
+        }
+    } else if use_http {
+        println!(
+            "✓ Daemon already running on port {} — using HTTP MCP config",
             daemon_port
-        )
-    } else {
-        // Stdio mode (default)
-        let mcp_binary = find_mcp_binary();
-        if mcp_binary.is_none() {
-            eprintln!("⚠ codescope-mcp binary not found. Run 'codescope install' first,");
-            eprintln!("  or build with: cargo build --release -p codescope-mcp");
+        );
+    }
+
+    let mcp_binary_resolved = if use_http { None } else { find_mcp_binary() };
+    if !use_http && mcp_binary_resolved.is_none() {
+        eprintln!("⚠ codescope-mcp binary not found. Run 'codescope install' first,");
+        eprintln!("  or build with: cargo build --release -p codescope-mcp");
+    }
+
+    // Route to the per-agent writer.
+    match agents::write_config(
+        agent,
+        &project_path,
+        &repo_name,
+        mcp_binary_resolved.as_deref(),
+        daemon_port,
+    ) {
+        Ok(outcome) => {
+            println!("📄 Wrote {} MCP config", agent.display());
+            println!("   {}", outcome.path.display());
+            println!("   {}", outcome.note);
         }
-        let mcp_cmd = mcp_binary
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("codescope-mcp"));
-        let mcp_cmd_str = mcp_cmd.to_string_lossy().replace('\\', "\\\\");
-
-        format!(
-            r#"{{
-  "mcpServers": {{
-    "codescope": {{
-      "command": "{}",
-      "args": ["{}", "--repo", "{}", "--auto-index"]
-    }}
-  }}
-}}
-"#,
-            mcp_cmd_str, project_path_str, repo_name
-        )
-    };
-
-    if mcp_json_path.exists() {
-        println!("📄 .mcp.json already exists — updating...");
-    } else {
-        println!("📄 Creating .mcp.json...");
-    }
-    std::fs::write(&mcp_json_path, &mcp_json)?;
-    println!("   {}", mcp_json_path.display());
-
-    // Step 3: Create .claude/rules/codescope-mandatory.md so Claude Code
-    // is required to use codescope MCP tools instead of Read/Grep.
-    let rules_dir = project_path.join(".claude").join("rules");
-    let rule_path = rules_dir.join("codescope-mandatory.md");
-    if !rule_path.exists() {
-        std::fs::create_dir_all(&rules_dir)?;
-        std::fs::write(
-            &rule_path,
-            include_str!("../../../../.claude/rules/codescope-mandatory.md"),
-        )?;
-        println!("📏 Created .claude/rules/codescope-mandatory.md");
-    } else {
-        println!("📏 .claude/rules/codescope-mandatory.md already exists");
-    }
-
-    // Step 3b: Ensure .claude/rules/ is not gitignored (but rest of .claude is).
-    // If .gitignore has ".claude/" but not "!.claude/rules/", add the negation.
-    let gitignore_path_check = project_path.join(".gitignore");
-    if gitignore_path_check.exists() {
-        let gi_content = std::fs::read_to_string(&gitignore_path_check).unwrap_or_default();
-        if gi_content.contains(".claude") && !gi_content.contains("!.claude/rules") {
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&gitignore_path_check)?;
-            use std::io::Write;
-            writeln!(
-                f,
-                "\n# Allow Claude Code rules to be committed\n!.claude/rules/"
-            )?;
-            println!("📝 Added !.claude/rules/ to .gitignore");
+        Err(e) => {
+            eprintln!("⚠ Failed to write {} config: {e}", agent.display());
         }
     }
 
-    // Step 4: Add .mcp.json to .gitignore if not already there
+    // Post-CMX-04: routing rules are injected at MCP initialize,
+    // so we no longer write `.claude/rules/*.md` into the user's
+    // repo from `init`.
+
+    // Step 3: Add .mcp.json / .cursor/mcp.json / etc. to .gitignore
+    // only for the Claude Code case — the other agents write to
+    // user-global paths (`~/.gemini`, `~/.codex`, `~/.codeium`)
+    // that aren't project-scoped. No gitignore churn needed there.
     let gitignore_path = project_path.join(".gitignore");
+    let _ = &mcp_json_path; // kept for compatibility with later steps
     if gitignore_path.exists() {
         let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
         if !content.contains(".mcp.json") {
@@ -262,11 +222,11 @@ async fn run_stdio_init(
     project_path: PathBuf,
     repo_name: String,
     db_path: Option<PathBuf>,
+    agent: Agent,
 ) -> Result<()> {
-    // Re-call run() with daemon=false, but the outer run() already wrote .mcp.json…
-    // This fallback is only for the case daemon was requested but failed to start.
-    // We recursively call run() with use_daemon=false.
-    Box::pin(run(project_path, &repo_name, db_path, false, 9877)).await
+    // Recursive call with daemon=false — the fallback path when
+    // the user requested daemon mode but it couldn't start.
+    Box::pin(run(project_path, &repo_name, agent, db_path, false, 9877)).await
 }
 
 /// Find the codescope-mcp binary — check PATH, common locations, and sibling dir.

@@ -97,6 +97,10 @@ pub enum Commands {
         /// Daemon port (only with --daemon, default 9877)
         #[arg(long, default_value = "9877")]
         daemon_port: u16,
+        /// Which agent to wire codescope into. Default: claude-code.
+        /// Accepts: claude-code | cursor | gemini-cli | vscode-copilot | codex | windsurf.
+        #[arg(long, default_value = "claude-code")]
+        agent: String,
     },
 
     /// Diagnose and fix common setup issues

@@ -132,11 +132,20 @@ async fn run() -> Result<()> {
             path,
             daemon,
             daemon_port,
+            agent,
         } => {
             let project_path = path
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            commands::init::run(project_path, &global_repo, cli.db_path, daemon, daemon_port)
-                .await?;
+            let agent_parsed = commands::agents::parse_name(&agent)?;
+            commands::init::run(
+                project_path,
+                &global_repo,
+                agent_parsed,
+                cli.db_path,
+                daemon,
+                daemon_port,
+            )
+            .await?;
         }
         Commands::Install => {
             commands::install::run()?;
