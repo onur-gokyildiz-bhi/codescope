@@ -115,6 +115,12 @@ impl DaemonState {
                 Some(dbs.keys().cloned().collect::<Vec<_>>())
             })
             .flatten()
+            // Filter artefacts:
+            // * `.old.<ts>` — surreal auto-creates a DB on
+            //   `use_db`, so pre-R7 dry-runs accidentally created
+            //   empty backup-named DBs; hide them.
+            // * `__spike_test_*` — integration-test leftovers.
+            .filter(|n| !n.contains(".old.") && !n.ends_with(".old") && !n.starts_with("__"))
             .collect();
         out.sort();
         out.dedup();

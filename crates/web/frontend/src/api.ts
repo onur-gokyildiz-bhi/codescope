@@ -65,4 +65,38 @@ export const api = {
 
   rawQuery: (q: string) =>
     fetchJson(withRepo(`${BASE}/api/query?q=${encodeURIComponent(q)}`)),
+
+  // Phase 3 Dream — narrated tours through the knowledge graph.
+  dreamArcs: () =>
+    fetchJson<{ arcs: DreamArcSummary[] }>(withRepo(`${BASE}/api/dream/arcs`)),
+
+  dreamArc: (id: string) =>
+    fetchJson<DreamArcDetail>(withRepo(`${BASE}/api/dream/arc/${encodeURIComponent(id)}`)),
+};
+
+export type DreamArcSummary = {
+  id: string;
+  title: string;
+  tag: string;
+  count: number;
+  first_at: string | null;
+  last_at: string | null;
+  kinds: string[];
+};
+
+export type DreamScene = {
+  id: string;
+  kind: string;
+  title: string;
+  content: string;
+  created_at: string | null;
+  tags: string[];
+  narration: string;
+};
+
+export type DreamArcDetail = {
+  id: string;
+  title: string;
+  tag: string;
+  scenes: DreamScene[];
 };

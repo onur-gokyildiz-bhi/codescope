@@ -1531,3 +1531,248 @@ body::before {
   .archive-list { border-right: none; border-bottom: 1px solid var(--border-dim, #1e293b); max-height: 40vh; }
   .archive-detail-actions { flex-wrap: wrap; }
 }
+
+/* ============================================================
+   Phase 3 Dream (/dream) — narrated tours through the KG.
+   Iter 2: arc list + narration carousel. Iter 3 will slot the
+   3D tour behind the scene card.
+   ============================================================ */
+
+.dream-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: var(--space-4, 16px);
+  height: 100%;
+  width: 100%;
+  padding: var(--space-4, 16px);
+  box-sizing: border-box;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 70% 20%, rgba(163,113,247,0.10), transparent 60%),
+    radial-gradient(circle at 20% 80%, rgba(56,189,248,0.08), transparent 60%);
+}
+
+.dream-arcs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-dim, #1e293b);
+  border-radius: 12px;
+  padding: var(--space-3, 12px);
+  backdrop-filter: blur(8px);
+}
+.dream-arcs-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-violet, #a371f7);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+.dream-arcs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+.dream-arc-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, transform 120ms;
+  background: rgba(30, 41, 59, 0.45);
+}
+.dream-arc-row:hover {
+  background: rgba(30, 41, 59, 0.75);
+  transform: translateX(2px);
+}
+.dream-arc-row--active {
+  background: rgba(163, 113, 247, 0.18);
+  border-color: rgba(163, 113, 247, 0.5);
+  box-shadow: 0 0 0 1px rgba(163, 113, 247, 0.25),
+              0 0 24px rgba(163, 113, 247, 0.15);
+}
+.dream-arc-title {
+  font-weight: 600;
+  color: var(--text-bright, #e2e8f0);
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.dream-arc-meta {
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+  margin-bottom: 6px;
+}
+.dream-arc-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dream-chip {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent-cyan, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.dream-chip--kind {
+  background: rgba(163, 113, 247, 0.15);
+  color: var(--accent-violet, #a371f7);
+  border-color: rgba(163, 113, 247, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dream-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid var(--border-dim, #1e293b);
+  border-radius: 12px;
+  padding: var(--space-4, 16px);
+  backdrop-filter: blur(6px);
+}
+.dream-stage-empty,
+.dream-status {
+  color: var(--text-dim, #94a3b8);
+  font-size: 13px;
+  padding: 24px 12px;
+  text-align: center;
+}
+.dream-stage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3, 12px);
+}
+.dream-stage-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-bright, #e2e8f0);
+  letter-spacing: -0.01em;
+}
+.dream-stage-sub {
+  font-size: 12px;
+  color: var(--text-dim, #94a3b8);
+}
+.dream-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dream-controls button {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-dim, #1e293b);
+  color: var(--text-bright, #e2e8f0);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms, border-color 120ms;
+}
+.dream-controls button:hover {
+  background: rgba(163, 113, 247, 0.18);
+  border-color: rgba(163, 113, 247, 0.4);
+}
+
+.dream-rail {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-dim, #1e293b);
+}
+.dream-rail-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(163, 113, 247, 0.35);
+  background: rgba(30, 41, 59, 0.6);
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms, transform 120ms, box-shadow 120ms;
+}
+.dream-rail-dot:hover {
+  transform: scale(1.2);
+}
+.dream-rail-dot--active {
+  background: var(--accent-violet, #a371f7);
+  border-color: var(--accent-violet, #a371f7);
+  box-shadow: 0 0 8px rgba(163, 113, 247, 0.7);
+}
+
+.dream-scene-card {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3, 12px) 4px;
+}
+.dream-scene-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim, #94a3b8);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.dream-scene-date {
+  font-variant-numeric: tabular-nums;
+}
+.dream-scene-index {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-violet, #a371f7);
+}
+.dream-scene-title {
+  margin: 0 0 12px 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-bright, #e2e8f0);
+  letter-spacing: -0.01em;
+}
+.dream-scene-narration {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-bright, #e2e8f0);
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent-violet, #a371f7);
+  background: rgba(163, 113, 247, 0.06);
+  border-radius: 0 8px 8px 0;
+}
+.dream-scene-body {
+  white-space: pre-wrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim, #94a3b8);
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-dim, #1e293b);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .dream-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 240px 1fr;
+  }
+  .dream-arcs-list { max-height: none; }
+}

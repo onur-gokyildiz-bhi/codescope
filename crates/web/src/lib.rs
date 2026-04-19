@@ -16,6 +16,8 @@ use codescope_core::graph::query::GraphQuery;
 mod error;
 pub use error::{code as error_code, ApiError};
 
+mod dream;
+
 enum ProjectSource {
     /// Backing DB for the CLI-provided path (primary repo). We also cache
     /// lazily-opened DBs for other repos discovered under `~/.codescope/db/`
@@ -69,14 +71,32 @@ impl AppState {
             ProjectSource::Multi(daemon) => {
                 let repo_name = match repo {
                     Some(r) if !r.is_empty() => r.to_string(),
-                    _ => daemon.discover_repos().into_iter().next().ok_or_else(|| {
-                        ApiError::new(
-                            StatusCode::NOT_FOUND,
-                            error_code::REPO_NOT_FOUND,
-                            "No projects found. Index a codebase first.",
-                        )
-                        .with_hint("Run `codescope index <path> --repo <name>`")
-                    })?,
+                    _ => {
+                        // Ask the surreal server for the real DB list
+                        // first (post-R7 authoritative source). Fall
+                        // back to the filesystem walk only if the
+                        // server's admin query fails outright — and
+                        // filter out `.old.*` backup dirs either way.
+                        let server = daemon.list_server_repos().await;
+                        let candidate =
+                            server
+                                .into_iter()
+                                .find(|n| !n.starts_with('_'))
+                                .or_else(|| {
+                                    daemon
+                                        .discover_repos()
+                                        .into_iter()
+                                        .find(|n| !n.contains(".old.") && !n.starts_with('_'))
+                                });
+                        candidate.ok_or_else(|| {
+                            ApiError::new(
+                                StatusCode::NOT_FOUND,
+                                error_code::REPO_NOT_FOUND,
+                                "No projects found. Index a codebase first.",
+                            )
+                            .with_hint("Run `codescope index <path> --repo <name>`")
+                        })?
+                    }
                 };
                 let db = daemon
                     .get_db(&repo_name)
@@ -121,6 +141,11 @@ struct RepoParam {
 fn build_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(index_page))
+        // Client-side routes that the SolidJS app owns — each has to
+        // serve the same index.html shell so the frontend's router
+        // can take over. Add entries here when new top-level pages
+        // land.
+        .route("/dream", get(index_page))
         .route("/assets/{*path}", get(serve_asset))
         .route("/api/projects", get(api_projects))
         .route("/api/stats", get(api_stats))
@@ -135,6 +160,9 @@ fn build_routes() -> Router<Arc<AppState>> {
         .route("/api/hotspots", get(api_hotspots))
         .route("/api/clusters", get(api_clusters))
         .route("/api/skill-graph", get(api_skill_graph))
+        // Phase 3 Dream — narrated tours through the knowledge graph.
+        .route("/api/dream/arcs", get(dream::api_dream_arcs))
+        .route("/api/dream/arc/{id}", get(dream::api_dream_arc))
 }
 
 /// Build the web API router from an existing DB connection (single-project mode).
@@ -321,15 +349,72 @@ struct SearchParams {
 async fn api_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match &state.source {
         ProjectSource::Multi(daemon) => {
-            let discovered = daemon.discover_repos();
-            let active = daemon.active_repos().await;
+            // Post-R7: the authoritative list of repos is the surreal
+            // server's DB list inside NS=codescope. The old
+            // `discover_repos` walk surfaces `.old.*` backup dirs
+            // from the legacy SurrealKV era — worse than useless
+            // now because the UI shows those as "real" projects.
+            let mut discovered = daemon.list_server_repos().await;
+            if discovered.is_empty() {
+                // Cold server / migration not done → fall back to the
+                // filesystem walk so the UI isn't an empty shell.
+                // Skip anything ending in `.old.<ts>` — those are
+                // R7 migration backups, not live projects.
+                discovered = daemon
+                    .discover_repos()
+                    .into_iter()
+                    .filter(|n| !is_legacy_backup_dir(n))
+                    .collect();
+            }
+            // Filter internal namespaces from the user-visible list.
+            discovered.retain(|n| !n.starts_with('_'));
+            let active: Vec<String> = daemon
+                .active_repos()
+                .await
+                .into_iter()
+                .filter(|n| !is_legacy_backup_dir(n) && !n.starts_with('_'))
+                .collect();
             Json(serde_json::json!({ "projects": discovered, "active": active })).into_response()
         }
         ProjectSource::Single { primary_repo, .. } => {
-            // Single mode can still browse every other indexed repo under
-            // `~/.codescope/db/`. Secondary DBs are opened lazily on first
-            // query (see resolve_query's extra_dbs cache).
-            let mut discovered = discover_local_projects();
+            // Single mode can still browse every other indexed repo.
+            // Prefer server DB list, filesystem only as fallback.
+            let mut discovered: Vec<String> = match codescope_core::connect_admin().await {
+                Ok(admin) => {
+                    let ns = std::env::var("CODESCOPE_DB_NS")
+                        .unwrap_or_else(|_| codescope_core::DEFAULT_NS.to_string());
+                    if admin.use_ns(&ns).await.is_ok() {
+                        admin
+                            .query("INFO FOR NS")
+                            .await
+                            .ok()
+                            .and_then(|mut r| r.take::<Vec<serde_json::Value>>(0).ok())
+                            .map(|rows| {
+                                rows.into_iter()
+                                    .filter_map(|row| {
+                                        let dbs = row
+                                            .get("databases")
+                                            .or_else(|| row.get("db"))?
+                                            .as_object()?;
+                                        Some(dbs.keys().cloned().collect::<Vec<_>>())
+                                    })
+                                    .flatten()
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                }
+                Err(_) => Vec::new(),
+            };
+            if discovered.is_empty() {
+                discovered = discover_local_projects()
+                    .into_iter()
+                    .filter(|n| !is_legacy_backup_dir(n))
+                    .collect();
+            }
+            discovered.retain(|n| !n.starts_with('_'));
             // Ensure the primary repo is present even if the user's custom
             // --db-path points outside `~/.codescope/db/`.
             if !primary_repo.is_empty() && !discovered.iter().any(|p| p == primary_repo) {
@@ -343,6 +428,12 @@ async fn api_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             Json(serde_json::json!({ "projects": discovered, "active": active })).into_response()
         }
     }
+}
+
+/// R7 migration renames source dirs to `<repo>.old.<unix_ts>/`.
+/// Those must not leak into the project switcher.
+fn is_legacy_backup_dir(name: &str) -> bool {
+    name.contains(".old.") || name.ends_with(".old")
 }
 
 async fn api_stats(

@@ -25,11 +25,9 @@ import DepthSlider from './components/DepthSlider';
 import Legend from './components/Legend';
 import Minimap from './components/Minimap';
 import RightPanel from './components/RightPanel';
-import DreamPlaceholder from './components/DreamPlaceholder';
+import DreamPage from './components/DreamPage';
 
 export default function App() {
-  const isDream = typeof window !== 'undefined' && window.location.pathname === '/dream';
-
   onMount(() => {
     registerShortcut('cmd+k', () => setShowPalette(v => !v));
     // 'f' shortcut is handled in TopBar via store signal directly
@@ -40,10 +38,18 @@ export default function App() {
     registerShortcut('3', () => setViewMode('hotspot'));
     registerShortcut('4', () => setViewMode('cluster'));
     registerShortcut('5', () => setViewMode('archive'));
+    registerShortcut('6', () => setViewMode('dream'));
     registerShortcut('escape', () => {
       setShowPalette(false);
       setShowShortcuts(false);
     });
+
+    // Back-compat: `/dream` still lands on the Dream view — we just
+    // pivot it into the same viewMode pipeline so it shares the
+    // TopBar, project switcher, and state with every other view.
+    if (typeof window !== 'undefined' && window.location.pathname === '/dream') {
+      setViewMode('dream');
+    }
   });
 
   createEffect(async () => {
@@ -53,17 +59,6 @@ export default function App() {
       setStats(s);
     } catch { /* stats poll — server may not be ready */ }
   });
-
-  if (isDream) {
-    return (
-      <div class="app-layout">
-        <TopBar />
-        <div class="main-area">
-          <DreamPlaceholder />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div class="app-layout">
@@ -88,6 +83,9 @@ export default function App() {
         </Show>
         <Show when={viewMode() === 'archive'}>
           <ArchiveView />
+        </Show>
+        <Show when={viewMode() === 'dream'}>
+          <DreamPage />
         </Show>
 
         <Show when={viewMode() === 'graph'}>

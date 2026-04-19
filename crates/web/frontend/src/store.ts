@@ -16,7 +16,7 @@ export const [showShortcuts, setShowShortcuts] = createSignal(false);
 export const [splitMode, setSplitMode] = createSignal(false);
 
 // Views
-export const [viewMode, setViewMode] = createSignal<'graph' | 'pack' | 'hotspot' | 'cluster' | 'archive'>('graph');
+export const [viewMode, setViewMode] = createSignal<'graph' | 'pack' | 'hotspot' | 'cluster' | 'archive' | 'dream'>('graph');
 export const [colorMode, setColorMode] = createSignal<'type' | 'module'>('type');
 
 // Source viewer
