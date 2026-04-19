@@ -995,6 +995,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "codescope-e2e"
+version = "0.7.10"
+dependencies = [
+ "anyhow",
+ "codescope-core",
+ "dirs 5.0.1",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "codescope-lsp"
 version = "0.7.10"
 dependencies = [

@@ -112,8 +112,193 @@ jobs:
       - name: Run clippy
         run: cargo clippy --workspace -- -D warnings
 
-      - name: Run tests
-        run: cargo test --workspace
+      - name: Run tests (workspace minus e2e — e2e has its own job)
+        run: cargo test --workspace --exclude codescope-e2e
 
       - name: Build release binaries
         run: cargo build --release -p codescope -p codescope-mcp
+
+  e2e:
+    # R3 — smoke gate. Spins up an ephemeral surreal server per test
+    # and exercises the server, CLI, and multi-project isolation.
+    # Kept as its own job so the surreal binary download and the
+    # 5-min timeout don't leak into the main `check` matrix.
+    name: E2E smoke (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y curl
+
+      - name: Install surreal binary into ~/.codescope/bin
+        run: |
+          mkdir -p ~/.codescope/bin
+          # Pinned to the version codescope itself targets. Bump in
+          # lockstep with crates/core/src/db.rs DEFAULT_URL notes.
+          SURREAL_VER=v3.0.5
+          case "${{ runner.os }}" in
+            Linux)
+              URL="https://github.com/surrealdb/surrealdb/releases/download/$SURREAL_VER/surreal-$SURREAL_VER.linux-amd64.tgz"
+              curl -L "$URL" | tar xz -C ~/.codescope/bin
+              ;;
+            *)
+              echo "unsupported runner"; exit 1 ;;
+          esac
+          chmod +x ~/.codescope/bin/surreal
+          ~/.codescope/bin/surreal --version
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build codescope binary (smoke_cli needs it on disk)
+        run: cargo build -p codescope
+
+      - name: Run e2e smoke suite
+        run: cargo test -p codescope-e2e -- --test-threads=2
+
+  bench:
+    name: Benchmarks (regression gate)
+    needs: check
+    # Only run on pushes to main — skip PRs to keep CI fast.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev perl make jq
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Verify benchmark fixture exists
+        run: |
+          if [ ! -d "benchmarks/repos/ripgrep" ]; then
+            echo "::error::benchmarks/repos/ripgrep fixture is missing. Add it as a submodule or checkout step."
+            exit 1
+          fi
+
+      - name: Run benchmark suite
+        run: |
+          mkdir -p benchmarks/ci-output
+          cargo run --release -p codescope-bench -- benchmarks/repos/ripgrep \
+            --json \
+            --output benchmarks/ci-output/bench-${{ github.sha }}.json
+          # Also keep a `latest.json` for easy comparison.
+          cp benchmarks/ci-output/bench-${{ github.sha }}.json benchmarks/ci-output/latest.json
+
+      - name: Compare against previous main baseline
+        id: compare
+        run: |
+          NEW=benchmarks/ci-output/latest.json
+          HIST=benchmarks/history.json
+          THRESHOLD=20   # percent
+
+          if [ ! -f "$HIST" ]; then
+            echo "No history.json found — seeding baseline (no regression check on first run)."
+            echo "regressed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Grab the most recent row from history.json (array of {sha, timestamp, queries: {name: time_ms}})
+          PREV=$(jq '.[-1] // null' "$HIST")
+          if [ "$PREV" = "null" ]; then
+            echo "history.json is empty — seeding baseline."
+            echo "regressed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Build a list of regressions: for each query in NEW, look up prev time and check >20% delta.
+          REGRESSIONS=$(jq -r --argjson prev "$PREV" --argjson threshold "$THRESHOLD" '
+            .queries[] as $q
+            | ($prev.queries[$q.name] // null) as $prev_time
+            | select($prev_time != null and $prev_time > 0)
+            | select((($q.time_ms - $prev_time) / $prev_time * 100) > $threshold)
+            | "\($q.name): \($prev_time)ms -> \($q.time_ms)ms (+\((($q.time_ms - $prev_time) / $prev_time * 100) | floor)%)"
+          ' "$NEW")
+
+          if [ -n "$REGRESSIONS" ]; then
+            echo "::error::Performance regression detected (>${THRESHOLD}% vs previous main):"
+            echo "$REGRESSIONS"
+            echo "regressed=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "No regressions above ${THRESHOLD}% threshold."
+            echo "regressed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Append new row to benchmarks/history.json
+        if: steps.compare.outputs.regressed == 'false'
+        run: |
+          NEW=benchmarks/ci-output/latest.json
+          HIST=benchmarks/history.json
+
+          # Build a flat {query_name: time_ms} map from the new result.
+          QUERIES=$(jq '[.queries[] | {key: .name, value: .time_ms}] | from_entries' "$NEW")
+
+          ROW=$(jq -n \
+            --arg sha  "${{ github.sha }}" \
+            --arg ts   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson q "$QUERIES" \
+            '{sha: $sha, timestamp: $ts, queries: $q}')
+
+          if [ ! -f "$HIST" ]; then
+            echo "[]" > "$HIST"
+          fi
+
+          jq --argjson row "$ROW" '. + [$row]' "$HIST" > "$HIST.tmp"
+          mv "$HIST.tmp" "$HIST"
+
+      - name: Commit updated history.json
+        if: steps.compare.outputs.regressed == 'false'
+        run: |
+          if git diff --quiet benchmarks/history.json; then
+            echo "No changes to history.json to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmarks/history.json
+          git commit -m "bench: append ${{ github.sha }} to history.json [skip ci]"
+          git push
+
+      - name: Upload benchmark output artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output-${{ github.sha }}
+          path: benchmarks/ci-output/bench-${{ github.sha }}.json
+          if-no-files-found: warn

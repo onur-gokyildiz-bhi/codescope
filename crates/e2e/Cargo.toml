@@ -1,0 +1,21 @@
+[package]
+name = "codescope-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "R3 — end-to-end smoke tests for codescope (server, CLI, MCP HTTP)."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+codescope-core = { path = "../core" }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+dirs = "5"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
