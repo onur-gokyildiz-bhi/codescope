@@ -1,4 +1,5 @@
 pub mod daemon;
+pub mod error;
 pub mod helpers;
 pub mod index_state;
 pub mod indexing;

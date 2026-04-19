@@ -13,6 +13,9 @@ use std::sync::Arc;
 use codescope_core::daemon::DaemonState;
 use codescope_core::graph::query::GraphQuery;
 
+mod error;
+pub use error::{code as error_code, ApiError};
+
 enum ProjectSource {
     /// Backing DB for the CLI-provided path (primary repo). We also cache
     /// lazily-opened DBs for other repos discovered under `~/.codescope/db/`
@@ -20,9 +23,7 @@ enum ProjectSource {
     Single {
         primary_repo: String,
         primary_db: codescope_core::DbHandle,
-        extra_dbs: tokio::sync::Mutex<
-            std::collections::HashMap<String, codescope_core::DbHandle>,
-        >,
+        extra_dbs: tokio::sync::Mutex<std::collections::HashMap<String, codescope_core::DbHandle>>,
     },
     Multi(Arc<DaemonState>),
 }
@@ -32,7 +33,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    async fn resolve_query(&self, repo: Option<&str>) -> Result<GraphQuery, (StatusCode, String)> {
+    async fn resolve_query(&self, repo: Option<&str>) -> Result<GraphQuery, ApiError> {
         match &self.source {
             ProjectSource::Single {
                 primary_repo,
@@ -51,26 +52,15 @@ impl AppState {
                         return Ok(GraphQuery::new(db.clone()));
                     }
                 }
-                // Lazy-open a secondary DB from `~/.codescope/db/<name>/`.
-                let path = dirs::home_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join(".codescope")
-                    .join("db")
-                    .join(&name);
-                if !path.is_dir() {
-                    return Err((
-                        StatusCode::NOT_FOUND,
-                        format!("Project DB '{}' not found at {}", name, path.display()),
-                    ));
-                }
-                // Open via the shared surreal server — no filesystem lock
-                // worries now that the server owns the data.
-                let db = codescope_core::connect_repo(&name).await.map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to open DB '{}': {}", name, e),
-                    )
-                })?;
+                // Lazy-open via the shared surreal server — the per-repo
+                // filesystem path is a migration fossil; the server
+                // auto-creates the DB under NS=codescope on first
+                // `use_db`. We just need to verify the repo actually
+                // has data by checking the legacy dir (until the server
+                // reports empty DBs through INFO FOR NS).
+                let db = codescope_core::connect_repo(&name)
+                    .await
+                    .map_err(|e| ApiError::from_db_err(&name, e))?;
                 let _ = codescope_core::graph::schema::init_schema(&db).await;
                 let cloned = db.clone();
                 extra_dbs.lock().await.insert(name, cloned);
@@ -80,18 +70,18 @@ impl AppState {
                 let repo_name = match repo {
                     Some(r) if !r.is_empty() => r.to_string(),
                     _ => daemon.discover_repos().into_iter().next().ok_or_else(|| {
-                        (
+                        ApiError::new(
                             StatusCode::NOT_FOUND,
-                            "No projects found. Index a codebase first.".into(),
+                            error_code::REPO_NOT_FOUND,
+                            "No projects found. Index a codebase first.",
                         )
+                        .with_hint("Run `codescope index <path> --repo <name>`")
                     })?,
                 };
-                let db = daemon.get_db(&repo_name).await.map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("DB error for '{}': {}", repo_name, e),
-                    )
-                })?;
+                let db = daemon
+                    .get_db(&repo_name)
+                    .await
+                    .map_err(|e| ApiError::from_db_err(&repo_name, e))?;
                 Ok(GraphQuery::new(db))
             }
         }
@@ -361,7 +351,7 @@ async fn api_stats(
 ) -> impl IntoResponse {
     let query = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     match query.raw_query("SELECT count() AS total FROM file GROUP ALL; SELECT count() AS total FROM `function` GROUP ALL; SELECT count() AS total FROM class GROUP ALL; SELECT count() AS total FROM import_decl GROUP ALL; SELECT count() AS total FROM config GROUP ALL; SELECT count() AS total FROM doc GROUP ALL; SELECT count() AS total FROM package GROUP ALL; SELECT count() AS total FROM knowledge GROUP ALL; SELECT count() AS total FROM decision GROUP ALL").await {
         Ok(result) => {
@@ -382,7 +372,7 @@ async fn api_stats(
             }
             Json(serde_json::Value::Object(stats)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -396,7 +386,7 @@ async fn api_search(
     }
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let mut results: Vec<serde_json::Value> = Vec::new();
 
@@ -593,7 +583,7 @@ async fn api_graph(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let center = params.center.unwrap_or_default();
     let _depth = params.depth.unwrap_or(2);
@@ -846,7 +836,7 @@ async fn api_graph(
                 }
                 Json(data).into_response()
             }
-            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            Err(e) => ApiError::internal(e.to_string()).into_response(),
         }
     } else {
         // Centered graph: find the entity + all its neighbors
@@ -1087,7 +1077,7 @@ async fn api_conversations(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let query = "\
         SELECT id, name, body, kind, timestamp, file_path FROM decision ORDER BY timestamp DESC LIMIT 80; \
@@ -1122,7 +1112,7 @@ async fn api_conversations(
             }
             Json(serde_json::Value::Object(out)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1138,15 +1128,15 @@ async fn api_raw_query(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let query = params.q.unwrap_or_default();
     if query.is_empty() {
-        return Json(serde_json::json!({"error": "No query provided"})).into_response();
+        return ApiError::invalid_input("No query provided").into_response();
     }
     match gq.raw_query(&query).await {
         Ok(result) => Json(result).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1157,14 +1147,14 @@ async fn api_files(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     match gq
         .raw_query("SELECT path, language, line_count FROM file ORDER BY path")
         .await
     {
         Ok(result) => Json(result).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1181,11 +1171,11 @@ async fn api_file_content(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let path = params.path.unwrap_or_default();
     if path.is_empty() {
-        return Json(serde_json::json!({"error": "No path"})).into_response();
+        return ApiError::invalid_input("No path").into_response();
     }
     let entities = gq.raw_query(&format!(
         "SELECT name, start_line, end_line, signature, 'function' AS type FROM `function` WHERE file_path = '{}' ORDER BY start_line; \
@@ -1221,11 +1211,11 @@ async fn api_node_detail(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let name = params.name.unwrap_or_default();
     if name.is_empty() {
-        return Json(serde_json::json!({"error": "No name"})).into_response();
+        return ApiError::invalid_input("No name").into_response();
     }
     let q = format!(
         "SELECT name, qualified_name, signature, file_path, start_line, end_line FROM `function` WHERE name = '{}'; \
@@ -1249,7 +1239,7 @@ async fn api_node_detail(
             }
             Json(serde_json::Value::Object(out)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1260,7 +1250,7 @@ async fn api_hotspots(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     match gq
         .raw_query(
@@ -1270,7 +1260,7 @@ async fn api_hotspots(
         .await
     {
         Ok(result) => Json(result).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1281,7 +1271,7 @@ async fn api_clusters(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     match gq
         .raw_query(
@@ -1291,7 +1281,7 @@ async fn api_clusters(
         .await
     {
         Ok(result) => Json(result).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1308,11 +1298,11 @@ async fn api_knowledge_detail(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(params.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let id = params.id.unwrap_or_default();
     if id.is_empty() {
-        return Json(serde_json::json!({"error": "No id"})).into_response();
+        return ApiError::invalid_input("No id").into_response();
     }
     let safe = id.replace('\'', "");
     let q = format!(
@@ -1343,7 +1333,7 @@ async fn api_knowledge_detail(
             }
             Json(serde_json::Value::Object(out)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }
 
@@ -1354,7 +1344,7 @@ async fn api_skill_graph(
 ) -> impl IntoResponse {
     let gq = match state.resolve_query(rp.repo.as_deref()).await {
         Ok(q) => q,
-        Err(e) => return (e.0, e.1).into_response(),
+        Err(e) => return e.into_response(),
     };
     let q =
         "SELECT name, qualified_name, description, node_type, file_path FROM skill ORDER BY name; \
@@ -1379,6 +1369,6 @@ async fn api_skill_graph(
             }
             Json(serde_json::Value::Object(out)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e.to_string()).into_response(),
     }
 }

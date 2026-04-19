@@ -159,15 +159,28 @@ impl IndexState {
             Phase::Ready | Phase::Idle => None,
             Phase::Indexing => {
                 let elapsed = g.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-                Some(format!(
-                    "{{\"status\":\"indexing\",\"progress\":\"{}/{}\",\"elapsed_secs\":{},\"errors_count\":{},\"message\":\"Index in progress — retry in a few seconds. Call index_status() for details.\"}}",
-                    g.files_done, g.files_total, elapsed, g.errors.len()
+                let msg = format!(
+                    "Index in progress — {}/{} files, {}s elapsed.",
+                    g.files_done, g.files_total, elapsed
+                );
+                let hint = format!(
+                    "Retry in a few seconds, or call index_status() for details. Errors so far: {}",
+                    g.errors.len()
+                );
+                Some(crate::error::tool_error(
+                    crate::error::code::INDEX_NOT_READY,
+                    &msg,
+                    Some(&hint),
                 ))
             }
-            Phase::Failed { reason } => Some(format!(
-                "{{\"status\":\"failed\",\"reason\":{},\"message\":\"Index build failed — call index_status() for details, or re-run index_codebase to retry.\"}}",
-                serde_json::to_string(reason).unwrap_or_else(|_| "\"(unprintable)\"".into())
-            )),
+            Phase::Failed { reason } => {
+                let msg = format!("Index build failed: {reason}");
+                Some(crate::error::tool_error(
+                    crate::error::code::INTERNAL,
+                    &msg,
+                    Some("Call index_status() for details, or re-run index_codebase to retry."),
+                ))
+            }
         }
     }
 }

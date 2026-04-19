@@ -203,11 +203,10 @@ impl GraphRagServer {
 
     /// Get the active project context, or return an error message.
     ///
-    /// Three cases:
-    /// 1. project already resolved → return clone.
-    /// 2. path-routed session with a `pending_repo` → resolve via
-    ///    [`DaemonState::get_db`] now, store in `project`, return.
-    /// 3. Nothing set → ask the caller to run `init_project`.
+    /// Errors come back as the R2 structured JSON shape; tool handlers
+    /// forward the string verbatim, so Claude Code sees
+    /// `{ok:false, error:{code, message, hint}}` and can act on
+    /// `error.hint`.
     pub(crate) async fn ctx(&self) -> Result<ProjectCtx, String> {
         if let Some(ctx) = self.project.read().await.clone() {
             return Ok(ctx);
@@ -215,12 +214,19 @@ impl GraphRagServer {
         let pending = self.pending_repo.read().await.clone();
         if let Some(repo) = pending {
             let daemon = self.daemon.clone().ok_or_else(|| {
-                "Daemon state not available for pending repo resolve.".to_string()
+                crate::error::tool_error(
+                    crate::error::code::INTERNAL,
+                    "Daemon state not available for pending repo resolve.",
+                    None,
+                )
             })?;
-            let db = daemon
-                .get_db(&repo)
-                .await
-                .map_err(|e| format!("Failed to open DB for pending repo '{}': {}", repo, e))?;
+            let db = daemon.get_db(&repo).await.map_err(|e| {
+                crate::error::tool_error(
+                    crate::error::code::DB_UNREACHABLE,
+                    &format!("Failed to open DB for pending repo '{repo}': {e}"),
+                    Some("Is the surreal server up? Run `codescope start`."),
+                )
+            })?;
             let ctx = ProjectCtx {
                 db,
                 repo_name: repo.clone(),
@@ -231,10 +237,11 @@ impl GraphRagServer {
             *self.project.write().await = Some(ctx.clone());
             return Ok(ctx);
         }
-        Err(
-            "No project initialized. Call `init_project` first with repo name and codebase path."
-                .into(),
-        )
+        Err(crate::error::tool_error(
+            crate::error::code::NO_PROJECT,
+            "No project initialized.",
+            Some("Call `init_project` with { repo, codebase_path }, or use the `/mcp/{repo}` endpoint."),
+        ))
     }
 
     /// Get the active project context *gated by indexing state*. If the

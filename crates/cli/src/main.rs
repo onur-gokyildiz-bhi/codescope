@@ -7,11 +7,54 @@ use codescope_cli::commands;
 use codescope_cli::{Cli, Commands};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    match run().await {
+        Ok(()) => {}
+        Err(e) => {
+            // R2 contract — emit structured error shape on stderr so
+            // tooling that wraps the CLI (panels, bots, CI) can parse
+            // `.error.message` / `.error.hint` instead of scraping
+            // anyhow's prose.
+            let (code, hint) = classify_cli_error(&e);
+            let body = serde_json::json!({
+                "ok": false,
+                "error": {
+                    "code": code,
+                    "message": e.to_string(),
+                    "hint": hint,
+                }
+            });
+            eprintln!("{body}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn classify_cli_error(e: &anyhow::Error) -> (&'static str, Option<String>) {
+    let msg = format!("{e:#}").to_lowercase();
+    if msg.contains("connection refused")
+        || msg.contains("is `codescope start` running")
+        || msg.contains("timed out connecting")
+    {
+        return (
+            "db_unreachable",
+            Some("Run `codescope start` to launch the surreal server.".into()),
+        );
+    }
+    if msg.contains("timeout") || msg.contains("timed out") {
+        return ("timeout", None);
+    }
+    if msg.contains("not found") {
+        return ("invalid_input", None);
+    }
+    ("internal", None)
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Global repo name: --repo flag > current directory name
