@@ -117,9 +117,10 @@ Install all three and your model spends tokens on thinking, not on scrolling too
 |----------|---------|
 | **Linux / macOS (ARM64)** | `curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh \| bash` |
 | **Windows** | `irm https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.ps1 \| iex` |
+| **Homebrew** | `brew install onur-gokyildiz-bhi/codescope/codescope` |
 | **Build from source** | `cargo install --git https://github.com/onur-gokyildiz-bhi/codescope` |
 
-**Already installed?** `codescope --version` to check. Update with the same install command.
+**Already installed?** `codescope --version` to check. Update in-place with `codescope upgrade`, or re-run the install command.
 
 Pre-built binaries for:
 - `x86_64-unknown-linux-gnu`
