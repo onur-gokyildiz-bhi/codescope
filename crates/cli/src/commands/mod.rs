@@ -13,6 +13,7 @@ pub mod languages;
 pub mod migrate;
 pub mod migrate_to_server;
 pub mod query;
+pub mod repair;
 pub mod review;
 pub mod search;
 pub mod semantic_search;

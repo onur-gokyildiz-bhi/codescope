@@ -200,6 +200,25 @@ pub enum Commands {
         delete_backup: bool,
     },
 
+    /// Rebuild a corrupted repo's DB. Drops NS=codescope DB=<repo>
+    /// on the running surreal server (no files touched on disk —
+    /// the server handles that), then optionally re-indexes from
+    /// source if `--reindex <path>` is given. Prompts unless `--yes`
+    /// is set.
+    Repair {
+        /// Repo name to rebuild (as used by `codescope index --repo`).
+        #[arg(long)]
+        repo: String,
+        /// Absolute path to the codebase — if set, `repair` invokes
+        /// `codescope index` after the drop so the repo ends up
+        /// populated again.
+        #[arg(long)]
+        reindex: Option<PathBuf>,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
+
     /// Start the bundled surreal server (idempotent). Writes a state
     /// file at `~/.codescope/surreal.json` with pid / port / version so
     /// subsequent `start`/`stop`/`status` commands know what's running.
