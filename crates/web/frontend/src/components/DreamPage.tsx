@@ -11,8 +11,8 @@
 // selector changes (tracked by `currentProject()`).
 
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
-import { Moon, PlayCircle, PauseCircle, SkipForward, SkipBack } from 'lucide-solid';
-import { api, type DreamArcSummary, type DreamScene } from '../api';
+import { Moon, PlayCircle, PauseCircle, SkipForward, SkipBack, Download } from 'lucide-solid';
+import { api, type DreamArcSummary, type DreamArcDetail, type DreamScene } from '../api';
 import { currentProject } from '../store';
 import DreamGraph3D from './DreamGraph3D';
 
@@ -85,6 +85,21 @@ export default function DreamPage() {
     setSceneIdx((i) => Math.max(0, Math.min(total - 1, i + delta)));
   };
 
+  const exportMarkdown = () => {
+    const detail = arcDetail();
+    if (!detail) return;
+    const md = arcToMarkdown(detail);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dream-${safeFileName(detail.id)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div class="dream-layout">
       {/* Full-bleed 3D tour graph renders behind every panel */}
@@ -142,14 +157,17 @@ export default function DreamPage() {
                   <div class="dream-stage-sub">{detail().scenes.length} scenes</div>
                 </div>
                 <div class="dream-controls">
-                  <button onClick={() => skip(-1)} aria-label="Previous scene">
+                  <button onClick={() => skip(-1)} aria-label="Previous scene" title="Previous">
                     <SkipBack size={18} />
                   </button>
-                  <button onClick={() => setAutoplay((v) => !v)} aria-label="Play/pause">
+                  <button onClick={() => setAutoplay((v) => !v)} aria-label="Play/pause" title="Play / pause (6s per scene)">
                     {autoplay() ? <PauseCircle size={22} /> : <PlayCircle size={22} />}
                   </button>
-                  <button onClick={() => skip(1)} aria-label="Next scene">
+                  <button onClick={() => skip(1)} aria-label="Next scene" title="Next">
                     <SkipForward size={18} />
+                  </button>
+                  <button onClick={exportMarkdown} aria-label="Export arc as markdown" title="Export as markdown">
+                    <Download size={18} />
                   </button>
                 </div>
               </header>
@@ -210,4 +228,57 @@ function excerpt(content: string, max: number): string {
   const t = content.trim();
   if (t.length <= max) return t;
   return t.slice(0, max) + '…';
+}
+
+/// Serialise an arc to a standalone markdown memoir. Format is
+/// intentionally plain — one H1 header, a date-range line, then
+/// each scene as an H2 with narration + a fenced content block so
+/// the file reads cleanly in any viewer.
+function arcToMarkdown(detail: DreamArcDetail): string {
+  const scenes = detail.scenes ?? [];
+  const first = scenes[0]?.created_at?.split('T')[0];
+  const last = scenes[scenes.length - 1]?.created_at?.split('T')[0];
+  const range = first && last
+    ? (first === last ? first : `${first} → ${last}`)
+    : 'unknown';
+
+  const lines: string[] = [];
+  lines.push(`# ${detail.title}`);
+  lines.push('');
+  lines.push(`*${scenes.length} scenes · ${range} · tag: \`${detail.tag}\`*`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  scenes.forEach((s, i) => {
+    const date = s.created_at?.split('T')[0] ?? '—';
+    lines.push(`## ${i + 1}. ${s.title}`);
+    lines.push('');
+    lines.push(`*${date} · ${s.kind}*`);
+    lines.push('');
+    lines.push(s.narration);
+    lines.push('');
+    if (s.content && s.content.trim()) {
+      lines.push('<details>');
+      lines.push('<summary>content</summary>');
+      lines.push('');
+      lines.push(s.content.trim());
+      lines.push('');
+      lines.push('</details>');
+      lines.push('');
+    }
+    if (i + 1 < scenes.length) {
+      lines.push('---');
+      lines.push('');
+    }
+  });
+  lines.push('');
+  lines.push(`_Exported from Codescope Dream · ${new Date().toISOString()}_`);
+  lines.push('');
+  return lines.join('\n');
+}
+
+/// Filesystem-safe slug for the download name. Keeps alphanumerics,
+/// dash, dot; collapses everything else to a single dash.
+function safeFileName(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'arc';
 }

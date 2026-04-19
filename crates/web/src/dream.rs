@@ -321,12 +321,15 @@ fn render_narration(
         .unwrap_or("an earlier day");
     let summary = first_sentence(content);
 
-    let opener = match idx {
-        0 => format!("On {date_str} the story begins."),
-        _ => format!("Then, on {date_str},"),
+    // For the first scene the opener ends in a period, so the
+    // `kind_phrase` starts a new sentence and needs capitalisation.
+    // Every later scene's opener ends in a comma — lowercase stays.
+    let (opener, sentence_start) = match idx {
+        0 => (format!("On {date_str} the story begins."), true),
+        _ => (format!("Then, on {date_str},"), false),
     };
 
-    let kind_phrase = match kind {
+    let phrase = match kind {
         "decision" => "you decided:",
         "problem" => "you hit a wall —",
         "solution" => "the fix landed:",
@@ -334,36 +337,113 @@ fn render_narration(
         "concept" => "a new concept surfaced:",
         _ => "you captured:",
     };
+    let kind_phrase = if sentence_start {
+        capitalise_first(phrase)
+    } else {
+        phrase.to_string()
+    };
+
+    // Use typographic quotes around the title so the output reads
+    // cleanly both as plain prose (frontend) and as markdown
+    // (export) — avoids literal `**` leaking into the UI.
+    let quoted_title = format!("\u{201C}{title}\u{201D}");
 
     if summary.is_empty() {
-        format!("{opener} {kind_phrase} **{title}**.")
+        format!("{opener} {kind_phrase} {quoted_title}.")
     } else {
-        format!("{opener} {kind_phrase} **{title}**. {summary}")
+        format!("{opener} {kind_phrase} {quoted_title}. {summary}")
+    }
+}
+
+fn capitalise_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+        None => String::new(),
     }
 }
 
 /// Trim content to one plain-text sentence (up to ~240 chars) for
-/// narration. We strip code fences and trailing whitespace.
+/// narration. Strips markdown scaffolding (headings, bold, bullets,
+/// code fences) so the narration reads as prose rather than raw
+/// markdown.
 fn first_sentence(content: &str) -> String {
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return String::new();
     }
-    // Drop leading markdown headings / fences.
-    let start = trimmed.find(|c: char| c.is_alphanumeric()).unwrap_or(0);
-    let body = &trimmed[start..];
-    // First sentence break: `.`, `!`, `?`, or newline.
+    // Find the first line that isn't a markdown header, bullet, or
+    // fence — otherwise we narrate "##" back to the user.
+    let body_line = trimmed
+        .lines()
+        .find(|l| {
+            let t = l.trim_start();
+            !t.is_empty()
+                && !t.starts_with('#')
+                && !t.starts_with("```")
+                && !t.starts_with("- ")
+                && !t.starts_with("* ")
+                && !t.starts_with("> ")
+                && !t.starts_with('|')
+        })
+        .unwrap_or("");
+    let stripped = strip_md_inline(body_line);
+    let body = stripped.trim();
+    if body.is_empty() {
+        return String::new();
+    }
+    // Skip leading non-alphanum noise (leftover colons / punctuation).
+    let start = body.find(char::is_alphanumeric).unwrap_or(0);
+    let body = &body[start..];
+    // First sentence break: `.`, `!`, `?`.
     let end = body
-        .find(|c: char| matches!(c, '.' | '!' | '?' | '\n'))
+        .find(|c: char| matches!(c, '.' | '!' | '?'))
         .map(|i| i + 1)
         .unwrap_or(body.len());
     let mut s = body[..end.min(body.len())].trim().to_string();
+    // Uppercase the first letter so the narration reads as prose.
+    if let Some(first) = s.chars().next() {
+        if first.is_ascii_lowercase() {
+            let mut c = s.chars();
+            let head = c.next().unwrap().to_ascii_uppercase();
+            s = std::iter::once(head).chain(c).collect();
+        }
+    }
     const MAX: usize = 240;
-    if s.len() > MAX {
-        s.truncate(MAX);
+    if s.chars().count() > MAX {
+        // Truncate on a char boundary so multi-byte chars survive.
+        let mut cut = s.len().min(MAX * 4);
+        while cut > 0 && !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        s.truncate(cut);
         s.push('…');
     }
     s
+}
+
+/// Remove inline markdown emphasis (`**`, `*`, `_`, `` ` ``) so the
+/// narration doesn't show raw markers. Non-emphasis punctuation is
+/// left alone.
+fn strip_md_inline(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' | '_' => {
+                while let Some(&n) = chars.peek() {
+                    if n == c {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            '`' => { /* strip backticks */ }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// `GraphQuery::raw_query` returns a flat `Array(rows)` for a single
