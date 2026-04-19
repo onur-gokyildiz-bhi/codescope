@@ -14,7 +14,7 @@ pub mod graph;
 pub mod parser;
 pub mod temporal;
 
-pub use db::{connect_admin, connect_path, connect_repo, DbHandle};
+pub use db::{connect_admin, connect_path, connect_repo, DbHandle, DEFAULT_NS};
 
 use serde::{Deserialize, Serialize};
 

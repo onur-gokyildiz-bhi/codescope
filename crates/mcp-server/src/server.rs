@@ -1,9 +1,9 @@
+use codescope_core::DbHandle;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::*;
 use rmcp::{tool_handler, tool_router, ServerHandler};
 use std::path::PathBuf;
 use std::sync::Arc;
-use codescope_core::DbHandle;
 
 use crate::daemon::DaemonState;
 use crate::helpers::build_context_summary;
@@ -31,6 +31,13 @@ pub struct GraphRagServer {
     /// True if this server was created via `new()` (stdio); false if via `new_daemon()`.
     /// Used by `init_project` to differentiate behavior.
     stdio_mode: bool,
+    /// Path-routed mode: a repo name the session is pre-bound to. Set when
+    /// the daemon's axum layer mounts the HTTP service at `/mcp/{repo}`.
+    /// `ctx()` lazily resolves it to a full [`ProjectCtx`] on first tool
+    /// call — we can't block on `daemon.get_db()` inside the synchronous
+    /// rmcp factory closure. Cleared by `init_project` to keep
+    /// switch-project semantics on an already-pinned session.
+    pending_repo: Arc<tokio::sync::RwLock<Option<String>>>,
     /// Cached conversation context summary, injected into ServerInfo.instructions
     context_summary: Arc<tokio::sync::RwLock<String>>,
     /// Delta-mode cache: stores last context_bundle output per file path.
@@ -73,6 +80,7 @@ impl GraphRagServer {
             }))),
             daemon: Some(state),
             stdio_mode: true,
+            pending_repo: Arc::new(tokio::sync::RwLock::new(None)),
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
@@ -87,6 +95,26 @@ impl GraphRagServer {
             project: Arc::new(tokio::sync::RwLock::new(None)),
             daemon: Some(state),
             stdio_mode: false,
+            pending_repo: Arc::new(tokio::sync::RwLock::new(None)),
+            context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
+            context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            index_state: IndexState::new(),
+            tool_router: Self::merged_router(),
+        }
+    }
+
+    /// Create for daemon mode, pre-bound to a repo via path routing
+    /// (`/mcp/{repo}`). No DB open yet — the first tool call resolves it
+    /// through [`DaemonState::get_db`] via [`Self::ctx`]. This keeps the
+    /// rmcp session factory synchronous while still giving each mounted
+    /// route a stable repo identity without requiring `init_project`.
+    pub fn new_daemon_for_repo(state: Arc<DaemonState>, repo: String) -> Self {
+        Self {
+            project: Arc::new(tokio::sync::RwLock::new(None)),
+            daemon: Some(state),
+            stdio_mode: false,
+            pending_repo: Arc::new(tokio::sync::RwLock::new(Some(repo))),
             context_summary: Arc::new(tokio::sync::RwLock::new(String::new())),
             context_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             result_archive: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
@@ -152,6 +180,13 @@ impl GraphRagServer {
         &self.project
     }
 
+    /// Accessor for the pending-repo RwLock — used by admin tool
+    /// sub-module to clear the path-routed default on explicit
+    /// `init_project`.
+    pub(crate) fn pending_repo_lock(&self) -> &Arc<tokio::sync::RwLock<Option<String>>> {
+        &self.pending_repo
+    }
+
     /// Accessor for the delta-mode context cache.
     pub(crate) fn context_cache(
         &self,
@@ -166,13 +201,40 @@ impl GraphRagServer {
         &self.result_archive
     }
 
-    /// Get the active project context, or return an error message
+    /// Get the active project context, or return an error message.
+    ///
+    /// Three cases:
+    /// 1. project already resolved → return clone.
+    /// 2. path-routed session with a `pending_repo` → resolve via
+    ///    [`DaemonState::get_db`] now, store in `project`, return.
+    /// 3. Nothing set → ask the caller to run `init_project`.
     pub(crate) async fn ctx(&self) -> Result<ProjectCtx, String> {
-        self.project
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| "No project initialized. Call `init_project` first with repo name and codebase path.".into())
+        if let Some(ctx) = self.project.read().await.clone() {
+            return Ok(ctx);
+        }
+        let pending = self.pending_repo.read().await.clone();
+        if let Some(repo) = pending {
+            let daemon = self.daemon.clone().ok_or_else(|| {
+                "Daemon state not available for pending repo resolve.".to_string()
+            })?;
+            let db = daemon
+                .get_db(&repo)
+                .await
+                .map_err(|e| format!("Failed to open DB for pending repo '{}': {}", repo, e))?;
+            let ctx = ProjectCtx {
+                db,
+                repo_name: repo.clone(),
+                // Path-routed sessions don't know a filesystem codebase;
+                // use CWD as a best-effort for tools that need a path.
+                codebase_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            };
+            *self.project.write().await = Some(ctx.clone());
+            return Ok(ctx);
+        }
+        Err(
+            "No project initialized. Call `init_project` first with repo name and codebase path."
+                .into(),
+        )
     }
 
     /// Get the active project context *gated by indexing state*. If the
@@ -220,9 +282,7 @@ impl GraphRagServer {
 
     /// Build a hot cache of recent knowledge entities (~500 words) so agents
     /// start each session with awareness of what's in the knowledge graph.
-    async fn build_knowledge_hot_cache(
-        db: &DbHandle,
-    ) -> String {
+    async fn build_knowledge_hot_cache(db: &DbHandle) -> String {
         let query =
             "SELECT title, kind, confidence FROM knowledge ORDER BY updated_at DESC LIMIT 15";
         let results: Vec<serde_json::Value> = match db.query(query).await {

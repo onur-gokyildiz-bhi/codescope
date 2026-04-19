@@ -85,4 +85,39 @@ impl DaemonState {
     pub async fn active_repos(&self) -> Vec<String> {
         self.dbs.read().await.keys().cloned().collect()
     }
+
+    /// Ask the bundled surreal server which databases exist inside
+    /// `NS=codescope`. Returns an empty list on any failure — callers can
+    /// then fall back to [`discover_repos`] (filesystem walk). Intended
+    /// for the daemon's `/mcp/{repo}` route planning.
+    pub async fn list_server_repos(&self) -> Vec<String> {
+        use serde_json::Value;
+        let Ok(admin) = crate::connect_admin().await else {
+            return Vec::new();
+        };
+        let ns = std::env::var("CODESCOPE_DB_NS").unwrap_or_else(|_| crate::DEFAULT_NS.to_string());
+        if admin.use_ns(&ns).await.is_err() {
+            return Vec::new();
+        }
+        let Ok(mut resp) = admin.query("INFO FOR NS").await else {
+            return Vec::new();
+        };
+        let Ok(rows): Result<Vec<Value>, _> = resp.take(0) else {
+            return Vec::new();
+        };
+        let mut out: Vec<String> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let dbs = row
+                    .get("databases")
+                    .or_else(|| row.get("db"))?
+                    .as_object()?;
+                Some(dbs.keys().cloned().collect::<Vec<_>>())
+            })
+            .flatten()
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
 }

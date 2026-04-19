@@ -49,6 +49,11 @@ impl GraphRagServer {
                     repo_name: repo_name.clone(),
                     codebase_path: codebase_path.clone(),
                 });
+                // Clear any path-routed default so a subsequent
+                // reconnect on `/mcp/{repo}` without explicit init
+                // still re-resolves to the pinned repo, not the
+                // last-used one.
+                *self.pending_repo_lock().write().await = None;
 
                 if params.auto_index.unwrap_or(false) {
                     let index_repo = repo_name.clone();
