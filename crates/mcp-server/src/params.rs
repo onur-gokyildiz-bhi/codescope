@@ -544,3 +544,20 @@ pub struct SearchIndexedParams {
     /// Default 10, max 50.
     pub limit: Option<usize>,
 }
+
+/// CMX-SANDBOX — run a short code snippet in a subprocess and
+/// capture its output. Dangerous by design; intended for the
+/// model to probe / compute things it can't do natively.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SandboxRunParams {
+    /// Language of the snippet. One of: `python`, `node`, `bash`.
+    /// On Windows, `bash` needs git-bash or WSL on PATH.
+    pub language: String,
+    /// The snippet body. Written to a temp file and executed.
+    pub code: String,
+    /// Timeout in milliseconds. Default 10000, max 60000.
+    pub timeout_ms: Option<u64>,
+    /// Optional working directory. Default: the project's
+    /// codebase_path, which keeps file-relative snippets sane.
+    pub working_dir: Option<String>,
+}

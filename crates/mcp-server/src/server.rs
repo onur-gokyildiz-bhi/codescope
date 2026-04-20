@@ -168,6 +168,7 @@ impl GraphRagServer {
         router.merge(Self::analytics_router());
         router.merge(Self::knowledge_router());
         router.merge(Self::indexed_router());
+        router.merge(Self::sandbox_router());
         router
     }
 

@@ -18,6 +18,7 @@ pub mod knowledge;
 pub mod memory;
 pub mod quality;
 pub mod refactor;
+pub mod sandbox;
 pub mod search;
 pub mod skills;
 pub mod temporal;
