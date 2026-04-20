@@ -234,6 +234,9 @@ async fn run() -> Result<()> {
         Commands::Hook { agent, uninstall } => {
             commands::hooks::run(&agent, uninstall).await?;
         }
+        Commands::Exec { args } => {
+            codescope_cli::compress::run(args).await?;
+        }
         Commands::Repair { repo, reindex, yes } => {
             commands::repair::run(repo, reindex, yes).await?;
         }

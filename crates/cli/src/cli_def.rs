@@ -233,6 +233,24 @@ pub enum Commands {
         yes: bool,
     },
 
+    /// Run a dev command and return a compressed version of its
+    /// output. Currently specialised on `git status/log/diff`,
+    /// `ls`, `cat`/`bat`, `head`/`tail`, `grep`/`rg`/`ag`. Unknown
+    /// commands stream through unmodified. Pass `--full` to
+    /// disable compression for the invocation.
+    ///
+    /// Example:
+    ///   codescope exec git status
+    ///   codescope exec cat src/main.rs
+    ///   codescope exec grep -r "parse_config" src/
+    Exec {
+        /// The command to run, followed by its arguments. Use
+        /// `--` to separate flags for the wrapped command from
+        /// codescope's own flags.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
     /// Install the bash-suggest hook (RTK-03) for Claude Code.
     /// Writes the platform-appropriate hook script under
     /// `~/.codescope/bin/` and merges a PreToolUse entry into

@@ -3,6 +3,7 @@
 
 pub mod cli_def;
 pub mod commands;
+pub mod compress;
 pub mod db;
 
 pub use cli_def::{Cli, Commands, HistoryAction};
