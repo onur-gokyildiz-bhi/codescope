@@ -59,8 +59,11 @@ jobs:
       - name: cargo clippy --workspace -- -D warnings
         run: cargo clippy --workspace -- -D warnings
 
-      - name: cargo test --workspace
-        run: cargo test --workspace
+      - name: cargo test --workspace (excluding e2e)
+        # `codescope-e2e` spawns a real `surreal` binary per test.
+        # Release preflight doesn't install one; the dedicated e2e
+        # job in ci.yml is where that suite runs.
+        run: cargo test --workspace --exclude codescope-e2e
 
   build:
     name: Build ${{ matrix.target }}
