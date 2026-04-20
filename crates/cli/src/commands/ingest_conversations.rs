@@ -12,12 +12,12 @@
 //! the target DB's `conversation` table so re-running is cheap.
 
 use anyhow::{Context, Result};
+use codescope_core::connect_path;
 use codescope_core::graph::builder::GraphBuilder;
+use codescope_core::DbHandle;
 use codescope_core::{CodeEntity, CodeRelation};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use codescope_core::DbHandle;
-use codescope_core::connect_path;
 use surrealdb::types::SurrealValue;
 
 pub async fn run(

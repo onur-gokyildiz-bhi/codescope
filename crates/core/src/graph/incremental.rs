@@ -1,7 +1,7 @@
+use crate::DbHandle;
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use crate::DbHandle;
 use surrealdb::types::SurrealValue;
 use tracing::{debug, info};
 

@@ -1,6 +1,6 @@
+use crate::DbHandle;
 use anyhow::Result;
 use serde::Deserialize;
-use crate::DbHandle;
 use surrealdb::types::SurrealValue;
 use tracing::{debug, info};
 

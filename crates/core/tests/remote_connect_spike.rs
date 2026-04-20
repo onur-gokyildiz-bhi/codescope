@@ -33,9 +33,7 @@ async fn connect_repo_and_run_info_for_kv() {
         return;
     }
 
-    let db = connect_repo("__spike_test_db")
-        .await
-        .expect("connect_repo");
+    let db = connect_repo("__spike_test_db").await.expect("connect_repo");
     let mut resp = db
         .query("INFO FOR DB")
         .await

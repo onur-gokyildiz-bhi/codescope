@@ -20,9 +20,9 @@
 //!   spawn_periodic    → Phase 7
 //! ```
 
+use codescope_core::DbHandle;
 use std::path::PathBuf;
 use std::sync::Arc;
-use codescope_core::DbHandle;
 
 use crate::collect_jsonl_files;
 use crate::helpers;

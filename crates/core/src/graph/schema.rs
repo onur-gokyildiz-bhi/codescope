@@ -1,6 +1,6 @@
+use crate::DbHandle;
 use anyhow::Result;
 use serde::Deserialize;
-use crate::DbHandle;
 use surrealdb::types::SurrealValue;
 
 /// Current schema version. Bump when adding a new migration in `migrations.rs`.

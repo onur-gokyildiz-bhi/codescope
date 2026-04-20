@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use anyhow::Result;
 use crate::DbHandle;
+use anyhow::Result;
 use tracing::{debug, warn};
 
 use crate::{CodeEntity, CodeRelation, EntityKind, IndexResult};

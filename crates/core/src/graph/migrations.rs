@@ -11,10 +11,10 @@
 //! cannot be expressed with IF NOT EXISTS guards.
 //!
 //! See `crates/core/src/graph/schema.rs` for the current `SCHEMA_VERSION`.
+use crate::DbHandle;
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
-use crate::DbHandle;
 
 use super::schema::{get_schema_version, set_schema_version, SCHEMA_VERSION};
 

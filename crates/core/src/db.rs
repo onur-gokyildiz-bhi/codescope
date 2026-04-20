@@ -65,9 +65,7 @@ pub async fn connect_repo(repo: &str) -> Result<DbHandle> {
     let db = tokio::time::timeout(CONNECT_TIMEOUT, connect(&url))
         .await
         .with_context(|| {
-            format!(
-                "timed out connecting to SurrealDB at {url} — is `codescope start` running?"
-            )
+            format!("timed out connecting to SurrealDB at {url} — is `codescope start` running?")
         })?
         .with_context(|| format!("failed to connect to SurrealDB at {url}"))?;
 

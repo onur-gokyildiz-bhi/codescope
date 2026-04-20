@@ -1,7 +1,7 @@
+use codescope_core::connect_path;
+use codescope_core::DbHandle;
 use std::path::Path;
 use std::sync::Arc;
-use codescope_core::DbHandle;
-use codescope_core::connect_path;
 use surrealdb::types::SurrealValue;
 
 /// Sentinel repo name used for entities stored in the cross-project global DB.
