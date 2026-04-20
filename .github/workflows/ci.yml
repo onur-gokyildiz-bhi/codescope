@@ -204,14 +204,29 @@ jobs:
           key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Verify benchmark fixture exists
+      - name: Checkout benchmark fixture (ripgrep)
+        # Pinned commit so bench numbers stay comparable across
+        # runs. Shallow clone — we only need the tree, never
+        # history. If the checkout fails (network, rate limit,
+        # etc.) the bench step further down soft-skips rather
+        # than red-X'ing the whole pipeline; the bench gate is
+        # informational, not a correctness requirement.
         run: |
+          set -e
+          mkdir -p benchmarks/repos
+          if [ ! -d "benchmarks/repos/ripgrep/.git" ]; then
+            git clone --depth 1 --branch 14.1.0 \
+              https://github.com/BurntSushi/ripgrep.git \
+              benchmarks/repos/ripgrep \
+              || echo "::warning::ripgrep checkout failed — bench will soft-skip"
+          fi
           if [ ! -d "benchmarks/repos/ripgrep" ]; then
-            echo "::error::benchmarks/repos/ripgrep fixture is missing. Add it as a submodule or checkout step."
-            exit 1
+            echo "FIXTURE_MISSING=1" >> $GITHUB_ENV
+            echo "::warning::benchmarks/repos/ripgrep still missing after checkout"
           fi
 
       - name: Run benchmark suite
+        if: env.FIXTURE_MISSING != '1'
         run: |
           mkdir -p benchmarks/ci-output
           cargo run --release -p codescope-bench -- benchmarks/repos/ripgrep \
@@ -220,8 +235,13 @@ jobs:
           # Also keep a `latest.json` for easy comparison.
           cp benchmarks/ci-output/bench-${{ github.sha }}.json benchmarks/ci-output/latest.json
 
+      - name: Skip bench (fixture unavailable)
+        if: env.FIXTURE_MISSING == '1'
+        run: echo "::warning::bench skipped — ripgrep fixture not available on this runner"
+
       - name: Compare against previous main baseline
         id: compare
+        if: env.FIXTURE_MISSING != '1'
         run: |
           NEW=benchmarks/ci-output/latest.json
           HIST=benchmarks/history.json
