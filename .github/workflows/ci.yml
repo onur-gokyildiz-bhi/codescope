@@ -122,11 +122,15 @@ jobs:
     # R3 — smoke gate. Spins up an ephemeral surreal server per test
     # and exercises the server, CLI, and multi-project isolation.
     # Kept as its own job so the surreal binary download and the
-    # 5-min timeout don't leak into the main `check` matrix.
+    # build-from-source timeout don't leak into the main `check`
+    # matrix.
     name: E2E smoke (${{ matrix.os }})
     needs: check
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    # 5 min was too tight once html2text + tokio::process landed
+    # (cold `cargo build -p codescope` alone took >5 min). 15 is
+    # comfortable with cache warm, tight with cache cold.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
