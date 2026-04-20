@@ -135,7 +135,7 @@ fn is_meta_tag(t: &str) -> bool {
 
 /// Convert `autocalib` → `Autocalib`, `surreal-migration` → `Surreal Migration`.
 fn humanise_tag(tag: &str) -> String {
-    tag.split(|c: char| c == '-' || c == '_')
+    tag.split(['-', '_'])
         .filter(|s| !s.is_empty())
         .map(|w| {
             let mut chars = w.chars();
@@ -773,7 +773,7 @@ fn first_sentence(content: &str) -> String {
     let body = &body[start..];
     // First sentence break: `.`, `!`, `?`.
     let end = body
-        .find(|c: char| matches!(c, '.' | '!' | '?'))
+        .find(['.', '!', '?'])
         .map(|i| i + 1)
         .unwrap_or(body.len());
     let mut s = body[..end.min(body.len())].trim().to_string();
@@ -1011,7 +1011,7 @@ fn build_suggestions(rows: &[serde_json::Value]) -> Vec<Suggestion> {
                 // `surreal-migration` matches "surreal" or
                 // "migration" individually.
                 let tag_words: Vec<String> = tag
-                    .split(|c: char| c == '-' || c == '_')
+                    .split(['-', '_'])
                     .map(|p| p.to_ascii_lowercase())
                     .filter(|p| p.len() >= 3)
                     .collect();

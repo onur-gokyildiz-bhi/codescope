@@ -245,7 +245,7 @@ pub fn recent_sessions(events: &[Event], n: usize) -> Vec<SessionRecap> {
         }
     }
     let mut out: Vec<SessionRecap> = by_session.into_values().collect();
-    out.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+    out.sort_by_key(|r| std::cmp::Reverse(r.ended_at));
     out.truncate(n);
     out
 }

@@ -196,12 +196,9 @@ fn replace_file(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn find_in_tree(root: &Path, name: &str) -> Option<PathBuf> {
-    for entry in walk(root) {
-        if entry.file_name().and_then(|s| s.to_str()) == Some(name) {
-            return Some(entry);
-        }
-    }
-    None
+    walk(root)
+        .into_iter()
+        .find(|entry| entry.file_name().and_then(|s| s.to_str()) == Some(name))
 }
 
 fn walk(root: &Path) -> Vec<PathBuf> {

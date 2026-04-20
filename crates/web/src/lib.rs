@@ -1148,14 +1148,12 @@ async fn api_graph(
 /// 'ı', 'ş') caused panics in /api/graph on conversation bodies — this is the
 /// safe replacement.
 fn truncate_chars(s: &str, max_chars: usize) -> String {
-    let mut count = 0usize;
     let mut end = s.len();
-    for (i, _) in s.char_indices() {
+    for (count, (i, _)) in s.char_indices().enumerate() {
         if count == max_chars {
             end = i;
             break;
         }
-        count += 1;
     }
     if end < s.len() {
         format!("{}…", &s[..end])
