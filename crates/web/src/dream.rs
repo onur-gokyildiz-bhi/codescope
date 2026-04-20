@@ -368,6 +368,14 @@ pub async fn api_dream_arc(
         }
     }
 
+    // Dream-D — upgrade narration in-place if the LLM cache
+    // has an entry for this arc. First fetch of a given arc
+    // kicks off background generation; the user sees template
+    // narration immediately and the LLM version on the next
+    // refresh. Silent no-op when `CODESCOPE_LLM_URL` /
+    // `CODESCOPE_LLM_MODEL` aren't set.
+    apply_llm_narration(&arc_id, &mut scenes);
+
     let edge_proposals = propose_edges(&scenes);
 
     let detail = ArcDetail {
@@ -378,6 +386,155 @@ pub async fn api_dream_arc(
         edge_proposals,
     };
     axum::response::Json(detail).into_response()
+}
+
+// ── Dream-D: LLM narration + cache ─────────────────────────────
+
+use std::sync::{Mutex, OnceLock};
+
+type NarrationCache = std::collections::HashMap<u64, Vec<String>>;
+
+fn cache() -> &'static Mutex<NarrationCache> {
+    static CACHE: OnceLock<Mutex<NarrationCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(NarrationCache::new()))
+}
+
+/// Hash the arc's identity so a scene-set change (new scene
+/// landed, order changed) invalidates the cached narration.
+fn arc_cache_key(arc_id: &str, scenes: &[Scene]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    arc_id.hash(&mut h);
+    for s in scenes {
+        s.id.hash(&mut h);
+    }
+    h.finish()
+}
+
+fn apply_llm_narration(arc_id: &str, scenes: &mut [Scene]) {
+    let Some(cfg) = codescope_core::llm::LlmConfig::from_env() else {
+        return;
+    };
+    let key = arc_cache_key(arc_id, scenes);
+
+    // Cache hit → overwrite narration.
+    if let Some(cached) = cache().lock().ok().and_then(|m| m.get(&key).cloned()) {
+        for (i, s) in scenes.iter_mut().enumerate() {
+            if let Some(line) = cached.get(i) {
+                if !line.trim().is_empty() {
+                    s.narration = line.clone();
+                }
+            }
+        }
+        return;
+    }
+
+    // Cache miss — kick off background generation. Template
+    // narration stays on this response; the next fetch gets
+    // LLM output.
+    let arc_id_owned = arc_id.to_string();
+    let scene_data: Vec<(String, String, String, String)> = scenes
+        .iter()
+        .map(|s| {
+            (
+                s.kind.clone(),
+                s.title.clone(),
+                s.created_at.clone().unwrap_or_default(),
+                first_n_chars(&s.content, 600),
+            )
+        })
+        .collect();
+    tokio::spawn(async move {
+        match generate_llm_narrations(&cfg, &arc_id_owned, &scene_data).await {
+            Ok(lines) if !lines.is_empty() => {
+                if let Ok(mut g) = cache().lock() {
+                    g.insert(key, lines);
+                }
+            }
+            Ok(_) => { /* empty response — skip cache */ }
+            Err(e) => {
+                tracing::debug!("Dream-D LLM generation failed: {e}");
+            }
+        }
+    });
+}
+
+/// Build one prompt that asks the LLM for one narration line
+/// per scene, numbered. Parse the response back into the scene
+/// order. One network round-trip per arc = cheaper than N.
+async fn generate_llm_narrations(
+    cfg: &codescope_core::llm::LlmConfig,
+    arc_id: &str,
+    scenes: &[(String, String, String, String)],
+) -> anyhow::Result<Vec<String>> {
+    let mut prompt = String::with_capacity(4096);
+    prompt.push_str(
+        "You are narrating a chronological arc of a software project's \
+         decisions, problems, and solutions. Each scene below is one \
+         entry from a knowledge graph. Write ONE short narration line per \
+         scene (25–60 words), in second-person past tense (\"you decided …\", \
+         \"you solved …\"). Keep tone reflective, not celebratory. Number \
+         your lines 1. 2. 3. … exactly matching the scene numbers. \
+         Output only the numbered lines, nothing else.\n\n",
+    );
+    prompt.push_str(&format!("Arc topic: {arc_id}\n\n"));
+    for (i, (kind, title, date, content)) in scenes.iter().enumerate() {
+        prompt.push_str(&format!(
+            "Scene {n} [{kind}, {date}]: {title}\n{content}\n\n",
+            n = i + 1,
+            kind = kind,
+            date = date,
+            title = title,
+            content = content.replace("\n\n", "\n")
+        ));
+    }
+    let text = codescope_core::llm::complete(cfg, &prompt).await?;
+    Ok(parse_numbered_response(&text, scenes.len()))
+}
+
+/// Split "1. foo\n2. bar\n..." into a `Vec<String>` of length
+/// `expected`. Missing entries come back as empty strings — the
+/// caller keeps the template narration for those scenes.
+fn parse_numbered_response(text: &str, expected: usize) -> Vec<String> {
+    let mut out = vec![String::new(); expected];
+    let mut current_idx: Option<usize> = None;
+    let mut buf = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        // Match "1. ", "2) ", "10. " …
+        let mut ni = 0;
+        let bytes = trimmed.as_bytes();
+        while ni < bytes.len() && bytes[ni].is_ascii_digit() {
+            ni += 1;
+        }
+        let is_numbered = ni > 0
+            && ni < bytes.len()
+            && matches!(bytes[ni], b'.' | b')')
+            && ni + 1 < bytes.len()
+            && bytes[ni + 1] == b' ';
+        if is_numbered {
+            if let Some(idx) = current_idx {
+                if idx < out.len() {
+                    out[idx] = buf.trim().to_string();
+                }
+            }
+            let n: usize = trimmed[..ni].parse().unwrap_or(0);
+            current_idx = Some(n.saturating_sub(1));
+            buf = trimmed[ni + 2..].trim().to_string();
+        } else if current_idx.is_some() {
+            if !buf.is_empty() {
+                buf.push(' ');
+            }
+            buf.push_str(trimmed);
+        }
+    }
+    if let Some(idx) = current_idx {
+        if idx < out.len() {
+            out[idx] = buf.trim().to_string();
+        }
+    }
+    out
 }
 
 /// Dream-E — rule-based edge proposer. Kind pair + Jaccard

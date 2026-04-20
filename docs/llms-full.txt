@@ -188,6 +188,18 @@ exact `file:line`.
 
 ---
 
+## Environment variables
+
+| Var | Default | Effect |
+|-----|---------|--------|
+| `CODESCOPE_DB_URL` | `ws://127.0.0.1:8077` | SurrealDB server endpoint. |
+| `CODESCOPE_DB_NS` | `codescope` | Namespace inside the server. |
+| `CODESCOPE_DB_USER` / `CODESCOPE_DB_PASS` | `root/root` | Server creds. |
+| `CODESCOPE_COMPACT` | unset | `1` strips embeddings/hashes; `ultra` also strips timestamps and shortens paths. |
+| `CODESCOPE_LLM_URL` | `http://127.0.0.1:11434` | Ollama-compatible endpoint. Setting **either** of the two `CODESCOPE_LLM_*` vars opts into Dream-D LLM narration. |
+| `CODESCOPE_LLM_MODEL` | `qwen2.5:7b-instruct` | Model name passed to the endpoint. |
+| `CODESCOPE_HOOK_BLOCK` | `0` | `1` makes the RTK-03 bash-suggest hook hard-fail matched patterns instead of printing a suggestion. |
+
 ## Known error codes (R2 contract)
 
 Non-2xx HTTP bodies and tool error strings follow:

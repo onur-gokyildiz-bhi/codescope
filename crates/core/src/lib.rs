@@ -14,6 +14,7 @@ pub mod embeddings;
 pub mod gain;
 pub mod graph;
 pub mod insight;
+pub mod llm;
 pub mod parser;
 pub mod temporal;
 
