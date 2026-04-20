@@ -6,7 +6,7 @@
 
 A graph-first code intelligence engine. Your agents stop reading files and start traversing a knowledge graph — 98-99% fewer tokens, deterministic, single-digit-millisecond traversal.
 
-Rust-native · Fully local · 32 MCP tools · LSP bridge · 57 languages
+Rust-native · Fully local · 52 MCP tools · LSP bridge · 57 languages · 9 agents
 
 [Install](#install) · [Why Graph-First?](#why-graph-first) · [Benchmarks](#benchmarks) · [Docs](docs/) · [Release Notes](https://github.com/onur-gokyildiz-bhi/codescope/releases)
 
@@ -49,7 +49,7 @@ codescope init
 
 # That's it.
 # Claude Code, Cursor, Codex, or any MCP-compatible agent now has
-# 32 codebase tools wired up automatically.
+# 52 codebase tools wired up automatically.
 ```
 
 Your agent can now:
@@ -133,13 +133,35 @@ Pre-built binaries for:
 
 ## Quick Start
 
-### Option 1 — MCP mode (default, works with Claude Code)
+### First run — bring the server up
+
+```bash
+codescope start                  # supervises the bundled `surreal` server
+codescope status                 # → running  pid=… port=8077 version=3.0.5
+```
+
+`codescope start` is idempotent — running it again is a no-op when the server is healthy. State lives at `~/.codescope/surreal.json`. Stop with `codescope stop`.
+
+### Option 1 — MCP mode (default agent: Claude Code)
 
 ```bash
 cd your-project
 codescope init
-# Creates .mcp.json + indexes your code. That's it.
-# Restart Claude Code / Cursor / Zed / Codex — codescope is now available.
+# Writes .mcp.json + indexes your code. That's it.
+# Restart Claude Code — codescope is now wired in.
+```
+
+To target a different agent:
+
+```bash
+codescope init --agent cursor          # writes .cursor/mcp.json
+codescope init --agent gemini-cli      # merges into ~/.gemini/settings.json
+codescope init --agent vscode-copilot  # .vscode/mcp.json (servers key)
+codescope init --agent codex           # ~/.codex/config.toml (TOML!)
+codescope init --agent windsurf        # ~/.codeium/windsurf/mcp_config.json
+codescope init --agent kiro            # .kiro/settings/mcp.json
+codescope init --agent cline           # .vscode/cline_mcp_settings.json
+codescope init --agent antigravity     # global + GEMINI.md routing nudge
 ```
 
 ### Option 2 — Daemon mode (MCP + Web UI in one process)
@@ -147,8 +169,9 @@ codescope init
 ```bash
 codescope init --daemon          # port 9877
 # Web UI: http://localhost:9877/
-# MCP:    http://localhost:9877/mcp
-# Solves all DB lock conflicts. One process serves everything.
+# MCP:    http://localhost:9877/mcp            (generic, init_project required)
+#         http://localhost:9877/mcp/<repo>     (per-repo, auto-bound)
+# No DB lock conflicts — surreal server owns the files.
 ```
 
 ### Option 3 — LSP mode (any editor with LSP support)
@@ -162,20 +185,34 @@ codescope lsp
 
 Your editor's **Go to Definition**, **Find References**, **Hover**, and **Workspace Symbols** are now graph-backed. Single-digit-millisecond response. No extension needed.
 
+### Daily operation
+
+```bash
+codescope status                     # server state (running / unhealthy / not-running)
+codescope gain                       # cumulative tool-call token savings
+codescope insight                    # per-repo + hourly activity histogram
+codescope session                    # last 5 MCP sessions with timeline tails
+codescope upgrade                    # in-place self-update from GitHub releases
+codescope repair --repo <name>       # drop + re-index a corrupted repo
+codescope hook install               # PreToolUse bash-suggest for Claude Code
+codescope doctor                     # diagnose setup + optional --fix
+```
+
 ### Manual commands (for scripting)
 
 ```bash
-codescope index .                       # Index current project
-codescope search "parse" --mode fuzzy   # Find functions
-codescope stats                         # Graph overview
-codescope review main..HEAD             # Impact analysis of a PR
-codescope migrate                       # Upgrade DB schema
-codescope web . --host 0.0.0.0          # 3D web UI, LAN accessible
+codescope index .                           # Index current project
+codescope search "parse" --mode fuzzy       # Find functions
+codescope stats                             # Graph overview
+codescope review main..HEAD                 # Impact analysis of a PR
+codescope query "SELECT * FROM \`function\` LIMIT 10"   # Raw SurrealQL
+codescope migrate-to-server --execute       # Move legacy ~/.codescope/db/ to server
+codescope web . --host 0.0.0.0              # 3D web UI, LAN accessible
 ```
 
 ---
 
-## 32 MCP Tools in 9 Categories
+## 52 MCP Tools in 9 Categories
 
 <table>
 <tr><td width="50%" valign="top">
@@ -269,7 +306,7 @@ Claude Code, Cursor, Codex, Zed — all agents connected to codescope see the sa
                         │
                 ┌───────▼────────┐
                 │ Codescope MCP  │
-                │  (32 tools)    │
+                │  (52 tools)    │
                 └───────┬────────┘
                         │
                 ┌───────▼────────┐
@@ -360,7 +397,7 @@ So "vs Cursor" is the wrong framing. **Codescope vs Cursor's built-in embeddings
 | | **Codescope** | Sourcegraph | Greptile | Aider's repomap |
 |---|:---:|:---:|:---:|:---:|
 | Graph database | SurrealDB (embedded) | SCIP (partial graph) | Cloud graph | ❌ (flat map) |
-| MCP protocol | **32 tools** | ❌ | API only | ❌ |
+| MCP protocol | **52 tools** | ❌ | API only | ❌ |
 | LSP bridge | **Yes, graph-backed** | Yes (per-language) | ❌ | ❌ |
 | AI agent memory | **Yes, cross-session** | ❌ | ❌ | ❌ |
 | Self-hosted | **Yes** | Paid tier | ❌ (SaaS) | Yes |
@@ -394,25 +431,26 @@ SurrealDB knowledge graph
 
 ## Roadmap
 
-**Recently shipped (v0.7.0 → v0.7.6):**
-- ✅ Knowledge graph visualization (3D web UI)
-- ✅ Delta-mode context bundling (97% token save on repeats)
-- ✅ Graph-ranked search (caller-count PPR)
-- ✅ Multi-edge impact analysis (calls + imports + implements)
-- ✅ File watcher auto re-index
-- ✅ Daemon mode (single process for MCP + Web UI)
-- ✅ Tool consolidation (57 → 32, -44%)
-- ✅ CUDA / GPU code semantic support
-- ✅ LSP bridge (any editor)
-- ✅ Schema migration system
-- ✅ Cross-project shared knowledge graph
-- ✅ Diff-aware PR review (`codescope review main..HEAD`)
+**Just shipped (v0.8.0):**
+- ✅ **Bundled SurrealDB server** — no more SurrealKV file-lock conflicts across CLI / MCP / web / LSP. `codescope start` supervises it; R1–R8 refactor across 7 crates.
+- ✅ **Phase 3 Dream** — narrated arc-tour UI over the knowledge graph. 3D fly-through, auto-tag suggestions (A), duplicate flagging (B), cross-repo pattern detection (C), optional Ollama narration (D), rule-based edge proposals (E).
+- ✅ **Multi-agent `codescope init --agent`** — 9 platforms: Claude Code, Cursor, Gemini CLI, VS Code Copilot, Codex, Windsurf, Kiro, Cline, Antigravity.
+- ✅ **Session continuity (CMX-02)** — per-session event log (tool_call / file_edit / error). `codescope session` CLI + web timeline.
+- ✅ **Observability** — `codescope gain` (cumulative token savings) + `codescope insight` (per-repo / hourly) + 7th "Insight" view in the web UI.
+- ✅ **`codescope start` / `stop` / `status`** supervisor with idempotent spawn, stale-PID cleanup, version drift detection.
+- ✅ **`codescope upgrade`** self-update + **`codescope repair`** single-repo DB rebuild.
+- ✅ **Homebrew formula** + **Claude Code plugin marketplace** manifest.
+- ✅ **Structured error contract (R2)** — `{ok, error: {code, message, hint}}` across web / MCP / CLI stderr.
+- ✅ **E2E smoke crate (R3)** — `crates/e2e/`, dedicated CI job.
+- ✅ **RTK-03 bash-suggest hook** — `codescope hook install` nudges the model toward codescope tools when it's about to `cat` / `grep`.
+- ✅ **RTK-06 response compaction** — `CODESCOPE_COMPACT=1|ultra` strips embeddings / timestamps / long paths for another 30–50% savings.
 
-**Next (v0.8.x):**
+**Next:**
 - 🔜 VSCode extension (built on LSP)
-- 🔜 Continuous Obsidian/Notion sync
+- 🔜 Continuous Obsidian / Notion sync
 - 🔜 Opt-in telemetry (drop unused tools based on real usage)
 - 🔜 Windows MSI installer
+- 🔜 Session replay UI (Dream × CMX-02 — "what happened in this session" narration)
 
 [Full roadmap in the knowledge graph](https://github.com/onur-gokyildiz-bhi/codescope/tree/main/docs) — `knowledge(action="search", query="status:planned")` when connected.
 
