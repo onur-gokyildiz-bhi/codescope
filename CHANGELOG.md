@@ -4,6 +4,31 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-20
+
+Hotfix — web UI rendered as a blank white page on every
+released binary.
+
+### Fixed
+
+- **Frontend assets embedded at compile time via `include_dir`.**
+  `serve_asset` used to read JS/CSS files from
+  `$CARGO_MANIFEST_DIR/frontend/dist/assets/` at runtime. That
+  path is resolved when the binary is built, so any installed
+  archive (release tarball, Homebrew, `codescope install`,
+  `codescope upgrade`) pointed at a directory on the CI runner
+  that didn't exist on the user's machine. Result: every asset
+  404'd and the root route served an index.html referencing
+  JS that never loaded — white screen. Now the whole `dist/
+  assets/` tree is baked into the binary via
+  `include_dir::include_dir!(…)`; the legacy on-disk path
+  stays as a dev fallback so `cargo run` still picks up live
+  vite rebuilds without a recompile.
+- **Asset `Content-Type` mapping** expands to fonts
+  (`woff` / `woff2`) and SVGs, which previously came back as
+  `application/octet-stream`. Most browsers tolerated it;
+  older Safari did not.
+
 ## [0.8.0] - 2026-04-20
 
 Substantial refactor + feature release across three branches.
