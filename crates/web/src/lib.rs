@@ -35,6 +35,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// `Some` only when the web layer was built in daemon (multi)
+    /// mode. `dream::api_dream_patterns` calls this to enumerate
+    /// repos across the running surreal server.
+    pub(crate) fn daemon_state(&self) -> Option<&Arc<DaemonState>> {
+        match &self.source {
+            ProjectSource::Multi(d) => Some(d),
+            _ => None,
+        }
+    }
+
     async fn resolve_query(&self, repo: Option<&str>) -> Result<GraphQuery, ApiError> {
         match &self.source {
             ProjectSource::Single {
@@ -168,6 +178,7 @@ fn build_routes() -> Router<Arc<AppState>> {
             "/api/dream/apply-tag",
             axum::routing::post(dream::api_dream_apply_tag),
         )
+        .route("/api/dream/patterns", get(dream::api_dream_patterns))
         // CMX-01 insight — per-call analytics from ~/.codescope/insight.jsonl
         .route("/api/insight", get(api_insight))
 }

@@ -13,11 +13,11 @@
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
 import {
   Moon, PlayCircle, PauseCircle, SkipForward, SkipBack, Download,
-  Sparkles, Plus,
+  Sparkles, Plus, Network,
 } from 'lucide-solid';
 import {
   api, type DreamArcSummary, type DreamArcDetail, type DreamScene,
-  type DreamSuggestion,
+  type DreamSuggestion, type DreamPattern,
 } from '../api';
 import { currentProject } from '../store';
 import DreamGraph3D from './DreamGraph3D';
@@ -61,6 +61,18 @@ export default function DreamPage() {
   );
   const [showSuggestions, setShowSuggestions] = createSignal(false);
   const [applying, setApplying] = createSignal<string | null>(null);
+
+  // Dream-C cross-repo patterns — fetched once at mount; no repo
+  // scoping (patterns only exist across repos by definition).
+  const [patterns] = createResource(async () => {
+    try {
+      return (await api.dreamPatterns()).patterns;
+    } catch (e) {
+      console.error('dreamPatterns failed:', e);
+      return [] as DreamPattern[];
+    }
+  });
+  const [showPatterns, setShowPatterns] = createSignal(false);
 
   const acceptSuggestion = async (id: string, tag: string) => {
     setApplying(`${id}::${tag}`);
@@ -217,6 +229,45 @@ export default function DreamPage() {
                       )}
                     </For>
                   </div>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
+
+        {/* Dream-C — cross-repo patterns */}
+        <Show when={(patterns() ?? []).length > 0}>
+          <button
+            class="dream-pattern-toggle"
+            onClick={() => setShowPatterns((v) => !v)}
+          >
+            <Network size={14} />
+            <span>
+              {showPatterns() ? 'Hide' : 'Cross-repo patterns'} · {(patterns() ?? []).length}
+            </span>
+          </button>
+        </Show>
+        <Show when={showPatterns() && (patterns() ?? []).length > 0}>
+          <div class="dream-pattern-list">
+            <For each={patterns() ?? []}>
+              {(p) => (
+                <div class="dream-pattern-row">
+                  <div class="dream-pattern-head">
+                    <span class="dream-pattern-title">{p.title}</span>
+                    <span class="dream-pattern-count">
+                      {p.repos.length} repos · {p.total}
+                    </span>
+                  </div>
+                  <ul class="dream-pattern-repos">
+                    <For each={p.repos}>
+                      {(r) => (
+                        <li>
+                          <span class="dream-pattern-repo">{r.repo}</span>
+                          <span class="dream-pattern-example">{r.example_title}</span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
                 </div>
               )}
             </For>

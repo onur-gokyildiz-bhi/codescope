@@ -2041,3 +2041,68 @@ body::before {
 .dream-scene-dup:hover {
   background: rgba(255, 61, 245, 0.2);
 }
+
+/* Dream-C — cross-repo patterns panel */
+.dream-pattern-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px dashed rgba(0, 229, 255, 0.4);
+  border-radius: 8px;
+  color: var(--accent-cyan, #38bdf8);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.dream-pattern-toggle:hover {
+  background: rgba(0, 229, 255, 0.16);
+}
+.dream-pattern-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.dream-pattern-row {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-dim, #1e293b);
+  border-left: 3px solid var(--accent-cyan, #38bdf8);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.dream-pattern-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.dream-pattern-title {
+  color: var(--text-bright, #e2e8f0);
+  font-weight: 600;
+}
+.dream-pattern-count {
+  color: var(--accent-cyan, #38bdf8);
+  font-variant-numeric: tabular-nums;
+}
+.dream-pattern-repos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+}
+.dream-pattern-repo {
+  color: var(--accent-cyan, #38bdf8);
+  margin-right: 6px;
+  font-family: var(--font-mono, ui-monospace);
+}
+.dream-pattern-example {
+  color: var(--text-dim, #94a3b8);
+}

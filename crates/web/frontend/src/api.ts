@@ -78,6 +78,9 @@ export const api = {
   dreamSuggestTags: () =>
     fetchJson<{ suggestions: DreamSuggestion[] }>(withRepo(`${BASE}/api/dream/suggest-tags`)),
 
+  dreamPatterns: () =>
+    fetchJson<{ patterns: DreamPattern[] }>(`${BASE}/api/dream/patterns`),
+
   dreamApplyTag: async (id: string, tag: string): Promise<{ ok: boolean }> => {
     const proj = currentProject();
     const url = `${BASE}/api/dream/apply-tag${proj ? `?repo=${encodeURIComponent(proj)}` : ''}`;
@@ -104,6 +107,19 @@ export type DreamSuggestion = {
   title: string;
   kind: string;
   candidates: DreamSuggestionCandidate[];
+};
+
+export type DreamPatternRepo = {
+  repo: string;
+  count: number;
+  example_title: string;
+};
+
+export type DreamPattern = {
+  tag: string;
+  title: string;
+  repos: DreamPatternRepo[];
+  total: number;
 };
 
 export type InsightResponse = {

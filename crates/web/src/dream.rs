@@ -797,6 +797,153 @@ fn value_to_id_string(v: &serde_json::Value) -> Option<String> {
     None
 }
 
+// ── Dream-C: cross-repo pattern detection ─────────────────────
+
+#[derive(Serialize)]
+pub struct Pattern {
+    pub tag: String,
+    pub title: String,
+    pub repos: Vec<PatternRepoEntry>,
+    pub total: usize,
+}
+
+#[derive(Serialize)]
+pub struct PatternRepoEntry {
+    pub repo: String,
+    pub count: usize,
+    pub example_title: String,
+}
+
+/// `GET /api/dream/patterns` — scan every repo on the surreal
+/// server for knowledge tags that repeat across ≥2 projects.
+/// The point is "you've solved this kind of thing before" — same
+/// `auth`, `migration`, `caching`, etc. tag in three different
+/// codebases is a strong signal worth surfacing.
+///
+/// Only returns topical tags (meta tags excluded). Limits each
+/// repo query to the 500 most recent knowledge rows to bound the
+/// cost; patterns that need more evidence than that are edge
+/// cases.
+pub async fn api_dream_patterns(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Need the server-wide repo list; only meaningful in daemon
+    // (multi) mode, but we also try `list_server_repos` in single
+    // mode — it falls back via connect_admin.
+    let daemon = state.daemon_state().cloned();
+    let repos: Vec<String> = if let Some(d) = &daemon {
+        d.list_server_repos().await
+    } else {
+        // Single-mode fallback: query admin directly.
+        match codescope_core::connect_admin().await {
+            Ok(admin) => {
+                let ns = std::env::var("CODESCOPE_DB_NS")
+                    .unwrap_or_else(|_| codescope_core::DEFAULT_NS.to_string());
+                let _ = admin.use_ns(&ns).await;
+                admin
+                    .query("INFO FOR NS")
+                    .await
+                    .ok()
+                    .and_then(|mut r| r.take::<Vec<serde_json::Value>>(0).ok())
+                    .map(|rows| {
+                        rows.into_iter()
+                            .filter_map(|row| {
+                                let dbs = row
+                                    .get("databases")
+                                    .or_else(|| row.get("db"))?
+                                    .as_object()?;
+                                Some(dbs.keys().cloned().collect::<Vec<_>>())
+                            })
+                            .flatten()
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            Err(_) => Vec::new(),
+        }
+    };
+    let repos: Vec<String> = repos
+        .into_iter()
+        .filter(|n| !n.starts_with('_') && !n.contains(".old."))
+        .collect();
+
+    // `(tag, repo) → (count, example_title)`.
+    let mut tally: BTreeMap<(String, String), (usize, String)> = BTreeMap::new();
+
+    for repo in &repos {
+        // Open a one-shot admin connection per repo — we don't
+        // want to cache unrelated handles here, and the opens are
+        // cheap against a live server.
+        let Ok(db) = codescope_core::connect_repo(repo).await else {
+            continue;
+        };
+        let gq = codescope_core::graph::query::GraphQuery::new(db);
+        let Ok(value) = gq
+            .raw_query("SELECT title, tags FROM knowledge ORDER BY created_at DESC LIMIT 500")
+            .await
+        else {
+            continue;
+        };
+        let rows = flatten_rows(value);
+        for row in rows {
+            let title = row
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let tags: Vec<String> = row
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for tag in tags {
+                if is_meta_tag(&tag) {
+                    continue;
+                }
+                let entry = tally
+                    .entry((tag, repo.clone()))
+                    .or_insert_with(|| (0, title.clone()));
+                entry.0 += 1;
+            }
+        }
+    }
+
+    // Pivot: group per-tag; keep only tags spanning ≥2 repos.
+    let mut by_tag: BTreeMap<String, Vec<PatternRepoEntry>> = BTreeMap::new();
+    for ((tag, repo), (count, example)) in tally {
+        by_tag.entry(tag).or_default().push(PatternRepoEntry {
+            repo,
+            count,
+            example_title: example,
+        });
+    }
+    let mut patterns: Vec<Pattern> = by_tag
+        .into_iter()
+        .filter(|(_, entries)| entries.len() >= 2)
+        .map(|(tag, entries)| {
+            let total = entries.iter().map(|e| e.count).sum();
+            Pattern {
+                title: humanise_tag(&tag),
+                tag,
+                total,
+                repos: entries,
+            }
+        })
+        .collect();
+
+    // Highest-reach patterns first.
+    patterns.sort_by(|a, b| {
+        b.repos
+            .len()
+            .cmp(&a.repos.len())
+            .then_with(|| b.total.cmp(&a.total))
+    });
+    patterns.truncate(50);
+    axum::response::Json(serde_json::json!({ "patterns": patterns })).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
