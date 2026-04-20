@@ -342,23 +342,47 @@ async fn index_page() -> Html<&'static str> {
     Html(include_str!("../frontend/dist/index.html"))
 }
 
+/// Built frontend asset tree, embedded at compile time. We prefer
+/// this over reading from `$CARGO_MANIFEST_DIR/frontend/dist/assets/`
+/// at runtime because that path only exists on the machine that
+/// compiled the binary — any installed build (release archives,
+/// `codescope install`, `codescope upgrade`) would 404 on every
+/// asset and render a blank white page.
+static ASSETS: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/frontend/dist/assets");
+
 async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
-    // Serve JS/CSS from embedded frontend build
     let content_type = if path.ends_with(".js") {
         "application/javascript"
     } else if path.ends_with(".css") {
         "text/css"
+    } else if path.ends_with(".woff") || path.ends_with(".woff2") {
+        "font/woff2"
+    } else if path.ends_with(".svg") {
+        "image/svg+xml"
     } else {
         "application/octet-stream"
     };
 
-    // Try to find the file in the build output
+    // Fast path — embedded asset lookup.
+    if let Some(file) = ASSETS.get_file(&path) {
+        return (
+            [(axum::http::header::CONTENT_TYPE, content_type)],
+            file.contents().to_vec(),
+        )
+            .into_response();
+    }
+
+    // Dev fallback: when running from `cargo run` the dist dir IS
+    // on disk, and we'd rather let the live build win over a stale
+    // baked-in copy. This branch is unreachable for installed
+    // binaries (the manifest dir doesn't exist), so it fails
+    // cleanly into 404 there.
     let assets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("frontend")
         .join("dist")
         .join("assets");
     let file_path = assets_dir.join(&path);
-
     match std::fs::read(&file_path) {
         Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response(),
         Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),

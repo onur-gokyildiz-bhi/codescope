@@ -27,6 +27,13 @@ clap = { workspace = true }
 dirs = "5"
 rayon = { workspace = true }
 ignore = { workspace = true }
+# Embed the built frontend directory at compile time. Without this
+# `serve_asset` reads from `$CARGO_MANIFEST_DIR/frontend/dist/assets/`
+# at RUNTIME — that path only exists on the machine that built the
+# binary. Release archives shipped to users 404 on every asset,
+# showing a blank white screen. `include_dir` bakes the whole tree
+# into the binary so the installed exe is self-contained.
+include_dir = "0.7"
 
 [dev-dependencies]
 tower = { workspace = true }
