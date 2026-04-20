@@ -38,7 +38,10 @@ impl EntityLinker {
         Self { known }
     }
 
-    /// Build directly from name/table/qname tuples (used by MCP tools)
+    /// Build directly from name/table/qname tuples (used by MCP tools).
+    /// Currently routed through the graph API's bulk loader; kept as
+    /// an exported constructor for callers that only have tuples in hand.
+    #[allow(dead_code)]
     pub fn from_tuples(tuples: Vec<(String, String, String)>) -> Self {
         Self { known: tuples }
     }

@@ -227,7 +227,7 @@ pub async fn run_web(
             .unwrap_or("default")
             .to_string()
     });
-    let db_path = db_path_override.unwrap_or_else(|| {
+    let _db_path = db_path_override.unwrap_or_else(|| {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".codescope")

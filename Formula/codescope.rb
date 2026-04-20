@@ -15,7 +15,7 @@
 class Codescope < Formula
   desc "Graph-first code intelligence engine for AI agents"
   homepage "https://github.com/onur-gokyildiz-bhi/codescope"
-  version "0.7.10"
+  version "0.8.0"
   license "MIT"
 
   # Bundled surreal server — needed by the R4 supervisor. We drop

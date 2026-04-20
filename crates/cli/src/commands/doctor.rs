@@ -323,7 +323,7 @@ fn check_binary(name: &str) -> Check {
     }
 }
 
-fn check_mcp_json(mcp_json: &PathBuf, project_path: &PathBuf, auto_fix: bool) -> Check {
+fn check_mcp_json(mcp_json: &PathBuf, _project_path: &PathBuf, auto_fix: bool) -> Check {
     if mcp_json.exists() {
         match std::fs::read_to_string(mcp_json) {
             Ok(content) => {

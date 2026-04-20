@@ -59,7 +59,7 @@ pub async fn run() -> Result<()> {
 
     // Hourly sparkline — last 24 non-empty hours
     let mut hours: Vec<(&String, &u64)> = s.hours.iter().collect();
-    hours.sort_by_key(|(k, _)| k.clone());
+    hours.sort_by_key(|(k, _)| (*k).clone());
     let tail: Vec<_> = hours.iter().rev().take(24).collect();
     if !tail.is_empty() {
         println!();

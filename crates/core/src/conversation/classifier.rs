@@ -6,6 +6,7 @@ use super::parser::ConversationTurn;
 
 /// Classification result for a conversation segment
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // confidence/rationale surfaced via LSP views, not the MCP surface
 pub struct ClassifiedSegment {
     pub kind: SegmentKind,
     pub name: String,

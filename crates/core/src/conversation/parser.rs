@@ -8,6 +8,7 @@ use std::path::Path;
 
 /// A parsed conversation turn (one user or assistant message)
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // has_tool_use read via future tool-use analytics path
 pub struct ConversationTurn {
     pub role: String,
     pub text: String,
@@ -19,6 +20,7 @@ pub struct ConversationTurn {
 }
 
 /// Result of parsing a JSONL conversation file
+#[allow(dead_code)] // last_timestamp read via future session-temporal queries
 pub struct ConversationParseResult {
     pub session_id: String,
     pub turns: Vec<ConversationTurn>,

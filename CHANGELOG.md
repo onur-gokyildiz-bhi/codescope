@@ -4,6 +4,164 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-20
+
+Substantial refactor + feature release across three branches.
+Rewrites the storage layer onto a bundled SurrealDB server,
+adds a narrated arc-tour UI, multi-agent distribution, and an
+observability layer shared with RTK + context-mode.
+
+### Architecture (R1–R8)
+
+- **R1-v2 remote SurrealDB client.** Every crate talks to a
+  bundled `surreal` server on `127.0.0.1:8077` via a single
+  `DbHandle = Surreal<Any>`. Eliminates the exclusive file lock
+  SurrealKV imposed across CLI + MCP stdio + web daemon + LSP;
+  the server handles concurrency now, not us. Configurable via
+  `CODESCOPE_DB_URL` / `CODESCOPE_DB_NS` / `CODESCOPE_DB_USER` /
+  `CODESCOPE_DB_PASS`.
+- **R2 structured error contract.** Every non-2xx body and tool
+  error string now serialises to
+  `{ok:false, error:{code, message, hint}}` with a narrow code
+  taxonomy (`db_unreachable`, `db_version_drift`, `db_corrupt`,
+  `repo_not_found`, `invalid_input`, `timeout`, `internal`,
+  `index_not_ready`, `no_project`). Applies across web, MCP, and
+  CLI stderr.
+- **R3 end-to-end smoke crate.** `crates/e2e/` ships a
+  `TestServer` fixture that spawns an ephemeral in-memory
+  surreal per test. `smoke_server`, `smoke_multiproject`, and
+  `smoke_cli` suites verify the invariants the refactor exists
+  to guarantee. Dedicated `e2e` CI job, 5-min timeout.
+- **R4 supervisor.** `codescope start` / `stop` / `status`
+  manage the surreal binary idempotently via
+  `~/.codescope/surreal.json`. `codescope doctor` grows a
+  supervisor-state check. Windows uses `DETACHED_PROCESS` +
+  `CREATE_NEW_PROCESS_GROUP`; Unix orphans the child.
+- **R5 `/mcp/{repo}` per-repo MCP routing.** HTTP daemon pre-
+  discovers every DB on the server at startup and mounts one
+  `StreamableHttpService` per repo. Tool calls against
+  `/mcp/<repo>` bypass `init_project` — the session resolves
+  the repo lazily on first `ctx()`.
+- **R6 `codescope repair`.** `--repo X [--reindex PATH]`
+  drops the repo's SurrealDB database and optionally re-runs
+  the indexer, without bouncing the server or touching other
+  repos. Interactive confirmation unless `--yes`.
+- **R7 `codescope migrate-to-server`.** Legacy per-repo
+  SurrealKV dirs migrate via a spawned
+  `surreal export` → `surreal import` pipeline per repo. Temp
+  server on a free port backs the source; a small backtick-
+  reserved-word pass fixes an upstream surreal 3.0.5 bug where
+  exported `function:id` didn't parse back on import. Verified
+  lossless on alice-project (2737 entities + 93146 relations,
+  zero drift).
+- **R8 release archives bundle the surreal binary.** Each
+  target triple in `release.yml` now ships a pinned `surreal`
+  next to the four codescope binaries. Install scripts drop it
+  at `~/.codescope/bin/` where the R4 supervisor looks first.
+
+### Phase 3 Dream — narrated tours through the knowledge graph
+
+- **`/dream` view** (sixth top-bar tab, shortcut `6`). Arcs
+  are tag-based clusters of knowledge entries: decisions,
+  problems, solutions, concepts, claims.
+- **3D tour graph.** Scenes become octahedron nodes connected
+  by a glowing "storyline" path. Camera flies between scenes on
+  autoplay (6 s/scene) or manual skip. Click any node to jump.
+- **Template narration** of each scene, first-person memoir
+  voice. Typographic quotes around titles; first-sentence
+  extraction after stripping markdown scaffolding.
+- **Markdown export** — downloads the active arc as a
+  standalone `dream-<tag>.md` with H2 per scene + collapsed
+  content blocks.
+
+### Dream refinement (A / B / C / D / E)
+
+- **Dream-A auto-tag suggestion.** Scans for entries without
+  topical tags and proposes the top-3 arcs they could belong to
+  via Jaccard overlap + tag-name-in-title bonus. One-click
+  accept writes the tag.
+- **Dream-B duplicate flag.** Scenes with ≥70% content
+  similarity inside an arc get a magenta outline on the rail
+  and a badge on the card. Click jumps to the anchor scene.
+- **Dream-C cross-repo patterns.** Walks every repo on the
+  server; tags that appear in ≥2 projects bubble up as "same
+  pattern in N repos" cards.
+- **Dream-D LLM narration (Ollama).** Opt-in via
+  `CODESCOPE_LLM_URL` + `CODESCOPE_LLM_MODEL`. One batched
+  completion per arc; cached by `hash(arc_id + scene_ids)`.
+  First fetch returns template narration and kicks off a
+  background generation; next fetch uses the LLM output.
+- **Dream-E rule-based edge proposals.** Offers `solves_for` /
+  `decided_about` / `related_to` RELATEs between scenes based
+  on kind pair + Jaccard score. Accepted edges write to
+  SurrealDB.
+
+### Distribution + multi-agent (CMX / RTK)
+
+- **Multi-agent `codescope init --agent <name>`.** Nine
+  platforms: claude-code, cursor, gemini-cli, vscode-copilot,
+  codex, windsurf, kiro, cline, antigravity. Each gets its
+  config at the upstream-documented path, in the upstream-
+  documented format (JSON for most, TOML for Codex).
+- **Homebrew tap.** `brew install onur-gokyildiz-bhi/codescope/codescope`
+  via `Formula/codescope.rb`.
+- **Claude Code plugin marketplace.**
+  `/plugin marketplace add onur-gokyildiz-bhi/codescope`.
+- **`codescope upgrade`.** In-place self-update from the
+  latest GitHub release for the host target triple.
+- **Bash-suggest hook (RTK-03).** `codescope hook install`
+  drops a PreToolUse script nudging the model toward codescope
+  MCP tools when it's about to `cat` / `grep` / `find` into a
+  codebase. `CODESCOPE_HOOK_BLOCK=1` makes matches hard-fail.
+
+### Observability (CMX-01 / 01b / 02)
+
+- **`codescope gain`.** Cumulative token-savings counter —
+  atomic increment in `ctx()`, 30-s flush to
+  `~/.codescope/gain.json`. Prints total calls + estimated
+  tokens saved.
+- **`codescope insight`.** Per-call histogram by repo + hour,
+  unicode bar + sparkline. Seventh top-bar view with a live-
+  refreshing web dashboard.
+- **`codescope session` + CMX-02.** Every event in the log now
+  carries `kind` (`tool_call` / `file_edit` / `error`),
+  `session_id` (PID + boot-ns, stable per MCP process), and
+  optional `detail`. The watcher emits `file_edit` events, so
+  a session recap shows both what you asked codescope and what
+  you changed on disk. `/api/session/recent` + web timeline.
+
+### Response compaction (RTK-06)
+
+- **`CODESCOPE_COMPACT=1`** strips embedding arrays, content
+  hashes, and model metadata from every `raw_query` result.
+  `CODESCOPE_COMPACT=ultra` additionally drops timestamps,
+  `qualified_name`, and collapses absolute paths to their last
+  three segments. 30–50% reduction on top of the structured
+  graph queries.
+
+### Routing hygiene (CMX-04, CMX-06, CMX-08)
+
+- **Stop writing `.claude/rules/codescope-mandatory.md` to
+  user repos.** Rules are now injected at MCP initialize via
+  `ServerInfo.instructions` — no file surprises in a user's
+  git.
+- **`docs/llms.txt` + `docs/llms-full.txt`.** LLM-facing
+  concise index + full MCP tool reference with parameter
+  shapes and the R2 error-code taxonomy.
+- **README "Think in Code" section.** Positions codescope
+  tools as structured queries the LLM programs, not data it
+  processes. Three-layer stack callout with RTK + context-mode.
+
+### Internal
+
+- **New crates/core modules:** `compact`, `gain`, `insight`,
+  `llm` — each self-contained, env-gated where relevant.
+- **`crates/web/src/dream.rs`** — now ~1000 lines covering the
+  arc / scene / suggestion / pattern / edge-proposal / LLM
+  narration-cache pipeline.
+- **`workspace.metadata.surreal`** — single source of truth for
+  the surreal binary version pin (matches `release.yml` env).
+
 ## [0.7.10] - 2026-04-17
 
 4.5× indexing speedup and large-project MCP reliability fixes.

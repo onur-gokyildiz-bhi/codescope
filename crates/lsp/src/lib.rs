@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use codescope_core::graph::query::GraphQuery;
-use codescope_core::{connect_path, DbHandle};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
@@ -431,6 +430,10 @@ impl Backend {
 // ---------------------------------------------------------------------------
 
 /// `~/.codescope/db/<repo>/` — same convention as the CLI and MCP server.
+/// Kept on the shelf for the legacy SurrealKV-path flow; callers have
+/// migrated to `connect_repo` which goes through the bundled server,
+/// so this exists only for the remote-filesystem-override diagnostic.
+#[allow(dead_code)]
 fn default_db_path(repo: &str) -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))

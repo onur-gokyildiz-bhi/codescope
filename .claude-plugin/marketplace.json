@@ -9,7 +9,7 @@
       "name": "codescope",
       "source": "./",
       "description": "Graph-first code intelligence — 52 MCP tools, SurrealDB knowledge graph, 80–95% token reduction on code context.",
-      "version": "0.7.10"
+      "version": "0.8.0"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "codescope",
-  "version": "0.7.10",
+  "version": "0.8.0",
   "description": "Graph-first code intelligence for AI agents. SurrealDB knowledge graph + 52 MCP tools replace Read/Grep/Glob with deterministic graph traversal. 80–95% fewer tokens on code context. Rust-native, fully local.",
   "author": {
     "name": "Onur Gokyildiz",
