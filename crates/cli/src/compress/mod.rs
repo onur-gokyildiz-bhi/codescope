@@ -15,12 +15,17 @@
 //! gain` counter so the aggregate benefit shows up alongside
 //! MCP tool savings.
 
+pub mod cargo;
 pub mod cat;
+pub mod docker;
 pub mod git;
 pub mod grep;
 pub mod head_tail;
 pub mod ls;
+pub mod npm;
 pub mod passthrough;
+pub mod pytest;
+pub mod tsc;
 
 use anyhow::Result;
 use std::process::{Command, Stdio};
@@ -39,6 +44,11 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         "head" => head_tail::handle("head", &rest_owned).await,
         "tail" => head_tail::handle("tail", &rest_owned).await,
         "grep" | "rg" | "ag" => grep::handle(cmd, &rest_owned).await,
+        "cargo" => cargo::handle(&rest_owned).await,
+        "pytest" | "py.test" => pytest::handle(&rest_owned).await,
+        "npm" | "pnpm" | "yarn" => npm::handle(cmd, &rest_owned).await,
+        "tsc" => tsc::handle(&rest_owned).await,
+        "docker" => docker::handle(&rest_owned).await,
         _ => passthrough::handle(cmd, &rest_owned).await,
     }
 }
