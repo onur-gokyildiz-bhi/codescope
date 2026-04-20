@@ -257,9 +257,16 @@ export default function DreamPage() {
                   {(scene, i) => (
                     <button
                       class="dream-rail-dot"
-                      classList={{ 'dream-rail-dot--active': i() === sceneIdx() }}
+                      classList={{
+                        'dream-rail-dot--active': i() === sceneIdx(),
+                        'dream-rail-dot--dup': !!scene.duplicate_of,
+                      }}
                       onClick={() => setSceneIdx(i())}
-                      title={scene.title}
+                      title={
+                        scene.duplicate_of
+                          ? `${scene.title} · possible duplicate of #${scene.duplicate_of.index + 1} (${Math.round(scene.duplicate_of.score * 100)}%)`
+                          : scene.title
+                      }
                     />
                   )}
                 </For>
@@ -280,6 +287,18 @@ export default function DreamPage() {
                         {sceneIdx() + 1} / {detail().scenes.length}
                       </span>
                     </div>
+                    <Show when={scene().duplicate_of}>
+                      {(dup) => (
+                        <button
+                          class="dream-scene-dup"
+                          onClick={() => setSceneIdx(dup().index)}
+                          title={`Jump to scene #${dup().index + 1}`}
+                        >
+                          ⚠ Possible duplicate of scene #{dup().index + 1}
+                          <span class="dream-chip">{Math.round(dup().score * 100)}% match</span>
+                        </button>
+                      )}
+                    </Show>
                     <h2 class="dream-scene-title">{scene().title}</h2>
                     <p class="dream-scene-narration">{scene().narration}</p>
                     <Show when={scene().content}>

@@ -141,6 +141,11 @@ export type DreamScene = {
   created_at: string | null;
   tags: string[];
   narration: string;
+  duplicate_of?: {
+    id: string;
+    index: number;
+    score: number;
+  };
 };
 
 export type DreamArcDetail = {

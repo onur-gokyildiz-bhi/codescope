@@ -68,6 +68,19 @@ pub struct Scene {
     /// narration card on the frontend. LLM v2 will overwrite this
     /// with a richer string.
     pub narration: String,
+    /// Dream-B — if this scene has ≥0.7 Jaccard similarity with an
+    /// earlier scene in the same arc, this is the earlier scene's
+    /// id (1-indexed position as well, for easy UI labelling).
+    /// `None` when there's nothing that looks like a duplicate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate_of: Option<DuplicateRef>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DuplicateRef {
+    pub id: String,
+    pub index: usize,
+    pub score: f32,
 }
 
 #[derive(Serialize)]
@@ -294,7 +307,45 @@ pub async fn api_dream_arc(
             created_at,
             tags,
             narration,
+            duplicate_of: None,
         });
+    }
+
+    // Dream-B — flag likely duplicates. For each pair (i < j),
+    // compute Jaccard on the title + first 400 chars of content.
+    // If ≥0.7, mark j as duplicate_of i. Quadratic but arcs are
+    // small (<500 scenes guaranteed by the SELECT LIMIT).
+    let bags: Vec<BTreeSet<String>> = scenes
+        .iter()
+        .map(|s| {
+            meaningful_words(&format!("{} {}", s.title, first_n_chars(&s.content, 400)))
+                .into_iter()
+                .collect()
+        })
+        .collect();
+    for j in 0..scenes.len() {
+        if bags[j].is_empty() {
+            continue;
+        }
+        for i in 0..j {
+            if bags[i].is_empty() {
+                continue;
+            }
+            let inter = bags[i].intersection(&bags[j]).count();
+            if inter == 0 {
+                continue;
+            }
+            let union = bags[i].len() + bags[j].len() - inter;
+            let score = inter as f32 / union.max(1) as f32;
+            if score >= 0.7 {
+                scenes[j].duplicate_of = Some(DuplicateRef {
+                    id: scenes[i].id.clone(),
+                    index: i,
+                    score,
+                });
+                break;
+            }
+        }
     }
 
     let detail = ArcDetail {

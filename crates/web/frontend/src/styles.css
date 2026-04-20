@@ -2014,3 +2014,30 @@ body::before {
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Dream-B — duplicate flag on rail + scene card */
+.dream-rail-dot--dup {
+  outline: 2px solid rgba(255, 61, 245, 0.6);
+  outline-offset: 1px;
+}
+.dream-rail-dot--dup.dream-rail-dot--active {
+  outline-color: rgba(255, 61, 245, 0.9);
+  box-shadow: 0 0 10px rgba(255, 61, 245, 0.55);
+}
+.dream-scene-dup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 0 10px 0;
+  background: rgba(255, 61, 245, 0.1);
+  border: 1px solid rgba(255, 61, 245, 0.4);
+  border-radius: 8px;
+  color: #ff88fb;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.dream-scene-dup:hover {
+  background: rgba(255, 61, 245, 0.2);
+}
