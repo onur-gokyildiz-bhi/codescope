@@ -43,9 +43,10 @@ Read is only for the function body **after** codescope returns the exact file:li
 
 ## Companion Tools
 
-- [RTK](https://github.com/rtk-ai/rtk): complementary CLI-output compressor. Shell layer (`git`, `ls`, `cargo`). 60–90% savings on common dev commands.
+- [GSD](https://github.com/gsd-build/get-shit-done): complementary spec-driven workflow. Planning layer (roadmap → phase → plan → execute → verify → ship). GSD subagents auto-use codescope MCP tools when both installed — see [`docs/integrations/gsd.md`](./integrations/gsd.md).
 - [context-mode](https://github.com/mksglu/context-mode): complementary generic-tool sandbox + FTS5 retrieval. Any-tool layer. ~98% reduction on large outputs.
-- Install all three: shell → tool-output → code-semantics, three layers of the same context diet.
+- [RTK](https://github.com/rtk-ai/rtk): complementary CLI-output compressor. Shell layer (`git`, `ls`, `cargo`). 60–90% savings on common dev commands.
+- Install all four — workflow / code-semantics / tool-output / shell — for the four-layer context diet.
 
 ## Optional
 

@@ -97,17 +97,23 @@ With codescope:     impact_analysis(User::email, depth=3)  →  {"callers": 12, 
 
 Every codescope tool is a structured query — `find_callers`, `impact_analysis`, `knowledge_search`, `code_health` — that the LLM programs, and the graph executes. The model stops scrolling output and starts thinking about the answer.
 
-### Three-Layer Context Diet
+### Four-Layer Context Diet
 
-Codescope is the code-semantics layer. For full coverage, pair with:
+Codescope is the code-semantics layer. Full coverage pairs it with
+three companion projects, each targeting a different kind of context
+waste:
 
-| Layer | Tool | Covers | Typical savings |
-|-------|------|--------|-----------------|
-| Shell output | [RTK](https://github.com/rtk-ai/rtk) | `git status`, `ls`, `cargo build`, `npm test`, … | 60–90% |
-| Generic tool output | [context-mode](https://github.com/mksglu/context-mode) | Any MCP tool (Playwright, GitHub API, log tails, web fetches) via FTS5 sandbox | ~98% |
-| **Code semantics** | **codescope** | Functions, callers, impact, decisions, conversations — the structured-reasoning layer | 80–95% |
+| Layer | Tool | Covers |
+|-------|------|--------|
+| Workflow / planning | [GSD](https://github.com/gsd-build/get-shit-done) | Spec-driven pipeline: roadmap → phase → plan → execute → verify → ship |
+| **Code semantics** | **codescope** | Functions, callers, impact, decisions, conversations — structured reasoning over code |
+| Generic tool output | [context-mode](https://github.com/mksglu/context-mode) | Any MCP tool (Playwright, GitHub API, log tails, web fetches) via FTS5 sandbox |
+| Shell output | [RTK](https://github.com/rtk-ai/rtk) | `git status`, `ls`, `cargo build`, `npm test`, … |
 
-Install all three and your model spends tokens on thinking, not on scrolling tool output.
+GSD's planning subagents automatically use codescope MCP tools when
+both are installed — see [`docs/integrations/gsd.md`](docs/integrations/gsd.md)
+for the pairing guide. Install all four and your model stops behaving
+like a shallow REPL and starts acting like an engineering substrate.
 
 ---
 
