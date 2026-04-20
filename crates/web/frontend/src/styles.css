@@ -2106,3 +2106,67 @@ body::before {
 .dream-pattern-example {
   color: var(--text-dim, #94a3b8);
 }
+
+/* Dream-E — edge proposals */
+.dream-edge-proposals {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 179, 71, 0.07);
+  border: 1px solid rgba(255, 179, 71, 0.3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dream-edge-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--accent-amber, #ffb347);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.dream-edge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.dream-edge-relation {
+  color: var(--accent-amber, #ffb347);
+  font-family: var(--font-mono, ui-monospace);
+  min-width: 96px;
+}
+.dream-edge-target {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-bright, #e2e8f0);
+  cursor: pointer;
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dream-edge-target:hover {
+  color: var(--accent-amber, #ffb347);
+}
+.dream-edge-accept {
+  padding: 3px 10px;
+  background: rgba(124, 255, 92, 0.18);
+  border: 1px solid rgba(124, 255, 92, 0.4);
+  color: var(--accent-lime, #7cff5c);
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.dream-edge-accept:hover:not(:disabled) {
+  background: rgba(124, 255, 92, 0.28);
+}
+.dream-edge-accept:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

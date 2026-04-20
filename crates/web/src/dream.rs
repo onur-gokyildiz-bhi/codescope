@@ -83,12 +83,32 @@ pub struct DuplicateRef {
     pub score: f32,
 }
 
+/// Dream-E — a proposed `RELATE` edge between two scenes. Shown
+/// on the active scene card; the user clicks to accept, which
+/// writes the actual relation. Inlined on arc-detail so we don't
+/// pay a second round-trip.
+#[derive(Serialize, Clone)]
+pub struct EdgeProposal {
+    pub from_id: String,
+    pub to_id: String,
+    pub to_index: usize,
+    pub to_title: String,
+    pub relation: &'static str,
+    pub score: f32,
+    pub reason: String,
+}
+
 #[derive(Serialize)]
 pub struct ArcDetail {
     pub id: String,
     pub title: String,
     pub tag: String,
     pub scenes: Vec<Scene>,
+    /// Dream-E — proposed RELATE edges between scenes. Computed
+    /// from kind + Jaccard overlap, no LLM. Each proposal the
+    /// user hasn't accepted stays here; accepted ones are
+    /// removed client-side after a successful POST.
+    pub edge_proposals: Vec<EdgeProposal>,
 }
 
 #[derive(Deserialize)]
@@ -348,13 +368,161 @@ pub async fn api_dream_arc(
         }
     }
 
+    let edge_proposals = propose_edges(&scenes);
+
     let detail = ArcDetail {
         id: arc_id.clone(),
         title: humanise_tag(&arc_id),
         tag: arc_id,
         scenes,
+        edge_proposals,
     };
     axum::response::Json(detail).into_response()
+}
+
+/// Dream-E — rule-based edge proposer. Kind pair + Jaccard
+/// overlap decides which relation, if any, to propose between
+/// two scenes.
+///
+/// * `solution` + `problem`  →  `solves_for`   (solution → problem)
+/// * `decision` + `problem`  →  `decided_about` (decision → problem)
+/// * `decision` + `claim`    →  `decided_about`
+/// * anything else with overlap ≥0.4 → `related_to`
+/// * duplicate pairs are skipped — Dream-B already flagged
+///   those.
+fn propose_edges(scenes: &[Scene]) -> Vec<EdgeProposal> {
+    let bags: Vec<BTreeSet<String>> = scenes
+        .iter()
+        .map(|s| {
+            meaningful_words(&format!("{} {}", s.title, first_n_chars(&s.content, 400)))
+                .into_iter()
+                .collect()
+        })
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..scenes.len() {
+        if scenes[i].duplicate_of.is_some() || bags[i].is_empty() {
+            continue;
+        }
+        for j in 0..scenes.len() {
+            if i == j || scenes[j].duplicate_of.is_some() || bags[j].is_empty() {
+                continue;
+            }
+            let inter = bags[i].intersection(&bags[j]).count();
+            if inter == 0 {
+                continue;
+            }
+            let union = bags[i].len() + bags[j].len() - inter;
+            let score = inter as f32 / union.max(1) as f32;
+            if score < 0.3 {
+                continue;
+            }
+            let (relation, reason) = match (scenes[i].kind.as_str(), scenes[j].kind.as_str()) {
+                ("solution", "problem") => (
+                    "solves_for",
+                    format!(
+                        "{}% shared vocabulary — solution looks like it closes this problem",
+                        (score * 100.0) as u32
+                    ),
+                ),
+                ("decision", "problem") | ("decision", "claim") => (
+                    "decided_about",
+                    format!("decision overlaps the {} scene", scenes[j].kind),
+                ),
+                // Symmetric cases flip the relation's direction;
+                // we emit once, from the "stronger" kind to the
+                // weaker — no need to emit a to b and b to a.
+                ("problem", "solution") | ("claim", "decision") | ("problem", "decision") => {
+                    continue;
+                }
+                _ if scenes[i].kind == scenes[j].kind => continue,
+                _ if score >= 0.4 => (
+                    "related_to",
+                    format!("{}% shared vocabulary", (score * 100.0) as u32),
+                ),
+                _ => continue,
+            };
+            out.push(EdgeProposal {
+                from_id: scenes[i].id.clone(),
+                to_id: scenes[j].id.clone(),
+                to_index: j,
+                to_title: scenes[j].title.clone(),
+                relation,
+                score,
+                reason,
+            });
+        }
+    }
+    // Highest-confidence first; cap to keep the UI quiet.
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out.truncate(50);
+    out
+}
+
+/// `POST /api/dream/relate?repo=X` with `{from_id, to_id, relation}`
+/// — writes a RELATE between two knowledge records. Relation is
+/// restricted to the same whitelist we accept for arc IDs; ids
+/// are escaped the same way `apply-tag` does.
+#[derive(Deserialize)]
+pub struct RelateBody {
+    pub from_id: String,
+    pub to_id: String,
+    pub relation: String,
+}
+
+/// Valid relation names. Kept tight — the schema allows more,
+/// but these are the ones the Dream-E proposer can emit.
+const ALLOWED_RELATIONS: &[&str] = &[
+    "related_to",
+    "solves_for",
+    "decided_about",
+    "supports",
+    "contradicts",
+    "links_to",
+];
+
+pub async fn api_dream_relate(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ArcQuery>,
+    axum::Json(body): axum::Json<RelateBody>,
+) -> impl IntoResponse {
+    let query = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return e.into_response(),
+    };
+    if !ALLOWED_RELATIONS.contains(&body.relation.as_str()) {
+        return ApiError::invalid_input("relation not in the allowed set").into_response();
+    }
+    let from = sanitise_knowledge_id(&body.from_id);
+    let to = sanitise_knowledge_id(&body.to_id);
+    let (Some(from), Some(to)) = (from, to) else {
+        return ApiError::invalid_input("malformed knowledge id").into_response();
+    };
+    let sql = format!(
+        "RELATE `knowledge`:\u{27E8}{from}\u{27E9}->`{rel}`->`knowledge`:\u{27E8}{to}\u{27E9}",
+        from = from,
+        to = to,
+        rel = body.relation,
+    );
+    match query.raw_query(&sql).await {
+        Ok(_) => axum::response::Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => ApiError::from_db_err(params.repo.as_deref().unwrap_or("?"), e).into_response(),
+    }
+}
+
+fn sanitise_knowledge_id(raw: &str) -> Option<String> {
+    let id = raw
+        .trim_start_matches("knowledge:")
+        .trim_matches('\u{27E8}')
+        .trim_matches('\u{27E9}');
+    if id.is_empty() || id.len() > 256 || !id.chars().all(is_record_id_char) {
+        return None;
+    }
+    Some(id.to_string())
 }
 
 /// Template narration — deliberate first-person voice so the Dream

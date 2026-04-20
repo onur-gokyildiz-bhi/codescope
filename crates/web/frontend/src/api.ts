@@ -81,6 +81,22 @@ export const api = {
   dreamPatterns: () =>
     fetchJson<{ patterns: DreamPattern[] }>(`${BASE}/api/dream/patterns`),
 
+  dreamRelate: async (
+    fromId: string,
+    toId: string,
+    relation: string,
+  ): Promise<{ ok: boolean }> => {
+    const proj = currentProject();
+    const url = `${BASE}/api/dream/relate${proj ? `?repo=${encodeURIComponent(proj)}` : ''}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_id: fromId, to_id: toId, relation }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+
   dreamApplyTag: async (id: string, tag: string): Promise<{ ok: boolean }> => {
     const proj = currentProject();
     const url = `${BASE}/api/dream/apply-tag${proj ? `?repo=${encodeURIComponent(proj)}` : ''}`;
@@ -164,9 +180,20 @@ export type DreamScene = {
   };
 };
 
+export type DreamEdgeProposal = {
+  from_id: string;
+  to_id: string;
+  to_index: number;
+  to_title: string;
+  relation: 'related_to' | 'solves_for' | 'decided_about' | 'supports' | 'contradicts' | 'links_to';
+  score: number;
+  reason: string;
+};
+
 export type DreamArcDetail = {
   id: string;
   title: string;
   tag: string;
   scenes: DreamScene[];
+  edge_proposals: DreamEdgeProposal[];
 };

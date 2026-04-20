@@ -179,6 +179,10 @@ fn build_routes() -> Router<Arc<AppState>> {
             axum::routing::post(dream::api_dream_apply_tag),
         )
         .route("/api/dream/patterns", get(dream::api_dream_patterns))
+        .route(
+            "/api/dream/relate",
+            axum::routing::post(dream::api_dream_relate),
+        )
         // CMX-01 insight — per-call analytics from ~/.codescope/insight.jsonl
         .route("/api/insight", get(api_insight))
 }

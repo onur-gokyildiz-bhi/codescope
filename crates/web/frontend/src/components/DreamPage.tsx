@@ -13,11 +13,11 @@
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
 import {
   Moon, PlayCircle, PauseCircle, SkipForward, SkipBack, Download,
-  Sparkles, Plus, Network,
+  Sparkles, Plus, Network, GitBranch,
 } from 'lucide-solid';
 import {
   api, type DreamArcSummary, type DreamArcDetail, type DreamScene,
-  type DreamSuggestion, type DreamPattern,
+  type DreamSuggestion, type DreamPattern, type DreamEdgeProposal,
 } from '../api';
 import { currentProject } from '../store';
 import DreamGraph3D from './DreamGraph3D';
@@ -73,6 +73,30 @@ export default function DreamPage() {
     }
   });
   const [showPatterns, setShowPatterns] = createSignal(false);
+
+  // Dream-E — accepted edge proposals are dropped from the local
+  // list so they don't re-appear without a refresh. Keyed by a
+  // composite string so the same pair+relation can't be accepted
+  // twice.
+  const [acceptedEdges, setAcceptedEdges] = createSignal<Set<string>>(new Set());
+  const [acceptingEdge, setAcceptingEdge] = createSignal<string | null>(null);
+  const edgeKey = (p: DreamEdgeProposal) =>
+    `${p.from_id}::${p.relation}::${p.to_id}`;
+
+  const acceptEdge = async (p: DreamEdgeProposal) => {
+    const key = edgeKey(p);
+    setAcceptingEdge(key);
+    try {
+      await api.dreamRelate(p.from_id, p.to_id, p.relation);
+      setAcceptedEdges((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+    } finally {
+      setAcceptingEdge(null);
+    }
+  };
 
   const acceptSuggestion = async (id: string, tag: string) => {
     setApplying(`${id}::${tag}`);
@@ -355,6 +379,45 @@ export default function DreamPage() {
                     <Show when={scene().content}>
                       <pre class="dream-scene-body">{excerpt(scene().content, 1200)}</pre>
                     </Show>
+
+                    {/* Dream-E edge proposals for this scene */}
+                    {(() => {
+                      const active = scene();
+                      const outgoing = (detail().edge_proposals ?? []).filter(
+                        (p) => p.from_id === active.id && !acceptedEdges().has(edgeKey(p)),
+                      );
+                      return (
+                        <Show when={outgoing.length > 0}>
+                          <div class="dream-edge-proposals">
+                            <div class="dream-edge-head">
+                              <GitBranch size={12} />
+                              <span>Suggested edges</span>
+                            </div>
+                            <For each={outgoing}>
+                              {(p) => (
+                                <div class="dream-edge-row">
+                                  <div class="dream-edge-relation">{p.relation.replace(/_/g, ' ')}</div>
+                                  <button
+                                    class="dream-edge-target"
+                                    onClick={() => setSceneIdx(p.to_index)}
+                                    title={p.reason}
+                                  >
+                                    #{p.to_index + 1} · {p.to_title}
+                                  </button>
+                                  <button
+                                    class="dream-edge-accept"
+                                    disabled={acceptingEdge() === edgeKey(p)}
+                                    onClick={() => acceptEdge(p)}
+                                  >
+                                    {acceptingEdge() === edgeKey(p) ? '…' : 'Accept'}
+                                  </button>
+                                </div>
+                              )}
+                            </For>
+                          </div>
+                        </Show>
+                      );
+                    })()}
                   </article>
                 )}
               </Show>
