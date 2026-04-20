@@ -3,11 +3,11 @@ use codescope_core::graph::migrations::migrate_to_current;
 use codescope_core::graph::schema::{
     get_schema_version, init_schema, set_schema_version, SCHEMA_VERSION,
 };
-use surrealdb::engine::local::Mem;
-use surrealdb::Surreal;
+use codescope_core::DbHandle;
+use surrealdb::engine::any;
 
-async fn setup_empty_db() -> Surreal<surrealdb::engine::local::Db> {
-    let db = Surreal::new::<Mem>(())
+async fn setup_empty_db() -> DbHandle {
+    let db = any::connect("memory")
         .await
         .expect("Failed to create in-memory DB");
     db.use_ns("codescope")

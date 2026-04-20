@@ -138,6 +138,22 @@ pub async fn run(repo: Option<String>, execute: bool, delete_backup: bool) -> Re
         None => discover_legacy_repos(&db_root),
     };
 
+    // Guardrail: no matter how `repo` was provided, reject any name
+    // that looks like a migration backup (`*.old.*`) or an internal
+    // namespace (`_global` / `_system`). Without this, an explicit
+    // `--repo <name>.old.<ts>` can quietly create empty DBs on the
+    // surreal server (we call `connect_repo` somewhere in the
+    // chain), and the next daemon start picks them up as if they
+    // were real projects. Filter at the outermost boundary.
+    let repos: Vec<String> = repos
+        .into_iter()
+        .filter(|n| !n.contains(".old.") && !n.ends_with(".old") && !n.starts_with('_'))
+        .collect();
+    if repos.is_empty() {
+        println!("No eligible repos after filtering backups / internal namespaces.");
+        return Ok(());
+    }
+
     if repos.is_empty() {
         println!("No repos found under {}.", db_root.display());
         return Ok(());

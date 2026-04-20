@@ -7,8 +7,8 @@ use codescope_core::embeddings::pipeline::EmbeddingPipeline;
 use codescope_core::embeddings::provider::EmbeddingProvider;
 use codescope_core::embeddings::{binary_quantize, hamming_distance};
 use codescope_core::graph::schema::init_schema;
-use surrealdb::engine::local::Mem;
-use surrealdb::Surreal;
+use codescope_core::DbHandle;
+use surrealdb::engine::any;
 
 #[test]
 fn test_binary_quantize_dimensions() {
@@ -87,8 +87,8 @@ impl EmbeddingProvider for MockProvider {
     }
 }
 
-async fn setup_db_with_embeddings() -> Surreal<surrealdb::engine::local::Db> {
-    let db = Surreal::new::<Mem>(()).await.unwrap();
+async fn setup_db_with_embeddings() -> DbHandle {
+    let db = any::connect("memory").await.unwrap();
     db.use_ns("codescope").use_db("test").await.unwrap();
     init_schema(&db).await.unwrap();
 
@@ -131,7 +131,7 @@ async fn embed_pipeline_stats_returns_correct_counts() {
 
 #[tokio::test]
 async fn embed_pipeline_stats_empty_db() {
-    let db = Surreal::new::<Mem>(()).await.unwrap();
+    let db = any::connect("memory").await.unwrap();
     db.use_ns("codescope").use_db("test").await.unwrap();
     init_schema(&db).await.unwrap();
 

@@ -1,20 +1,22 @@
 use codescope_core::graph::builder::GraphBuilder;
 use codescope_core::graph::schema::init_schema;
 /// Database integration tests for SurrealDB operations.
-/// Tests schema init, entity insertion, querying, and concurrent access.
-use codescope_core::{CodeEntity, CodeRelation, EntityKind, RelationKind};
+/// Post R1-v2 (v0.8.0) the graph helpers consume
+/// `DbHandle = Surreal<Any>`, so tests use
+/// `engine::any::connect("memory")` — same wire shape as the
+/// bundled server, zero-persistence.
+use codescope_core::{CodeEntity, CodeRelation, DbHandle, EntityKind, RelationKind};
 use serde::Deserialize;
-use surrealdb::engine::local::Mem;
+use surrealdb::engine::any;
 use surrealdb::types::SurrealValue;
-use surrealdb::Surreal;
 
 #[derive(Debug, Deserialize, SurrealValue)]
 struct NameRow {
     name: String,
 }
 
-async fn setup_db() -> Surreal<surrealdb::engine::local::Db> {
-    let db = Surreal::new::<Mem>(())
+async fn setup_db() -> DbHandle {
+    let db = any::connect("memory")
         .await
         .expect("Failed to create in-memory DB");
     db.use_ns("codescope")
