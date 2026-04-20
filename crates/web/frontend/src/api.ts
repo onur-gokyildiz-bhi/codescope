@@ -75,6 +75,11 @@ export const api = {
 
   insight: () => fetchJson<InsightResponse>(`${BASE}/api/insight`),
 
+  sessionRecent: (limit = 5) =>
+    fetchJson<{ sessions: SessionRecap[] }>(
+      `${BASE}/api/session/recent?limit=${limit}`,
+    ),
+
   dreamSuggestTags: () =>
     fetchJson<{ suggestions: DreamSuggestion[] }>(withRepo(`${BASE}/api/dream/suggest-tags`)),
 
@@ -178,6 +183,24 @@ export type DreamScene = {
     index: number;
     score: number;
   };
+};
+
+export type SessionEvent = {
+  ts: number;
+  repo: string;
+  kind: 'tool_call' | 'file_edit' | 'error';
+  session_id: string;
+  detail?: string | null;
+};
+
+export type SessionRecap = {
+  session_id: string;
+  started_at: number;
+  ended_at: number;
+  event_count: number;
+  repos: string[];
+  kinds: Record<string, number>;
+  tail: SessionEvent[];
 };
 
 export type DreamEdgeProposal = {

@@ -2170,3 +2170,89 @@ body::before {
   opacity: 0.5;
   cursor: wait;
 }
+
+/* CMX-02 — session recap cards inside Insight view */
+.insight-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.insight-session {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-dim, #1e293b);
+  border-left: 3px solid rgba(163, 113, 247, 0.7);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.insight-session-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+}
+.insight-session-id {
+  font-family: var(--font-mono, ui-monospace);
+  color: var(--accent-violet, #a371f7);
+  flex: 1;
+}
+.insight-session-dur {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-bright, #e2e8f0);
+}
+.insight-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim, #94a3b8);
+  margin: 4px 0 8px 0;
+}
+.insight-session-kind {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent-cyan, #38bdf8);
+}
+.insight-session-kind.is-error {
+  background: rgba(255, 61, 245, 0.12);
+  color: #ff88fb;
+}
+.insight-session-tail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.insight-session-tail li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-dim, #94a3b8);
+}
+.insight-session-tail li.is-error {
+  color: #ff88fb;
+}
+.insight-session-icon {
+  width: 14px;
+  text-align: center;
+  color: var(--accent-violet, #a371f7);
+}
+.insight-session-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim, #94a3b8);
+  min-width: 64px;
+}
+.insight-session-repo {
+  color: var(--accent-cyan, #38bdf8);
+  font-family: var(--font-mono, ui-monospace);
+}
+.insight-session-detail {
+  color: var(--text-bright, #e2e8f0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

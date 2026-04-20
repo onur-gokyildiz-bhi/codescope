@@ -7,8 +7,8 @@
 // having to reload.
 
 import { createEffect, createResource, onCleanup, For, Show } from 'solid-js';
-import { BarChart3, Activity, Zap } from 'lucide-solid';
-import { api, type InsightResponse } from '../api';
+import { BarChart3, Activity, Zap, Clock } from 'lucide-solid';
+import { api, type InsightResponse, type SessionRecap } from '../api';
 
 export default function InsightPage() {
   const [data, { refetch }] = createResource<InsightResponse>(async () => {
@@ -16,14 +16,26 @@ export default function InsightPage() {
       return await api.insight();
     } catch (e) {
       console.error('insight fetch failed:', e);
-      return { summary: { total_calls: 0, repos: {}, hours: {}, first_ts: null, last_ts: null }, gain: { total_calls: 0, tokens_per_call_est: 2500, tokens_saved_est: 0, first_used: null, last_used: null } };
+      return { summary: { total_calls: 0, repos: {}, hours: {}, first_ts: null, last_ts: null, by_kind: {} }, gain: { total_calls: 0, tokens_per_call_est: 2500, tokens_saved_est: 0, first_used: null, last_used: null } };
+    }
+  });
+
+  const [sessions, { refetch: refetchSessions }] = createResource<SessionRecap[]>(async () => {
+    try {
+      return (await api.sessionRecent(5)).sessions;
+    } catch (e) {
+      console.error('session fetch failed:', e);
+      return [];
     }
   });
 
   // 30 s auto-refresh. The MCP server flushes every 30 s too, so
   // this matches freshness.
   createEffect(() => {
-    const handle = setInterval(() => refetch(), 30_000);
+    const handle = setInterval(() => {
+      refetch();
+      refetchSessions();
+    }, 30_000);
     onCleanup(() => clearInterval(handle));
   });
 
@@ -69,11 +81,95 @@ export default function InsightPage() {
               <h3>Recent activity <span class="insight-muted">(last 24 active hours)</span></h3>
               <Sparkline hours={d().summary.hours} />
             </section>
+
+            {/* CMX-02 — recent sessions */}
+            <section class="insight-section">
+              <h3>Sessions <span class="insight-muted">(last 5)</span></h3>
+              <SessionsList sessions={sessions() ?? []} />
+            </section>
           </>
         )}
       </Show>
     </div>
   );
+}
+
+function SessionsList(props: { sessions: SessionRecap[] }) {
+  return (
+    <Show
+      when={props.sessions.length > 0}
+      fallback={<div class="insight-status">No sessions recorded yet.</div>}
+    >
+      <div class="insight-sessions">
+        <For each={props.sessions}>
+          {(s) => {
+            const dur = s.ended_at - s.started_at;
+            const byKind = Object.entries(s.kinds ?? {}) as [string, number][];
+            return (
+              <div class="insight-session">
+                <div class="insight-session-head">
+                  <Clock size={12} />
+                  <span class="insight-session-id">{s.session_id}</span>
+                  <span class="insight-session-dur">{formatDur(dur)}</span>
+                </div>
+                <div class="insight-session-meta">
+                  <span>{formatNum(s.event_count)} events</span>
+                  <span>
+                    {s.repos.length > 0 ? s.repos.join(', ') : '—'}
+                  </span>
+                  <For each={byKind}>
+                    {([k, n]) => (
+                      <span
+                        class="insight-session-kind"
+                        classList={{ 'is-error': k === 'error' }}
+                      >
+                        {k}={n}
+                      </span>
+                    )}
+                  </For>
+                </div>
+                <ol class="insight-session-tail">
+                  <For each={s.tail.slice(-5)}>
+                    {(ev) => (
+                      <li classList={{ 'is-error': ev.kind === 'error' }}>
+                        <span class="insight-session-icon">
+                          {ev.kind === 'tool_call'
+                            ? '›'
+                            : ev.kind === 'file_edit'
+                            ? '✎'
+                            : '✗'}
+                        </span>
+                        <span class="insight-session-time">{hms(ev.ts)}</span>
+                        <span class="insight-session-repo">{ev.repo}</span>
+                        {ev.detail ? (
+                          <span class="insight-session-detail">{ev.detail}</span>
+                        ) : null}
+                      </li>
+                    )}
+                  </For>
+                </ol>
+              </div>
+            );
+          }}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+function formatDur(secs: number): string {
+  if (secs <= 0) return '<1s';
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m${secs % 60}s`;
+  const h = Math.floor(secs / 3600);
+  const rem = secs % 3600;
+  return `${h}h${Math.floor(rem / 60)}m`;
+}
+
+function hms(ts: number): string {
+  const d = new Date(ts * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
 function HeadlineCard(props: {

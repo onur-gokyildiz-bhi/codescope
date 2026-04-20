@@ -46,6 +46,30 @@ pub fn start_watcher(codebase_path: &Path) -> anyhow::Result<mpsc::Receiver<Vec<
 
                     if !changed.is_empty() {
                         debug!("File watcher: {} files changed", changed.len());
+                        // CMX-02 — emit one `file_edit` event per
+                        // changed file so the session log knows
+                        // what the user touched between tool calls.
+                        // Repo name isn't known here (per-watcher
+                        // spawn; we live in a non-async thread), so
+                        // we derive it from the watch path's last
+                        // component as a best effort.
+                        let repo = watch_path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        for p in &changed {
+                            let rel = p
+                                .strip_prefix(&watch_path)
+                                .unwrap_or(p)
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            codescope_core::insight::record_kind(
+                                &repo,
+                                codescope_core::insight::EventKind::FileEdit,
+                                Some(rel),
+                            );
+                        }
                         if tx.blocking_send(changed).is_err() {
                             break; // receiver dropped
                         }

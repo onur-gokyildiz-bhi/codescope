@@ -215,6 +215,16 @@ pub enum Commands {
     /// sparkline of tool activity. Reads `~/.codescope/insight.jsonl`.
     Insight,
 
+    /// CMX-02 — recap of the last N MCP sessions: start/end,
+    /// repos touched, per-kind event counts, and a short event
+    /// tail. Useful after a compact or crash to see what you
+    /// were doing.
+    Session {
+        /// Number of sessions to show, oldest first inside each.
+        #[arg(long, default_value = "5")]
+        limit: usize,
+    },
+
     /// Self-update — download the latest GitHub release for the
     /// host triple and replace the installed binaries in-place.
     /// `--yes` skips the confirmation prompt.

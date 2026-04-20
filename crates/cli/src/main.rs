@@ -225,6 +225,9 @@ async fn run() -> Result<()> {
         Commands::Insight => {
             commands::insight::run().await?;
         }
+        Commands::Session { limit } => {
+            commands::session::run(limit).await?;
+        }
         Commands::Upgrade { yes } => {
             commands::upgrade::run(yes).await?;
         }

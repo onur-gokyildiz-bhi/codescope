@@ -17,11 +17,54 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 
-/// What lives on one line of `insight.jsonl`.
+/// What lives on one line of `insight.jsonl`. Backward-compatible:
+/// older events without a `kind` / `session_id` / `detail` default
+/// via serde so the v0 logs still parse.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Event {
     pub ts: u64,
     pub repo: String,
+    /// CMX-02 — event kind. Omitted on legacy events; defaults to
+    /// `tool_call` to match the original semantics.
+    #[serde(default = "default_kind")]
+    pub kind: EventKind,
+    /// Stable per-process id so the UI can group events by session
+    /// without heuristic gap-detection. Generated once on MCP
+    /// server startup and reused for every event in that process.
+    #[serde(default)]
+    pub session_id: String,
+    /// Free-form context the kind wants to carry (file path for
+    /// `file_edit`, error message for `error`, …). Kept short —
+    /// anything bigger belongs in SurrealDB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    ToolCall,
+    FileEdit,
+    Error,
+}
+
+fn default_kind() -> EventKind {
+    EventKind::ToolCall
+}
+
+/// Return a process-stable session id. Computed once from PID +
+/// boot-ns on first call, cached for reuse. No UUID dep needed.
+pub fn session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| {
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        format!("{pid:x}-{nanos:x}")
+    })
 }
 
 fn log_path() -> PathBuf {
@@ -33,12 +76,22 @@ fn log_path() -> PathBuf {
 
 const ROTATE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
 
-/// Append one event. Fail-soft: on any I/O error we silently
-/// drop — insight is observability, not correctness.
+/// Append a `tool_call` event. Kept for backward compatibility
+/// with the v0 call sites; new code should use
+/// [`record_kind`] so the event kind is explicit.
 pub fn record_event(repo: impl Into<String>) {
+    record_kind(repo, EventKind::ToolCall, None);
+}
+
+/// Append an event of any kind. Fail-soft on I/O — insight is
+/// observability, not correctness.
+pub fn record_kind(repo: impl Into<String>, kind: EventKind, detail: Option<String>) {
     let ev = Event {
         ts: now_secs(),
         repo: repo.into(),
+        kind,
+        session_id: session_id().to_string(),
+        detail,
     };
     let Ok(line) = serde_json::to_string(&ev) else {
         return;
@@ -89,7 +142,7 @@ pub fn load_all() -> Vec<Event> {
     events
 }
 
-/// Pre-computed rollups used by the CLI and (future) web view.
+/// Pre-computed rollups used by the CLI and web view.
 #[derive(Serialize, Debug, Default)]
 pub struct Summary {
     pub total_calls: u64,
@@ -97,6 +150,9 @@ pub struct Summary {
     pub hours: BTreeMap<String, u64>,
     pub first_ts: Option<u64>,
     pub last_ts: Option<u64>,
+    /// CMX-02 — counts by event kind, so the Insight / Session
+    /// views can split tool_call vs file_edit vs error.
+    pub by_kind: BTreeMap<String, u64>,
 }
 
 /// Aggregate the raw event list into headline metrics.
@@ -107,10 +163,91 @@ pub fn summarise(events: &[Event]) -> Summary {
         *s.repos.entry(ev.repo.clone()).or_insert(0) += 1;
         let hour_key = bucket_hour(ev.ts);
         *s.hours.entry(hour_key).or_insert(0) += 1;
+        let kind_key = match ev.kind {
+            EventKind::ToolCall => "tool_call",
+            EventKind::FileEdit => "file_edit",
+            EventKind::Error => "error",
+        };
+        *s.by_kind.entry(kind_key.into()).or_insert(0) += 1;
         s.first_ts.get_or_insert(ev.ts);
         s.last_ts = Some(ev.ts);
     }
     s
+}
+
+/// CMX-02 — pre-rolled "what happened in the last few sessions"
+/// for the Dream / Session UI. Each session is a contiguous run
+/// of events sharing the same `session_id`; we emit the most
+/// recent `n` sessions oldest-first inside each (so playback
+/// feels like a tape).
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct SessionRecap {
+    pub session_id: String,
+    pub started_at: u64,
+    pub ended_at: u64,
+    pub event_count: u64,
+    pub repos: Vec<String>,
+    pub kinds: BTreeMap<String, u64>,
+    /// Last 20 events verbatim — enough to draw a timeline card
+    /// without dragging tens of thousands of rows into the UI.
+    pub tail: Vec<Event>,
+}
+
+/// Build `n` most-recent session recaps from the raw event list.
+/// Events without a session_id (legacy v0 logs) are bucketed
+/// under the pseudo-session `"legacy"` so they don't disappear.
+pub fn recent_sessions(events: &[Event], n: usize) -> Vec<SessionRecap> {
+    if events.is_empty() {
+        return Vec::new();
+    }
+    let mut by_session: BTreeMap<String, SessionRecap> = BTreeMap::new();
+    for ev in events {
+        let sid = if ev.session_id.is_empty() {
+            "legacy".to_string()
+        } else {
+            ev.session_id.clone()
+        };
+        let recap = by_session
+            .entry(sid.clone())
+            .or_insert_with(|| SessionRecap {
+                session_id: sid,
+                started_at: ev.ts,
+                ended_at: ev.ts,
+                event_count: 0,
+                repos: Vec::new(),
+                kinds: BTreeMap::new(),
+                tail: Vec::new(),
+            });
+        recap.event_count += 1;
+        if ev.ts < recap.started_at {
+            recap.started_at = ev.ts;
+        }
+        if ev.ts > recap.ended_at {
+            recap.ended_at = ev.ts;
+        }
+        if !recap.repos.contains(&ev.repo) {
+            recap.repos.push(ev.repo.clone());
+        }
+        let kk = match ev.kind {
+            EventKind::ToolCall => "tool_call",
+            EventKind::FileEdit => "file_edit",
+            EventKind::Error => "error",
+        };
+        *recap.kinds.entry(kk.into()).or_insert(0) += 1;
+        recap.tail.push(ev.clone());
+    }
+    // Keep only the last 20 events per session for UI payload; if
+    // the caller wants everything they can still read load_all().
+    for r in by_session.values_mut() {
+        if r.tail.len() > 20 {
+            let start = r.tail.len() - 20;
+            r.tail = r.tail[start..].to_vec();
+        }
+    }
+    let mut out: Vec<SessionRecap> = by_session.into_values().collect();
+    out.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+    out.truncate(n);
+    out
 }
 
 fn bucket_hour(ts: u64) -> String {

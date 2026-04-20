@@ -185,6 +185,9 @@ fn build_routes() -> Router<Arc<AppState>> {
         )
         // CMX-01 insight — per-call analytics from ~/.codescope/insight.jsonl
         .route("/api/insight", get(api_insight))
+        // CMX-02 session recap — last N sessions, each with a
+        // tail of events (tool_call / file_edit / error).
+        .route("/api/session/recent", get(api_session_recent))
 }
 
 /// Build the web API router from an existing DB connection (single-project mode).
@@ -479,6 +482,22 @@ async fn api_insight() -> impl IntoResponse {
         }
     }))
     .into_response()
+}
+
+/// CMX-02 — returns the `n` most-recent session recaps. Query
+/// param `limit` (default 5, capped at 20) lets the UI ask for
+/// more tapes when the user scrolls back.
+async fn api_session_recent(
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5)
+        .min(20);
+    let events = codescope_core::insight::load_all();
+    let recaps = codescope_core::insight::recent_sessions(&events, limit);
+    axum::response::Json(serde_json::json!({ "sessions": recaps })).into_response()
 }
 
 async fn api_stats(
