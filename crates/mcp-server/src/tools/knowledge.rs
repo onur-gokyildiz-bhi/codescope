@@ -505,10 +505,13 @@ mod tests {
     /// scope=project (different repo_name ctx), and scope=both returns the union.
     #[tokio::test]
     async fn global_scope_is_visible_across_project_contexts() {
-        use surrealdb::engine::local::Mem;
+        use surrealdb::engine::any;
 
-        // Two project DBs simulating two different repos.
-        let project_a: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
+        // Two project DBs simulating two different repos. Post R1-v2
+        // every handle is `Surreal<Any>` (=`DbHandle`); `any::connect`
+        // with `memory://` gives us in-memory without a local engine
+        // type mismatch.
+        let project_a: DbHandle = any::connect("memory").await.unwrap();
         project_a
             .use_ns("codescope")
             .use_db("repo_a")
@@ -518,7 +521,7 @@ mod tests {
             .await
             .unwrap();
 
-        let project_b: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
+        let project_b: DbHandle = any::connect("memory").await.unwrap();
         project_b
             .use_ns("codescope")
             .use_db("repo_b")
@@ -529,7 +532,7 @@ mod tests {
             .unwrap();
 
         // A shared in-memory "global" DB stands in for ~/.codescope/db/_global.
-        let global: DbHandle = Surreal::new::<Mem>(()).await.unwrap();
+        let global: DbHandle = any::connect("memory").await.unwrap();
         global
             .use_ns("codescope")
             .use_db(GLOBAL_REPO)

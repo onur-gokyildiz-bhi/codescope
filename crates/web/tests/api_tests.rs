@@ -6,12 +6,14 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use codescope_core::graph::schema::init_schema;
 use codescope_web::build_web_router;
-use surrealdb::engine::local::Mem;
-use surrealdb::Surreal;
+use surrealdb::engine::any;
 use tower::ServiceExt;
 
 async fn setup_router() -> axum::Router {
-    let db = Surreal::new::<Mem>(()).await.unwrap();
+    // Post R1-v2 helpers consume `DbHandle = Surreal<Any>`;
+    // `any::connect("memory")` gives us the matching type without
+    // a real server spawn.
+    let db = any::connect("memory").await.unwrap();
     db.use_ns("codescope").use_db("test").await.unwrap();
     init_schema(&db).await.unwrap();
     build_web_router(db)

@@ -9,12 +9,11 @@
 use codescope_core::graph::builder::GraphBuilder;
 use codescope_core::graph::query::GraphQuery;
 use codescope_core::graph::schema::init_schema;
-use codescope_core::{CodeEntity, CodeRelation, EntityKind, RelationKind};
-use surrealdb::engine::local::Mem;
-use surrealdb::Surreal;
+use codescope_core::{CodeEntity, CodeRelation, DbHandle, EntityKind, RelationKind};
+use surrealdb::engine::any;
 
-async fn setup() -> (Surreal<surrealdb::engine::local::Db>, GraphQuery) {
-    let db = Surreal::new::<Mem>(()).await.unwrap();
+async fn setup() -> (DbHandle, GraphQuery) {
+    let db = any::connect("memory").await.unwrap();
     db.use_ns("codescope").use_db("test").await.unwrap();
     init_schema(&db).await.unwrap();
 
