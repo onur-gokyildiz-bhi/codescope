@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod embed;
 pub mod gain;
 pub mod history;
+pub mod hooks;
 pub mod hotspots;
 pub mod index;
 pub mod ingest_conversations;

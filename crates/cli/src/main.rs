@@ -228,6 +228,9 @@ async fn run() -> Result<()> {
         Commands::Upgrade { yes } => {
             commands::upgrade::run(yes).await?;
         }
+        Commands::Hook { agent, uninstall } => {
+            commands::hooks::run(&agent, uninstall).await?;
+        }
         Commands::Repair { repo, reindex, yes } => {
             commands::repair::run(repo, reindex, yes).await?;
         }

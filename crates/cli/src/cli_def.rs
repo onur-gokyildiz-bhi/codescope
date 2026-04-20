@@ -223,6 +223,17 @@ pub enum Commands {
         yes: bool,
     },
 
+    /// Install the bash-suggest hook (RTK-03) for Claude Code.
+    /// Writes the platform-appropriate hook script under
+    /// `~/.codescope/bin/` and merges a PreToolUse entry into
+    /// `~/.claude/settings.json`. `--uninstall` removes it.
+    Hook {
+        #[arg(long, default_value = "claude-code")]
+        agent: String,
+        #[arg(long)]
+        uninstall: bool,
+    },
+
     /// Rebuild a corrupted repo's DB. Drops NS=codescope DB=<repo>
     /// on the running surreal server (no files touched on disk —
     /// the server handles that), then optionally re-indexes from
