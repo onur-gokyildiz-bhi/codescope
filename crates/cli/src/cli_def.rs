@@ -233,6 +233,39 @@ pub enum Commands {
         yes: bool,
     },
 
+    /// Fetch a URL or read a local file, extract text, store in
+    /// the per-repo `indexed_content` table for later BM25
+    /// search via `codescope search-content` (CLI) or the
+    /// `search_indexed` MCP tool. URLs are HTML→text via
+    /// `html2text`; local files are read verbatim.
+    Ingest {
+        /// URL (`http://` / `https://`) or local file path.
+        source: String,
+        /// Override the auto-derived title.
+        #[arg(long)]
+        title: Option<String>,
+        /// Comma-separated tags.
+        #[arg(long)]
+        tags: Option<String>,
+    },
+
+    /// BM25 full-text search across the active repo's
+    /// `indexed_content` table. Returns title + source + 280-
+    /// char snippet per hit.
+    SearchContent {
+        query: String,
+        #[arg(long, default_value = "10")]
+        limit: usize,
+    },
+
+    /// Drop every indexed_content row for the active repo. The
+    /// `knowledge` table is not touched. `--yes` skips the
+    /// confirmation prompt.
+    PurgeIndexed {
+        #[arg(long)]
+        yes: bool,
+    },
+
     /// Run a dev command and return a compressed version of its
     /// output. Currently specialised on `git status/log/diff`,
     /// `ls`, `cat`/`bat`, `head`/`tail`, `grep`/`rg`/`ag`. Unknown

@@ -13,6 +13,7 @@ pub mod conversations;
 pub mod embeddings;
 pub mod exploration;
 pub mod http;
+pub mod indexed;
 pub mod knowledge;
 pub mod memory;
 pub mod quality;

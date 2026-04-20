@@ -514,3 +514,33 @@ pub struct SkillsParams {
     /// For "index": clear before indexing
     pub clean: Option<bool>,
 }
+
+/// CMX-INDEX — fetch a URL or local file, store in indexed_content.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FetchAndIndexParams {
+    /// URL (`http://` / `https://`) or local file path.
+    pub source: String,
+    /// Override the auto-derived title.
+    pub title: Option<String>,
+    /// Tags to associate with this entry.
+    pub tags: Option<Vec<String>>,
+}
+
+/// CMX-INDEX — store an arbitrary text blob.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IndexContentParams {
+    pub title: String,
+    pub body: String,
+    /// Provenance — URL, path, anything stable to dedupe on.
+    pub source: String,
+    pub kind: Option<String>,
+    pub tags: Option<Vec<String>>,
+}
+
+/// CMX-INDEX — BM25 search over indexed_content.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SearchIndexedParams {
+    pub query: String,
+    /// Default 10, max 50.
+    pub limit: Option<usize>,
+}

@@ -26,6 +26,10 @@ ignore = { workspace = true }
 fastembed = { workspace = true }
 reqwest = { workspace = true }
 dirs = "5"
+# CMX-INDEX: HTML → plain text for fetch_and_index. Pure-Rust,
+# zero JS, no headless browser. Good enough for docs / READMEs /
+# blog posts; not a full reader-mode extractor.
+html2text = "0.16"
 
 # Tree-sitter language grammars
 tree-sitter-typescript = "0.23.2"

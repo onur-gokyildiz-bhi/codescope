@@ -13,6 +13,7 @@ pub mod db;
 pub mod embeddings;
 pub mod gain;
 pub mod graph;
+pub mod indexed;
 pub mod insight;
 pub mod llm;
 pub mod parser;

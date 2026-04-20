@@ -397,6 +397,26 @@ pub async fn init_schema(db: &DbHandle) -> Result<()> {
         DEFINE INDEX IF NOT EXISTS know_title_search ON knowledge FIELDS title FULLTEXT ANALYZER name_analyzer BM25;
         DEFINE INDEX IF NOT EXISTS know_content_search ON knowledge FIELDS content FULLTEXT ANALYZER name_analyzer BM25;
 
+        -- === INDEXED CONTENT (CMX absorb) ===
+        -- Generic text dumps the LLM should be able to retrieve from
+        -- without dragging the whole blob into context: web fetches,
+        -- log captures, doc snapshots, paste buffers. Distinct from
+        -- `knowledge` because the shape is different — no `kind`
+        -- taxonomy, just a body searchable by BM25, keyed by source
+        -- so re-fetching the same URL replaces (no duplicates).
+        DEFINE TABLE IF NOT EXISTS indexed_content SCHEMAFULL;
+        DEFINE FIELD IF NOT EXISTS title ON indexed_content TYPE string;
+        DEFINE FIELD IF NOT EXISTS body ON indexed_content TYPE string;
+        DEFINE FIELD IF NOT EXISTS source ON indexed_content TYPE string;
+        DEFINE FIELD IF NOT EXISTS kind ON indexed_content TYPE option<string>;
+        DEFINE FIELD IF NOT EXISTS tags ON indexed_content TYPE option<array>;
+        DEFINE FIELD IF NOT EXISTS size_bytes ON indexed_content TYPE option<int>;
+        DEFINE FIELD IF NOT EXISTS indexed_at ON indexed_content TYPE option<string>;
+        DEFINE INDEX IF NOT EXISTS idxc_source ON indexed_content FIELDS source UNIQUE;
+        DEFINE INDEX IF NOT EXISTS idxc_kind ON indexed_content FIELDS kind;
+        DEFINE INDEX IF NOT EXISTS idxc_title_search ON indexed_content FIELDS title FULLTEXT ANALYZER name_analyzer BM25;
+        DEFINE INDEX IF NOT EXISTS idxc_body_search ON indexed_content FIELDS body FULLTEXT ANALYZER name_analyzer BM25;
+
         -- Knowledge edge tables
         DEFINE TABLE supports TYPE RELATION SCHEMAFULL;
         DEFINE FIELD IF NOT EXISTS relation ON supports TYPE option<string>;

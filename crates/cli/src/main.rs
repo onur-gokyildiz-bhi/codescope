@@ -237,6 +237,27 @@ async fn run() -> Result<()> {
         Commands::Exec { args } => {
             codescope_cli::compress::run(args).await?;
         }
+        Commands::Ingest {
+            source,
+            title,
+            tags,
+        } => {
+            let tag_list: Vec<String> = tags
+                .map(|s| {
+                    s.split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            commands::ingest::run(source, &global_repo, title, tag_list).await?;
+        }
+        Commands::SearchContent { query, limit } => {
+            commands::search_content::run(query, &global_repo, limit).await?;
+        }
+        Commands::PurgeIndexed { yes } => {
+            commands::purge_indexed::run(&global_repo, yes).await?;
+        }
         Commands::Repair { repo, reindex, yes } => {
             commands::repair::run(repo, reindex, yes).await?;
         }
