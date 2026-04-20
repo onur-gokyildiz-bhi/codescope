@@ -124,15 +124,12 @@ impl GraphRagServer {
                 return crate::error::tool_error(
                     crate::error::code::INTERNAL,
                     &format!("spawn {program}: {e}"),
-                    Some(
-                        match params.language.as_str() {
-                            "python" | "py" => "Is python3 (or python) on PATH?",
-                            "node" | "js" => "Is node on PATH?",
-                            "bash" | "sh" => "On Windows, install git-bash or WSL.",
-                            _ => "Check the interpreter install.",
-                        }
-                        .into(),
-                    ),
+                    Some(match params.language.as_str() {
+                        "python" | "py" => "Is python3 (or python) on PATH?",
+                        "node" | "js" => "Is node on PATH?",
+                        "bash" | "sh" => "On Windows, install git-bash or WSL.",
+                        _ => "Check the interpreter install.",
+                    }),
                 );
             }
         };
