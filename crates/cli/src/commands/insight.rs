@@ -26,19 +26,16 @@ pub async fn run() -> Result<()> {
     println!("  \x1b[1mcodescope insight\x1b[0m");
     println!("  ──────────────────");
     println!("  Total tool calls:  {}", format_num(s.total_calls));
-    match (s.first_ts, s.last_ts) {
-        (Some(first), Some(last)) => {
-            let span_days = (last - first) / 86_400;
-            println!("  First call:        {}", ymdhm(first));
-            println!("  Last call:         {}", ymdhm(last));
-            if span_days > 0 {
-                println!(
-                    "  Calls per day:     ~{}",
-                    format_num(s.total_calls / span_days.max(1))
-                );
-            }
+    if let (Some(first), Some(last)) = (s.first_ts, s.last_ts) {
+        let span_days = (last - first) / 86_400;
+        println!("  First call:        {}", ymdhm(first));
+        println!("  Last call:         {}", ymdhm(last));
+        if span_days > 0 {
+            println!(
+                "  Calls per day:     ~{}",
+                format_num(s.total_calls / span_days.max(1))
+            );
         }
-        _ => {}
     }
 
     // Per-repo breakdown

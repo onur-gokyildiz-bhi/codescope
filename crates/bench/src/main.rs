@@ -567,6 +567,7 @@ fn format_tokens(t: usize) -> String {
     }
 }
 
+#[allow(dead_code)] // left behind after R1-v2; kept for future disk-size asserts
 fn dir_size(path: &PathBuf) -> u64 {
     walkdir::WalkDir::new(path)
         .into_iter()

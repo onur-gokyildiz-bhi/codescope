@@ -2,14 +2,13 @@
 //!
 //! Two modes:
 //!
-//! * `--repo X`         — in-place, no server restart. Sends
-//!                        `REMOVE DATABASE <repo>` to the running
-//!                        surreal server, leaving the rest of the
-//!                        namespace untouched. Safe when only one
-//!                        repo is suspect.
+//! * `--repo X` — in-place, no server restart. Sends
+//!   `REMOVE DATABASE <repo>` to the running surreal server,
+//!   leaving the rest of the namespace untouched. Safe when only
+//!   one repo is suspect.
 //! * `--repo X --reindex <path>` — the above, then immediately
-//!                        re-runs the indexer against `<path>` so the
-//!                        repo comes back with fresh data.
+//!   re-runs the indexer against `<path>` so the repo comes back
+//!   with fresh data.
 //!
 //! There's no `--all` wipe yet. Full-server recovery is rare now
 //! that the server owns every file; if it's needed, `codescope stop`,
