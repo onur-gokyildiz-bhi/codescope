@@ -97,23 +97,27 @@ With codescope:     impact_analysis(User::email, depth=3)  →  {"callers": 12, 
 
 Every codescope tool is a structured query — `find_callers`, `impact_analysis`, `knowledge_search`, `code_health` — that the LLM programs, and the graph executes. The model stops scrolling output and starts thinking about the answer.
 
-### Four-Layer Context Diet
+### Context Diet — codescope covers three of four layers
 
-Codescope is the code-semantics layer. Full coverage pairs it with
-three companion projects, each targeting a different kind of context
-waste:
+Codescope now ships the **code-semantics**, **generic tool output**,
+and **shell output** layers in one binary. Pair it with **GSD** for
+the workflow layer and you're covered end-to-end:
 
-| Layer | Tool | Covers |
-|-------|------|--------|
+| Layer | Covered by | How |
+|-------|------------|-----|
 | Workflow / planning | [GSD](https://github.com/gsd-build/get-shit-done) | Spec-driven pipeline: roadmap → phase → plan → execute → verify → ship |
-| **Code semantics** | **codescope** | Functions, callers, impact, decisions, conversations — structured reasoning over code |
-| Generic tool output | [context-mode](https://github.com/mksglu/context-mode) | Any MCP tool (Playwright, GitHub API, log tails, web fetches) via FTS5 sandbox |
-| Shell output | [RTK](https://github.com/rtk-ai/rtk) | `git status`, `ls`, `cargo build`, `npm test`, … |
+| **Code semantics** | **codescope** (MCP tools) | Functions, callers, impact, decisions, conversations — graph traversal over code |
+| **Generic tool output** | **codescope** (`fetch_and_index`, `search_indexed`, `sandbox_run`) | Ingest web fetches, doc dumps, log captures into per-repo BM25 indexes; run short Python/Node/Bash snippets in a sandbox |
+| **Shell output** | **codescope exec** | Wrap `cargo`, `pytest`, `git`, `grep`, `docker`, … — compressor per command (80-95% reduction, `--full` opts out) |
 
 GSD's planning subagents automatically use codescope MCP tools when
 both are installed — see [`docs/integrations/gsd.md`](docs/integrations/gsd.md)
-for the pairing guide. Install all four and your model stops behaving
-like a shallow REPL and starts acting like an engineering substrate.
+for the pairing guide. Install codescope + GSD and your model stops
+behaving like a shallow REPL and starts acting like an engineering
+substrate.
+
+The `codescope hook --agent claude-code` command installs a PreToolUse
+nudge that routes Bash calls through `codescope exec` automatically.
 
 ---
 
@@ -437,7 +441,9 @@ SurrealDB knowledge graph
 
 ## Roadmap
 
-**Just shipped (v0.8.0):**
+**Just shipped (v0.8.x):**
+- ✅ **CMX absorb** — `fetch_and_index` (URLs / local files → BM25 per-repo), `search_indexed`, `sandbox_run` (python / node / bash subprocess, timeout + output cap). Mirrors context-mode inside the codescope MCP surface; no second daemon to run.
+- ✅ **RTK absorb** — `codescope exec <cmd>` output compressors for `cargo`, `pytest`, `npm` / `pnpm` / `yarn`, `tsc`, `docker`, plus `git` / `ls` / `cat` / `head` / `tail` / `grep`. 80-95% reduction measured on cold cargo checks; `--full` opts out per invocation. Bash-suggest hook now nudges `codescope exec` wrapping on matched patterns.
 - ✅ **Bundled SurrealDB server** — no more SurrealKV file-lock conflicts across CLI / MCP / web / LSP. `codescope start` supervises it; R1–R8 refactor across 7 crates.
 - ✅ **Phase 3 Dream** — narrated arc-tour UI over the knowledge graph. 3D fly-through, auto-tag suggestions (A), duplicate flagging (B), cross-repo pattern detection (C), optional Ollama narration (D), rule-based edge proposals (E).
 - ✅ **Multi-agent `codescope init --agent`** — 9 platforms: Claude Code, Cursor, Gemini CLI, VS Code Copilot, Codex, Windsurf, Kiro, Cline, Antigravity.
@@ -448,7 +454,6 @@ SurrealDB knowledge graph
 - ✅ **Homebrew formula** + **Claude Code plugin marketplace** manifest.
 - ✅ **Structured error contract (R2)** — `{ok, error: {code, message, hint}}` across web / MCP / CLI stderr.
 - ✅ **E2E smoke crate (R3)** — `crates/e2e/`, dedicated CI job.
-- ✅ **RTK-03 bash-suggest hook** — `codescope hook install` nudges the model toward codescope tools when it's about to `cat` / `grep`.
 - ✅ **RTK-06 response compaction** — `CODESCOPE_COMPACT=1|ultra` strips embeddings / timestamps / long paths for another 30–50% savings.
 
 **Next:**
