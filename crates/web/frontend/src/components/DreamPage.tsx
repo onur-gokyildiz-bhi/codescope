@@ -11,8 +11,14 @@
 // selector changes (tracked by `currentProject()`).
 
 import { createEffect, createResource, createSignal, For, Show } from 'solid-js';
-import { Moon, PlayCircle, PauseCircle, SkipForward, SkipBack, Download } from 'lucide-solid';
-import { api, type DreamArcSummary, type DreamArcDetail, type DreamScene } from '../api';
+import {
+  Moon, PlayCircle, PauseCircle, SkipForward, SkipBack, Download,
+  Sparkles, Plus,
+} from 'lucide-solid';
+import {
+  api, type DreamArcSummary, type DreamArcDetail, type DreamScene,
+  type DreamSuggestion,
+} from '../api';
 import { currentProject } from '../store';
 import DreamGraph3D from './DreamGraph3D';
 
@@ -40,6 +46,35 @@ export default function DreamPage() {
       return null;
     }
   });
+
+  // Dream-A auto-tag suggestions — repo-wide, not per-arc.
+  const [suggestions, { refetch: refetchSuggestions }] = createResource(
+    currentProject,
+    async () => {
+      try {
+        return (await api.dreamSuggestTags()).suggestions;
+      } catch (e) {
+        console.error('dreamSuggestTags failed:', e);
+        return [] as DreamSuggestion[];
+      }
+    },
+  );
+  const [showSuggestions, setShowSuggestions] = createSignal(false);
+  const [applying, setApplying] = createSignal<string | null>(null);
+
+  const acceptSuggestion = async (id: string, tag: string) => {
+    setApplying(`${id}::${tag}`);
+    try {
+      await api.dreamApplyTag(id, tag);
+      // Refresh both: arcs list gains count and the suggestion
+      // list loses this row.
+      refetchSuggestions();
+      // Arc-list refetch is implicit via the createResource key
+      // (currentProject) — easiest to bump by toggling open.
+    } finally {
+      setApplying(null);
+    }
+  };
 
   // Auto-select the first arc once arcs land.
   createEffect(() => {
@@ -142,6 +177,50 @@ export default function DreamPage() {
               </For>
             </ul>
           </Show>
+        </Show>
+
+        {/* Dream-A suggestions — collapsed by default so the arc
+            list stays the focus. Badge shows count. */}
+        <Show when={(suggestions() ?? []).length > 0}>
+          <button
+            class="dream-suggest-toggle"
+            onClick={() => setShowSuggestions((v) => !v)}
+          >
+            <Sparkles size={14} />
+            <span>
+              {showSuggestions() ? 'Hide' : 'Tag suggestions'} · {(suggestions() ?? []).length}
+            </span>
+          </button>
+        </Show>
+        <Show when={showSuggestions() && (suggestions() ?? []).length > 0}>
+          <div class="dream-suggest-list">
+            <For each={suggestions() ?? []}>
+              {(s) => (
+                <div class="dream-suggest-row">
+                  <div class="dream-suggest-title">{s.title}</div>
+                  <div class="dream-suggest-kind">{s.kind}</div>
+                  <div class="dream-suggest-candidates">
+                    <For each={s.candidates}>
+                      {(c) => (
+                        <button
+                          class="dream-suggest-pill"
+                          disabled={applying() === `${s.id}::${c.tag}`}
+                          onClick={() => acceptSuggestion(s.id, c.tag)}
+                          title={`Matched: ${c.matched_words.join(', ')}`}
+                        >
+                          <Plus size={10} />
+                          {c.tag}
+                          <span class="dream-suggest-score">
+                            {Math.round(c.score * 100)}
+                          </span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              )}
+            </For>
+          </div>
         </Show>
       </aside>
 

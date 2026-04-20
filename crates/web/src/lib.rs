@@ -163,6 +163,11 @@ fn build_routes() -> Router<Arc<AppState>> {
         // Phase 3 Dream — narrated tours through the knowledge graph.
         .route("/api/dream/arcs", get(dream::api_dream_arcs))
         .route("/api/dream/arc/{id}", get(dream::api_dream_arc))
+        .route("/api/dream/suggest-tags", get(dream::api_dream_suggest))
+        .route(
+            "/api/dream/apply-tag",
+            axum::routing::post(dream::api_dream_apply_tag),
+        )
         // CMX-01 insight — per-call analytics from ~/.codescope/insight.jsonl
         .route("/api/insight", get(api_insight))
 }

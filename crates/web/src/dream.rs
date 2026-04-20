@@ -24,7 +24,7 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use crate::error::ApiError;
@@ -466,5 +466,341 @@ fn flatten_rows(v: serde_json::Value) -> Vec<serde_json::Value> {
             .unwrap_or_default()
     } else {
         arr.clone()
+    }
+}
+
+// ── Dream-A: auto-tag suggestion ──────────────────────────────
+
+/// One suggestion — an untagged knowledge entry and the top-3
+/// arcs it most likely belongs to, with Jaccard scores.
+#[derive(Serialize)]
+pub struct Suggestion {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub candidates: Vec<SuggestionCandidate>,
+}
+
+#[derive(Serialize)]
+pub struct SuggestionCandidate {
+    pub tag: String,
+    pub score: f32,
+    pub matched_words: Vec<String>,
+}
+
+/// `GET /api/dream/suggest-tags?repo=X` — propose topical tags
+/// for entries that have none. Jaccard on title + first 400
+/// chars of content; threshold 0.15; top-3 per entry; top-50
+/// entries overall.
+pub async fn api_dream_suggest(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ArcQuery>,
+) -> impl IntoResponse {
+    let query = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return e.into_response(),
+    };
+    let sql = "SELECT id, kind, title, content, tags FROM knowledge LIMIT 5000";
+    let rows = match query.raw_query(sql).await {
+        Ok(v) => flatten_rows(v),
+        Err(e) => {
+            return ApiError::from_db_err(params.repo.as_deref().unwrap_or("?"), e).into_response();
+        }
+    };
+    let suggestions = build_suggestions(&rows);
+    axum::response::Json(serde_json::json!({ "suggestions": suggestions })).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ApplyTagBody {
+    pub id: String,
+    pub tag: String,
+}
+
+/// `POST /api/dream/apply-tag?repo=X` with JSON body
+/// `{id, tag}` — add a tag to one knowledge entry. Both fields
+/// are restricted to SurrealQL-safe characters so we can inline
+/// them without a bound-parameter path (raw_query has no binds
+/// yet).
+pub async fn api_dream_apply_tag(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ArcQuery>,
+    axum::Json(body): axum::Json<ApplyTagBody>,
+) -> impl IntoResponse {
+    let query = match state.resolve_query(params.repo.as_deref()).await {
+        Ok(q) => q,
+        Err(e) => return e.into_response(),
+    };
+    if !is_safe_tag(&body.tag) {
+        return ApiError::invalid_input("tag must be alphanumeric + `-_:./`, ≤128 chars")
+            .into_response();
+    }
+    let id_part = body
+        .id
+        .trim_start_matches("knowledge:")
+        .trim_matches('\u{27E8}')
+        .trim_matches('\u{27E9}');
+    if id_part.is_empty() || id_part.len() > 256 || !id_part.chars().all(is_record_id_char) {
+        return ApiError::invalid_input("knowledge id has forbidden characters").into_response();
+    }
+    let sql = format!(
+        "UPDATE `knowledge`:\u{27E8}{id}\u{27E9} SET tags += '{tag}' RETURN AFTER",
+        id = id_part,
+        tag = body.tag,
+    );
+    match query.raw_query(&sql).await {
+        Ok(_) => axum::response::Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => ApiError::from_db_err(params.repo.as_deref().unwrap_or("?"), e).into_response(),
+    }
+}
+
+fn is_record_id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '/')
+}
+
+fn build_suggestions(rows: &[serde_json::Value]) -> Vec<Suggestion> {
+    let mut tag_bags: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut untagged: Vec<(String, String, String, String)> = Vec::new();
+
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(value_to_id_string)
+            .unwrap_or_default();
+        let title = row
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let kind = row
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("knowledge")
+            .to_string();
+        let content = row
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tags: Vec<String> = row
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let words = meaningful_words(&format!("{title} {}", first_n_chars(&content, 400)));
+        let topical: Vec<String> = tags.iter().filter(|t| !is_meta_tag(t)).cloned().collect();
+
+        if topical.is_empty() {
+            untagged.push((id, title, kind, content));
+        }
+        for tag in topical {
+            let bag = tag_bags.entry(tag).or_default();
+            for w in &words {
+                bag.insert(w.clone());
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (id, title, kind, content) in untagged {
+        if id.is_empty() {
+            continue;
+        }
+        let words: BTreeSet<String> =
+            meaningful_words(&format!("{title} {}", first_n_chars(&content, 400)))
+                .into_iter()
+                .collect();
+        if words.is_empty() {
+            continue;
+        }
+        let mut candidates: Vec<SuggestionCandidate> = tag_bags
+            .iter()
+            .filter_map(|(tag, bag)| {
+                let inter: Vec<String> = words.intersection(bag).cloned().collect();
+                // Jaccard for the general topical overlap.
+                let jaccard = if inter.is_empty() {
+                    0.0
+                } else {
+                    let union = words.len() + bag.len() - inter.len();
+                    inter.len() as f32 / union.max(1) as f32
+                };
+                // Tag-name-in-title / content bonus: if any word
+                // form of the tag literally appears in the entry,
+                // that's a near-certain signal. Split on `-_` so
+                // `surreal-migration` matches "surreal" or
+                // "migration" individually.
+                let tag_words: Vec<String> = tag
+                    .split(|c: char| c == '-' || c == '_')
+                    .map(|p| p.to_ascii_lowercase())
+                    .filter(|p| p.len() >= 3)
+                    .collect();
+                let tag_hits = tag_words.iter().filter(|w| words.contains(*w)).count();
+                let tag_bonus = if tag_hits == 0 {
+                    0.0
+                } else {
+                    // 0.35 for a single tag-word match; 0.55 for two+.
+                    0.15 + 0.2 * tag_hits.min(2) as f32
+                };
+                let score = jaccard.max(tag_bonus);
+                if score < 0.12 {
+                    return None;
+                }
+                Some(SuggestionCandidate {
+                    tag: tag.clone(),
+                    score,
+                    matched_words: inter.into_iter().take(6).collect(),
+                })
+            })
+            .collect();
+        candidates.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.truncate(3);
+        if candidates.is_empty() {
+            continue;
+        }
+        out.push(Suggestion {
+            id,
+            title,
+            kind,
+            candidates,
+        });
+    }
+    out.sort_by(|a, b| {
+        let sa = a.candidates.first().map(|c| c.score).unwrap_or(0.0);
+        let sb = b.candidates.first().map(|c| c.score).unwrap_or(0.0);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out.truncate(50);
+    out
+}
+
+fn first_n_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+fn meaningful_words(text: &str) -> Vec<String> {
+    const STOP: &[&str] = &[
+        "the", "and", "for", "with", "that", "this", "from", "have", "has", "was", "were", "but",
+        "not", "all", "any", "are", "can", "out", "our", "new", "one", "two", "into", "over",
+        "just", "when", "then", "what", "your", "you", "use", "used", "uses", "via", "also",
+    ];
+    let mut out = Vec::new();
+    let mut seen: HashMap<String, ()> = HashMap::new();
+    let mut current = String::new();
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            current.push(c.to_ascii_lowercase());
+        } else {
+            push_word(&mut out, &mut seen, &mut current, STOP);
+        }
+    }
+    push_word(&mut out, &mut seen, &mut current, STOP);
+    out
+}
+
+fn push_word(
+    out: &mut Vec<String>,
+    seen: &mut HashMap<String, ()>,
+    current: &mut String,
+    stop: &[&str],
+) {
+    if current.len() >= 3
+        && !stop.contains(&current.as_str())
+        && !seen.contains_key(current.as_str())
+    {
+        seen.insert(current.clone(), ());
+        out.push(current.clone());
+    }
+    current.clear();
+}
+
+fn value_to_id_string(v: &serde_json::Value) -> Option<String> {
+    if let Some(s) = v.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = v.as_object() {
+        let tb = obj
+            .get("tb")
+            .and_then(|v| v.as_str())
+            .unwrap_or("knowledge");
+        let id = obj.get("id")?;
+        let inner = if let Some(s) = id.as_str() {
+            s.to_string()
+        } else if let Some(o) = id.as_object() {
+            o.get("String")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)?
+        } else {
+            return None;
+        };
+        return Some(format!("{tb}:{inner}"));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn jaccard_suggests_matching_arc() {
+        let rows = vec![
+            json!({
+                "id": "knowledge:a",
+                "kind": "decision",
+                "title": "Autocalib preset table for model-specific dispatch",
+                "content": "Shipped 68 tok/s standard path.",
+                "tags": ["autocalib", "status:done"]
+            }),
+            json!({
+                "id": "knowledge:b",
+                "kind": "decision",
+                "title": "Autocalib autotune CLI",
+                "content": "tq autotune command with JSON cache.",
+                "tags": ["autocalib", "autotune", "status:done"]
+            }),
+            json!({
+                "id": "knowledge:c",
+                "kind": "claim",
+                "title": "Autocalib phase 3 pending",
+                "content": "arch and hidden_dim cache key planned.",
+                "tags": ["status:planned"]
+            }),
+        ];
+        let suggestions = build_suggestions(&rows);
+        assert!(!suggestions.is_empty(), "should produce suggestions");
+        let s = &suggestions[0];
+        assert!(s.candidates.iter().any(|c| c.tag == "autocalib"));
+    }
+
+    #[test]
+    fn no_suggestion_when_untagged_shares_nothing() {
+        let rows = vec![
+            json!({
+                "id": "knowledge:x",
+                "kind": "claim",
+                "title": "Unrelated note about coffee",
+                "content": "Morning habit.",
+                "tags": []
+            }),
+            json!({
+                "id": "knowledge:y",
+                "kind": "decision",
+                "title": "Database migration",
+                "content": "Switched from SQLite to Surreal.",
+                "tags": ["database", "surreal-migration"]
+            }),
+        ];
+        let suggestions = build_suggestions(&rows);
+        assert!(suggestions.is_empty(), "no overlap → no suggestion");
     }
 }

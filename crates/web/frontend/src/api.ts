@@ -74,6 +74,36 @@ export const api = {
     fetchJson<DreamArcDetail>(withRepo(`${BASE}/api/dream/arc/${encodeURIComponent(id)}`)),
 
   insight: () => fetchJson<InsightResponse>(`${BASE}/api/insight`),
+
+  dreamSuggestTags: () =>
+    fetchJson<{ suggestions: DreamSuggestion[] }>(withRepo(`${BASE}/api/dream/suggest-tags`)),
+
+  dreamApplyTag: async (id: string, tag: string): Promise<{ ok: boolean }> => {
+    const proj = currentProject();
+    const url = `${BASE}/api/dream/apply-tag${proj ? `?repo=${encodeURIComponent(proj)}` : ''}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, tag }),
+    });
+    if (!r.ok) {
+      throw new Error(await r.text());
+    }
+    return r.json();
+  },
+};
+
+export type DreamSuggestionCandidate = {
+  tag: string;
+  score: number;
+  matched_words: string[];
+};
+
+export type DreamSuggestion = {
+  id: string;
+  title: string;
+  kind: string;
+  candidates: DreamSuggestionCandidate[];
 };
 
 export type InsightResponse = {
