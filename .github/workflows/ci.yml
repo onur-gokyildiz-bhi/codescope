@@ -171,6 +171,20 @@ jobs:
           key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # codescope-web embeds frontend/dist via include_str! +
+      # include_dir!; without this step the `cargo build` below
+      # fails with "No such file or directory" on index.html.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          cd crates/web/frontend
+          npm ci
+          npm run build
+
       - name: Build codescope binary (smoke_cli needs it on disk)
         run: cargo build -p codescope
 
