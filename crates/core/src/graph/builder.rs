@@ -206,9 +206,26 @@ impl GraphBuilder {
 
     /// Delete all entities for a specific file (single multi-statement query).
     pub async fn delete_file_entities(&self, file_path: &str, repo: &str) -> Result<()> {
+        // SurrealDB TYPE RELATION edges don't cascade on entity delete, so
+        // re-indexing a file without cleaning its edges first duplicates
+        // every call / contains / imports edge — `find_callers` then
+        // returns the same caller N times per re-index. Delete edges
+        // first (either endpoint in the file), then entity rows.
         self.db
             .query(
-                "DELETE FROM `function` WHERE file_path = $path AND repo = $repo; \
+                "DELETE FROM calls WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM contains WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM imports WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM inherits WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM implements WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM uses WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM depends_on WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM configures WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM defines_endpoint WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM has_field WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM references WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM calls_endpoint WHERE in.file_path = $path OR out.file_path = $path; \
+                 DELETE FROM `function` WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM class WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM module WHERE file_path = $path AND repo = $repo; \
                  DELETE FROM variable WHERE file_path = $path AND repo = $repo; \
@@ -230,10 +247,27 @@ impl GraphBuilder {
     }
 
     /// Clear all data for a specific repo (single multi-statement query).
+    /// Drops edge rows before entity rows so the relations don't outlive
+    /// their endpoints. Edges are identified by their in/out side's repo
+    /// field; anything with no repo field attached (analyzer artefacts)
+    /// is caught by the `repo = $repo` clause or cleaned up by the
+    /// orphan-resolve step on the next index.
     pub async fn clear_repo(&self, repo: &str) -> Result<()> {
         self.db
             .query(
-                "DELETE FROM file WHERE repo = $repo; \
+                "DELETE FROM calls WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM contains WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM imports WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM inherits WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM implements WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM uses WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM depends_on WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM configures WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM defines_endpoint WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM has_field WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM references WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM calls_endpoint WHERE in.repo = $repo OR out.repo = $repo; \
+                 DELETE FROM file WHERE repo = $repo; \
                  DELETE FROM `function` WHERE repo = $repo; \
                  DELETE FROM class WHERE repo = $repo; \
                  DELETE FROM module WHERE repo = $repo; \
@@ -283,8 +317,16 @@ impl GraphBuilder {
         }
 
         // Step 1: load all orphan calls in one query.
+        // `IS NONE` (not `IS NULL`) — when the `out` record-link
+        // points to a row that doesn't exist, SurrealDB 3.0.5
+        // treats the dereference as absent, not null. The old
+        // `IS NULL` check silently matched nothing, so most
+        // orphans never got resolved (only the 3 % that happened
+        // to have explicit null names). Verified empirically:
+        // `out.name IS NULL` → 0 rows,
+        // `out.name IS NONE` → 16 611 on a fresh index.
         let orphan_query = "SELECT id, in, meta::id(out) AS raw_target FROM calls \
-             WHERE out.name IS NULL AND meta::tb(out) = 'function'";
+             WHERE out.name IS NONE AND meta::tb(out) = 'function'";
         let mut resp = self.db.query(orphan_query).await?;
         let orphans: Vec<Orphan> = resp.take(0).unwrap_or_default();
 

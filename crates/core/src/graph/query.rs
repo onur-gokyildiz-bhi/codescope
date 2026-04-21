@@ -112,7 +112,12 @@ impl GraphQuery {
         let name = function_name.to_string();
         let lim = default_limit();
         let timeout = query_timeout();
-        // Use direct edge traversal — much faster than subquery on large graphs
+        // GROUP BY collapses duplicate caller rows — legacy DBs that
+        // were indexed before the edge-dedup fix (v0.8.2 builder.rs)
+        // accumulated one `calls` edge per re-index, so the same
+        // (caller → target) pair can appear N times. GROUP BY is a
+        // harmless no-op on clean DBs and a necessary shield on
+        // upgraded ones.
         let results: Vec<SearchResult> = tokio::time::timeout(
             timeout,
             self.db
@@ -120,7 +125,10 @@ impl GraphQuery {
                     "SELECT in.qualified_name AS qualified_name, in.name AS name, \
                      in.file_path AS file_path, in.start_line AS start_line, \
                      in.end_line AS end_line, in.language AS language, in.signature AS signature \
-                     FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}"
+                     FROM calls \
+                     WHERE out.name = $name AND in.name != NONE \
+                     GROUP BY qualified_name, name, file_path, start_line, end_line, language, signature \
+                     LIMIT {lim}"
                 ))
                 .bind(("name", name)),
         )
@@ -135,6 +143,8 @@ impl GraphQuery {
         let name = function_name.to_string();
         let lim = default_limit();
         let timeout = query_timeout();
+        // Same dedup rationale as find_callers — legacy DBs can hold
+        // the same (caller → callee) edge many times over.
         let results: Vec<SearchResult> = tokio::time::timeout(
             timeout,
             self.db
@@ -142,7 +152,10 @@ impl GraphQuery {
                     "SELECT out.qualified_name AS qualified_name, out.name AS name, \
                      out.file_path AS file_path, out.start_line AS start_line, \
                      out.end_line AS end_line, out.language AS language, out.signature AS signature \
-                     FROM calls WHERE in.name = $name AND out.name != NONE LIMIT {lim}"
+                     FROM calls \
+                     WHERE in.name = $name AND out.name != NONE \
+                     GROUP BY qualified_name, name, file_path, start_line, end_line, language, signature \
+                     LIMIT {lim}"
                 ))
                 .bind(("name", name)),
         )
