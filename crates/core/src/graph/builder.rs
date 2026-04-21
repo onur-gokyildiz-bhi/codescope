@@ -307,6 +307,12 @@ impl GraphBuilder {
             id: RecordId,
             #[serde(rename = "in")]
             caller: RecordId,
+            // Set at extraction time (parser/extractor.rs) — the exact
+            // callee identifier lexed from source. Preferred over the
+            // `meta::id(out)` fallback because the underscore-collapsed
+            // sanitized ID can't be reliably split back into segments
+            // for multi-word names (`default_limit` → `limit`).
+            raw_callee: Option<String>,
             raw_target: String,
         }
 
@@ -316,16 +322,12 @@ impl GraphBuilder {
             id: RecordId,
         }
 
-        // Step 1: load all orphan calls in one query.
-        // `IS NONE` (not `IS NULL`) — when the `out` record-link
-        // points to a row that doesn't exist, SurrealDB 3.0.5
-        // treats the dereference as absent, not null. The old
-        // `IS NULL` check silently matched nothing, so most
-        // orphans never got resolved (only the 3 % that happened
-        // to have explicit null names). Verified empirically:
-        // `out.name IS NULL` → 0 rows,
-        // `out.name IS NONE` → 16 611 on a fresh index.
-        let orphan_query = "SELECT id, in, meta::id(out) AS raw_target FROM calls \
+        // Step 1: load all orphan calls in one query. `IS NONE` (not
+        // `IS NULL`) — SurrealDB 3.0.5 treats a missing record-link
+        // dereference as absent, not null. `raw_callee` comes from
+        // the edge metadata that the parser set; if older edges
+        // lack it we fall back to `raw_target` parsing.
+        let orphan_query = "SELECT id, in, raw_callee, meta::id(out) AS raw_target FROM calls \
              WHERE out.name IS NONE AND meta::tb(out) = 'function'";
         let mut resp = self.db.query(orphan_query).await?;
         let orphans: Vec<Orphan> = resp.take(0).unwrap_or_default();
@@ -354,17 +356,29 @@ impl GraphBuilder {
             by_name.entry(f.name).or_insert(f.id);
         }
 
-        // Step 3: resolve each orphan using the in-memory map.
-        // Callee name recovery mirrors the old heuristic: last underscore-
-        // separated segment of the sanitized qualified name.
+        // Step 3: resolve each orphan. Prefer the edge's `raw_callee`
+        // metadata (exact lex from source); fall back to the last
+        // underscore-separated segment of the sanitized ID for edges
+        // that predate the metadata.
+        //
+        // Orphans that still can't match stay dangling on purpose.
+        // Many are std/external refs (to_string, len, Ok), but a non-
+        // trivial slice are functions the parser didn't extract
+        // (impl-block methods in some languages). Dropping dangling
+        // edges would lose that signal forever; keep them and rely on
+        // `in.name != NONE` / `out.name != NONE` filters on the
+        // downstream query side. See `find_callers` / `backlinks`.
         let mut ops: Vec<String> = Vec::with_capacity(orphans.len());
         let mut resolved = 0usize;
         for o in &orphans {
-            let callee_name = o
-                .raw_target
-                .rsplit('_')
-                .next()
-                .unwrap_or(o.raw_target.as_str());
+            let callee_name: &str = match &o.raw_callee {
+                Some(s) if !s.is_empty() => s.as_str(),
+                _ => o
+                    .raw_target
+                    .rsplit('_')
+                    .next()
+                    .unwrap_or(o.raw_target.as_str()),
+            };
             if let Some(target_id) = by_name.get(callee_name) {
                 ops.push(format!(
                     "DELETE {}; RELATE ({})->calls->({}) SET line = 0;",
