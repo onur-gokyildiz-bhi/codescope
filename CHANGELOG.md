@@ -4,6 +4,20 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-04-22
+
+UI follow-up to 0.8.4 — the per-tool savings breakdown now
+shows up in the web Insight page too, not just the CLI.
+
+### Added
+
+- **"Savings by tool" bar chart in the web UI.** `/api/insight`
+  returns `gain.per_tool` (sorted by total saved) and the
+  InsightPage renders a horizontal bar chart mirroring the
+  `codescope gain` CLI table. Legacy unattributed calls get a
+  muted row so the headline "Tokens saved" number always
+  reconciles with the breakdown.
+
 ## [0.8.4] - 2026-04-22
 
 Observability + bug-fix pass. `codescope gain` now tells you
