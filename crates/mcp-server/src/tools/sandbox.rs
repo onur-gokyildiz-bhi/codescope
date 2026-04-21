@@ -151,6 +151,26 @@ impl GraphRagServer {
             }
         };
 
+        // Windows: assign the child to a JobObject with KILL_ON_JOB_CLOSE.
+        // Any descendant the snippet spawns is automatically added to the
+        // job, and dropping the job kills them all. This is the Windows
+        // equivalent of setsid + kill(-pgid) on Unix. `_job` MUST stay
+        // alive until we've decided whether to kill or reap — otherwise
+        // KILL_ON_JOB_CLOSE fires immediately.
+        #[cfg(windows)]
+        let _job = match win32job::Job::create() {
+            Ok(job) => {
+                let mut info = job.query_extended_limit_info().unwrap_or_default();
+                info.limit_kill_on_job_close();
+                let _ = job.set_extended_limit_info(&info);
+                if let Some(handle) = child.raw_handle() {
+                    let _ = job.assign_process(handle as _);
+                }
+                Some(job)
+            }
+            Err(_) => None,
+        };
+
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         // Capture the pid so we can signal the whole process group on
@@ -254,10 +274,12 @@ fn bash_cmd() -> String {
 /// Kill the child and everything it spawned. On Unix, the child is
 /// its own process-group leader (setsid at pre_exec) so `kill(-pgid,
 /// SIGTERM)` followed by `SIGKILL` fans out to every descendant. On
-/// Windows we fall back to tokio's `start_kill()`, which only hits
-/// the direct child — descendants can leak there until we add a
-/// JobObject. `kill_on_drop(true)` on the command catches the
-/// happy-path cleanup.
+/// Windows, the caller keeps a `JobObject` around with
+/// `KILL_ON_JOB_CLOSE` — dropping it kills every descendant. We
+/// still explicitly `start_kill()` the direct child here so `.wait()`
+/// returns promptly instead of waiting for the job drop. The
+/// `kill_on_drop(true)` command flag is a safety net on both
+/// platforms.
 async fn kill_process_tree(pid: Option<u32>, child: &mut tokio::process::Child) {
     #[cfg(unix)]
     {
