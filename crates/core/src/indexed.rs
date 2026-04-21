@@ -112,7 +112,15 @@ pub async fn fetch_and_store(
         };
 
     let body = if kind == "web" {
-        html2text::from_read(raw.as_bytes(), 100).unwrap_or_else(|_| raw.clone())
+        // Prefer the article / main / content subtree when present
+        // — docs and blogs almost always wrap their real content in
+        // one of these, and feeding html2text the whole document
+        // pulls in nav / footer / cookie-banner prose that dilutes
+        // BM25 scoring. When the selectors don't match (SPAs that
+        // render the shell but no content, or pages that skip
+        // semantic tags), fall back to the full body.
+        let reduced = extract_article_body(&raw).unwrap_or(raw.clone());
+        html2text::from_read(reduced.as_bytes(), 100).unwrap_or_else(|_| raw.clone())
     } else {
         raw
     };
@@ -218,6 +226,45 @@ fn looks_like_html(text: &str) -> bool {
     head.contains("<html") || head.contains("<!doctype html") || head.contains("<body")
 }
 
+/// Try to pluck the main article body out of an HTML document.
+/// Scans for `<article>`, `<main>`, and common content-container
+/// class names in that order; returns the first matching subtree
+/// as an HTML fragment. Returns `None` if nothing matches so the
+/// caller can fall back to the full body.
+///
+/// Intentionally string-based — a proper DOM parse is overkill
+/// for this heuristic and would pull in `html5ever` transitively
+/// on the hot path. Not robust against pathological nesting
+/// (an `<article>` containing another `<article>` will keep
+/// the outer one intact, which is what we want here anyway).
+fn extract_article_body(html: &str) -> Option<String> {
+    for (open, close) in [
+        ("<article", "</article>"),
+        ("<main", "</main>"),
+        ("<div class=\"content\"", "</div>"),
+        ("<div id=\"content\"", "</div>"),
+    ] {
+        if let Some(snippet) = slice_tag(html, open, close) {
+            return Some(snippet);
+        }
+    }
+    None
+}
+
+fn slice_tag(html: &str, open_prefix: &str, close_tag: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let open_lc = open_prefix.to_ascii_lowercase();
+    let close_lc = close_tag.to_ascii_lowercase();
+    let start = lower.find(&open_lc)?;
+    // Skip to the closing `>` of the open tag so attributes (class,
+    // id, data-*) don't trip the length calculation.
+    let after_open = html[start..].find('>').map(|p| start + p + 1)?;
+    let end = lower[after_open..]
+        .find(&close_lc)
+        .map(|p| after_open + p + close_lc.len())?;
+    Some(html[start..end].to_string())
+}
+
 /// Pull `<title>...</title>` out of an HTML blob without a full
 /// parser — good enough for the title field.
 fn extract_html_title(html: &str) -> Option<String> {
@@ -269,5 +316,36 @@ mod tests {
         assert!(looks_like_html("<!DOCTYPE html><html></html>"));
         assert!(looks_like_html("<html><body></body></html>"));
         assert!(!looks_like_html("plain text content"));
+    }
+
+    #[test]
+    fn article_extract_prefers_article_tag() {
+        let html = r#"<html><body><nav>menu</nav><article>real content</article><footer>junk</footer></body></html>"#;
+        let got = extract_article_body(html).unwrap();
+        assert!(got.contains("real content"));
+        assert!(!got.contains("menu"));
+        assert!(!got.contains("junk"));
+    }
+
+    #[test]
+    fn article_extract_falls_back_to_main() {
+        let html = r#"<html><body><nav>menu</nav><main>main content</main></body></html>"#;
+        let got = extract_article_body(html).unwrap();
+        assert!(got.contains("main content"));
+        assert!(!got.contains("menu"));
+    }
+
+    #[test]
+    fn article_extract_respects_attributes_on_open_tag() {
+        let html =
+            r#"<html><body><article class="post" data-id="42">content</article></body></html>"#;
+        let got = extract_article_body(html).unwrap();
+        assert!(got.contains("content"));
+    }
+
+    #[test]
+    fn article_extract_none_when_no_match() {
+        let html = r#"<html><body><nav>menu</nav><p>paragraph</p></body></html>"#;
+        assert!(extract_article_body(html).is_none());
     }
 }
