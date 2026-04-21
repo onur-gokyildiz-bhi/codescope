@@ -4,6 +4,43 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-04-22
+
+Observability + bug-fix pass. `codescope gain` now tells you
+where the savings are actually coming from.
+
+### Added
+
+- **Per-tool `codescope gain` breakdown.** Every MCP handler
+  now attributes its call to the tool name. The CLI shows a
+  sorted table — tool × calls × per-call estimate × total
+  saved — instead of a flat "N calls × 2500". Each tool has
+  its own token-savings estimate (impact_analysis ≈ 50 000,
+  find_callers ≈ 6 000, graph_stats ≈ 500). Answers the
+  "where is the value coming from" question directly.
+- **Windows JobObject process-tree kill for `sandbox_run`.**
+  Completes the cross-platform story started in 0.8.3. A
+  job with `KILL_ON_JOB_CLOSE` automatically reaps every
+  subprocess the snippet spawns — the Windows equivalent
+  of setsid + `kill(-pgid)` on Unix.
+
+### Fixed
+
+- **GROUP BY dedup swept across all edge-traversal queries.**
+  Same duplicate-row issue `find_callers` had in 0.8.3 also
+  hit `explore` (callers + callees), `backlinks` (calls +
+  wikilinks), and `impact_analysis` (implements). Each now
+  groups on identifying fields so legacy DBs collapse
+  duplicates without a required `codescope repair`.
+- **Orphan call resolver uses edge `raw_callee` metadata.**
+  The parser had been writing the exact callee identifier on
+  every `calls` edge; the resolver was ignoring it and
+  splitting the sanitized synthetic target ID on underscores.
+  That silently mangled multi-word function names
+  (`default_limit` → split to `limit`, never matches). Now
+  reads `raw_callee` first and falls back to the old
+  heuristic only for legacy edges missing the metadata.
+
 ## [0.8.3] - 2026-04-21
 
 Bug-fix + hardening pass. `find_callers` duplicate rows were the
