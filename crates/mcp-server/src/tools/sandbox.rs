@@ -45,19 +45,16 @@ impl GraphRagServer {
             Err(e) => return e,
         };
 
-        let (program, file_ext, interpreter_args): (String, &str, Vec<String>) =
-            match params.language.as_str() {
-                "python" | "py" => (python_cmd(), "py", vec![]),
-                "node" | "js" => ("node".to_string(), "js", vec![]),
-                "bash" | "sh" => (bash_cmd(), "sh", vec![]),
-                other => {
-                    return crate::error::tool_error(
-                        crate::error::code::INVALID_INPUT,
-                        &format!("unsupported language: {other}"),
-                        Some("Use one of: python, node, bash."),
-                    );
-                }
-            };
+        let (program, file_ext, interpreter_args) = match resolve_language(&params.language) {
+            Some(t) => t,
+            None => {
+                return crate::error::tool_error(
+                    crate::error::code::INVALID_INPUT,
+                    &format!("unsupported language: {}", params.language),
+                    Some("Use one of: python, node, bash."),
+                );
+            }
+        };
 
         let timeout_ms = params
             .timeout_ms
@@ -230,4 +227,45 @@ fn bash_cmd() -> String {
     // invoke `bash` and hope it's on PATH — if not, spawn fails
     // and we return a useful hint.
     "bash".to_string()
+}
+
+/// Map the `language` param to (interpreter, file_ext, extra_args).
+/// Returns `None` for unsupported languages; the caller surfaces an
+/// `invalid_input` tool_error.
+fn resolve_language(lang: &str) -> Option<(String, &'static str, Vec<String>)> {
+    match lang {
+        "python" | "py" => Some((python_cmd(), "py", vec![])),
+        "node" | "js" => Some(("node".to_string(), "js", vec![])),
+        "bash" | "sh" => Some((bash_cmd(), "sh", vec![])),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_aliases_accepted() {
+        assert!(resolve_language("python").is_some());
+        assert!(resolve_language("py").is_some());
+        assert!(resolve_language("node").is_some());
+        assert!(resolve_language("js").is_some());
+        assert!(resolve_language("bash").is_some());
+        assert!(resolve_language("sh").is_some());
+    }
+
+    #[test]
+    fn unsupported_language_returns_none() {
+        assert!(resolve_language("ruby").is_none());
+        assert!(resolve_language("").is_none());
+        assert!(resolve_language("Python").is_none()); // case-sensitive by design
+    }
+
+    #[test]
+    fn file_ext_matches_language() {
+        assert_eq!(resolve_language("python").unwrap().1, "py");
+        assert_eq!(resolve_language("node").unwrap().1, "js");
+        assert_eq!(resolve_language("bash").unwrap().1, "sh");
+    }
 }

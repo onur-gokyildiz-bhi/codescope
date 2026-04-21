@@ -117,10 +117,14 @@ pub async fn run(
         }
     }
 
-    // Step 4: First index
+    // Step 4: First index.
+    // If the surreal server isn't running yet, bring it up
+    // transparently — first-time users hit "it's not working"
+    // otherwise and have to discover `codescope start` from the
+    // error. connect_db's hint is still there for scripting.
     println!("\n📊 Indexing codebase...");
     let start = Instant::now();
-    let db = connect_db(db_path, &repo_name).await?;
+    let db = connect_db_or_autostart(db_path.clone(), &repo_name).await?;
     let builder = GraphBuilder::new(db.clone());
     let parser = CodeParser::new();
 
@@ -227,6 +231,35 @@ async fn run_stdio_init(
     // Recursive call with daemon=false — the fallback path when
     // the user requested daemon mode but it couldn't start.
     Box::pin(run(project_path, &repo_name, agent, db_path, false, 9877)).await
+}
+
+/// Try to open the repo's DB; if the surreal server isn't running,
+/// start it, wait briefly for it to become healthy, and retry. Only
+/// used from `init` — other commands keep the "explicit start"
+/// contract so scripts can surface the real error.
+async fn connect_db_or_autostart(
+    db_path: Option<PathBuf>,
+    repo_name: &str,
+) -> Result<codescope_core::DbHandle> {
+    match connect_db(db_path.clone(), repo_name).await {
+        Ok(db) => Ok(db),
+        Err(e) => {
+            let msg = format!("{e:#}").to_lowercase();
+            let looks_like_server_down = msg.contains("connection refused")
+                || msg.contains("timed out connecting")
+                || msg.contains("is `codescope start` running");
+            if !looks_like_server_down {
+                return Err(e);
+            }
+            println!("🟡 surreal server not running — starting it for you…");
+            crate::commands::supervisor::start(None).await?;
+            // Give the server a beat to settle; `supervisor::start`
+            // already waits for the health probe but the first bind
+            // on the `connect_repo` path can still race.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            connect_db(db_path, repo_name).await
+        }
+    }
 }
 
 /// Find the codescope-mcp binary — check PATH, common locations, and sibling dir.

@@ -86,3 +86,31 @@ fn is_dot_progress_line(line: &str) -> bool {
         ) || c.is_ascii_digit()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dot_progress_dots_and_verdicts() {
+        assert!(is_dot_progress_line("tests/foo.py ......."));
+        assert!(is_dot_progress_line("tests/foo.py ..F..E"));
+        assert!(is_dot_progress_line("tests/bar.py .sxX"));
+    }
+
+    #[test]
+    fn dot_progress_with_percent_marker() {
+        assert!(is_dot_progress_line(
+            "tests/foo.py ......                                   [ 50%]"
+        ));
+    }
+
+    #[test]
+    fn non_progress_lines_excluded() {
+        // Regular prose, assertion bodies, stack frames — must pass through.
+        assert!(!is_dot_progress_line("FAILED tests/foo.py::test_bar"));
+        assert!(!is_dot_progress_line("collected 42 items"));
+        assert!(!is_dot_progress_line("tests/foo.py:10: AssertionError"));
+        assert!(!is_dot_progress_line(""));
+    }
+}

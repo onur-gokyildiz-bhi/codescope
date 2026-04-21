@@ -55,3 +55,28 @@ fn normalize_ts_line(line: &str) -> String {
         line.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_path_prefix_for_dedup() {
+        let a = "src/foo.ts(10,5): error TS2322: Type 'X' is not assignable to type 'Y'.";
+        let b = "src/bar.ts(42,1): error TS2322: Type 'X' is not assignable to type 'Y'.";
+        assert_eq!(normalize_ts_line(a), normalize_ts_line(b));
+    }
+
+    #[test]
+    fn preserves_lines_without_location() {
+        let info = "Found 3 errors.";
+        assert_eq!(normalize_ts_line(info), info);
+    }
+
+    #[test]
+    fn distinct_errors_stay_distinct() {
+        let a = "src/foo.ts(10,5): error TS2322: msg-a";
+        let b = "src/foo.ts(11,5): error TS2345: msg-b";
+        assert_ne!(normalize_ts_line(a), normalize_ts_line(b));
+    }
+}

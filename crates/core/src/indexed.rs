@@ -152,15 +152,26 @@ pub async fn search(db: &DbHandle, query: &str, limit: usize) -> Result<Vec<Sear
         return Ok(Vec::new());
     }
     let lim = limit.clamp(1, 50);
-    // Use `@1@` / `@2@` to disambiguate the two FULLTEXT predicates
-    // when computing per-row score / highlight.
+    // SurrealDB 3.0.5 quirk: `search::score()` returns 0.0 even with a
+    // valid FULLTEXT BM25 index + matching WHERE predicate (verified
+    // via `INFO FOR TABLE` + direct probe). Until upstream ships real
+    // scores, keep the FULLTEXT index for the WHERE speedup and
+    // compute a simple "title match + body match" score manually:
+    // title hits weight 2.0, body hits weight 1.0. Substring fallback
+    // (`string::contains`) lets a query on an analyzer-rejected token
+    // (URL fragments, punctuation) still rank, at the cost of a
+    // linear scan on the filtered subset.
     let sql = format!(
         "SELECT title, source, kind,
             string::slice(body, 0, 280) AS snippet,
-            (search::score(1) + 0.5 * search::score(2)) AS score
+            (IF string::contains(string::lowercase(title), string::lowercase($q)) THEN 2.0 ELSE 0.0 END) +
+            (IF string::contains(string::lowercase(body),  string::lowercase($q)) THEN 1.0 ELSE 0.0 END) AS score
          FROM indexed_content
-         WHERE body @1@ $q OR title @2@ $q
-         ORDER BY score DESC
+         WHERE body @1@ $q
+            OR title @2@ $q
+            OR string::contains(string::lowercase(body),  string::lowercase($q))
+            OR string::contains(string::lowercase(title), string::lowercase($q))
+         ORDER BY score DESC, title
          LIMIT {lim}"
     );
     let mut resp = db.query(sql).bind(("q", query.to_string())).await?;

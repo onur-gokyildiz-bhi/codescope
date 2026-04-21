@@ -4,6 +4,66 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-04-21
+
+Absorb context-mode + RTK into the codescope binary. You no longer
+need two extra daemons to cover generic tool output and shell
+output — codescope handles both.
+
+### Added
+
+- **CMX absorb — indexed content store.**
+  New per-repo `indexed_content` table with BM25 FULLTEXT indexes.
+  CLI: `codescope ingest <url|path>`, `codescope search-content <q>`,
+  `codescope purge-indexed`. MCP: `fetch_and_index`, `index_content`,
+  `search_indexed`. HTML is rendered to plain text via `html2text`.
+  Distinct from the `knowledge` table on purpose — this one is dumb
+  text (web fetches, log dumps, doc snapshots) so `knowledge_search`
+  doesn't get polluted.
+- **CMX absorb — sandbox_run MCP tool.**
+  Runs a short python / node / bash snippet in a subprocess and
+  returns `{stdout, stderr, exit_code, timed_out}`. 10 s default
+  timeout (60 s cap), 16 KB per-stream output cap, credential env
+  vars stripped before spawn.
+- **RTK absorb — `codescope exec <cmd>` output compressors.**
+  Wraps `cargo`, `pytest`, `npm` / `pnpm` / `yarn`, `tsc`,
+  `docker`, plus `git` / `ls` / `cat` / `head` / `tail` / `grep`.
+  Keeps warnings + errors + summary; drops the noise. ~87 %
+  reduction measured on a cold `cargo check`. `--full` opts out.
+- **Hook enhancement — suggest `codescope exec` wrapping.**
+  `codescope-bash-suggest` (PreToolUse for Claude Code) now
+  recognises compressor-eligible commands and nudges the model to
+  prefix with `codescope exec` instead of only pointing at MCP
+  tools.
+- **`codescope init` auto-starts the surreal server** if it isn't
+  running. Removes one step from the first-time setup — no more
+  "I ran init and it errored" reports.
+- **Unit-test coverage** for the new compressors (split_full_flag,
+  keep_head_tail, pytest dot-progress detector, tsc dedup) and
+  sandbox language-dispatch.
+
+### Fixed
+
+- **BM25 score always returned 0.0.** SurrealDB 3.0.5 quirk —
+  `search::score()` returns zero even with a valid FULLTEXT BM25
+  index and matching WHERE predicate. `search_content` now keeps
+  the FULLTEXT predicate for fast filtering and computes a
+  deterministic "title match (2.0) + body match (1.0)" score
+  manually. Substring fallback (`string::contains`) catches
+  analyzer-rejected tokens (URL fragments, punctuation).
+
+### CI
+
+- **E2E smoke timeout bumped 5 → 15 min.** Cold `cargo build -p
+  codescope` exceeded 5 min after the html2text + tokio::process
+  additions landed, so the job was timing out before the tests
+  ran.
+- **E2E smoke builds the frontend before the binary.** `codescope-
+  web` now embeds `frontend/dist/*` at compile time via
+  `include_dir!` + `include_str!` (the 0.8.1 hotfix); the e2e job
+  still built the binary without the prior `npm run build`, so
+  compilation failed on "No such file or directory".
+
 ## [0.8.1] - 2026-04-20
 
 Hotfix — web UI rendered as a blank white page on every

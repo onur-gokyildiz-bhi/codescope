@@ -142,3 +142,47 @@ pub(crate) fn split_full_flag(args: &[String]) -> (bool, Vec<String>) {
     }
     (full, out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(ss: &[&str]) -> Vec<String> {
+        ss.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn split_full_flag_detects_and_strips() {
+        let (full, rest) = split_full_flag(&v(&["status", "--full"]));
+        assert!(full);
+        assert_eq!(rest, v(&["status"]));
+    }
+
+    #[test]
+    fn split_full_flag_accepts_long_alias() {
+        let (full, rest) = split_full_flag(&v(&["build", "--codescope-full", "-p", "foo"]));
+        assert!(full);
+        assert_eq!(rest, v(&["build", "-p", "foo"]));
+    }
+
+    #[test]
+    fn split_full_flag_noop_without_flag() {
+        let (full, rest) = split_full_flag(&v(&["log", "--oneline"]));
+        assert!(!full);
+        assert_eq!(rest, v(&["log", "--oneline"]));
+    }
+
+    #[test]
+    fn keep_head_tail_short_returns_all() {
+        let lines = vec!["a", "b", "c"];
+        assert_eq!(keep_head_tail(&lines, 5, 5), v(&["a", "b", "c"]));
+    }
+
+    #[test]
+    fn keep_head_tail_long_collapses_middle() {
+        let lines: Vec<&str> = (0..100).map(|_| "x").collect();
+        let out = keep_head_tail(&lines, 3, 2);
+        assert_eq!(out.len(), 3 + 1 + 2);
+        assert!(out[3].contains("95 lines omitted"));
+    }
+}
