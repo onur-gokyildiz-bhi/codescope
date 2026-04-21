@@ -13,7 +13,7 @@ impl GraphRagServer {
     /// Consolidated refactor tool — rename planning, dead-code discovery, safe-delete check.
     #[tool(description = "Refactor ops (rename references, find unused, safe-delete check).")]
     async fn refactor(&self, Parameters(params): Parameters<RefactorParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("refactor").await {
             Ok(c) => c,
             Err(e) => return e,
         };

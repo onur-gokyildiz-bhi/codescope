@@ -100,7 +100,7 @@ impl GraphRagServer {
     )]
     #[tracing::instrument(skip_all, fields(action = %params.action))]
     async fn knowledge(&self, Parameters(params): Parameters<KnowledgeParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("knowledge").await {
             Ok(c) => c,
             Err(e) => return e,
         };

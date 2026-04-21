@@ -14,7 +14,7 @@ impl GraphRagServer {
         description = "Manage Architecture Decision Records. Actions: list, get, create, update."
     )]
     async fn manage_adr(&self, Parameters(params): Parameters<ManageAdrParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("manage_adr").await {
             Ok(c) => c,
             Err(e) => return e,
         };

@@ -15,7 +15,7 @@ impl GraphRagServer {
     /// Sync git commit history into the graph database for temporal analysis
     #[tool(description = "Sync git commits into graph. Enables hotspots and change coupling.")]
     async fn sync_git_history(&self, Parameters(params): Parameters<SyncHistoryParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("sync_git_history").await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -48,7 +48,7 @@ impl GraphRagServer {
         description = "Code health analysis (hotspots, churn, coupling, review_diff) from git + graph."
     )]
     async fn code_health(&self, Parameters(params): Parameters<CodeHealthParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("code_health").await {
             Ok(c) => c,
             Err(e) => return e,
         };

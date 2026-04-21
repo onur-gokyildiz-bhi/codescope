@@ -210,11 +210,23 @@ impl GraphRagServer {
     /// `{ok:false, error:{code, message, hint}}` and can act on
     /// `error.hint`.
     pub(crate) async fn ctx(&self) -> Result<ProjectCtx, String> {
+        self.ctx_named("").await
+    }
+
+    /// Same as [`ctx`] but attributes the call to a named tool for
+    /// the per-tool `codescope gain` breakdown. Pass the tool's
+    /// identifier (the `async fn` name from the `#[tool]` handler).
+    /// An empty name falls back to the generic counter.
+    pub(crate) async fn ctx_named(&self, tool_name: &str) -> Result<ProjectCtx, String> {
         // Every tool call reaches here on its first awaited step,
         // so instrumenting once here catches 99% of the surface
         // without touching 52 individual tool handlers. The bump
         // is a single relaxed atomic add — effectively free.
-        codescope_core::gain::record_call();
+        if tool_name.is_empty() {
+            codescope_core::gain::record_call();
+        } else {
+            codescope_core::gain::record_tool(tool_name);
+        }
         if let Some(ctx) = self.project.read().await.clone() {
             // Insight event — fire-and-forget, no await.
             codescope_core::insight::record_event(&ctx.repo_name);
@@ -264,11 +276,16 @@ impl GraphRagServer {
     /// Admin tools that MUST remain callable during indexing (e.g.
     /// `index_status`, `project`, `index_codebase`) should keep using
     /// plain `ctx()`.
+    #[allow(dead_code)]
     pub(crate) async fn gated_ctx(&self) -> Result<ProjectCtx, String> {
+        self.gated_ctx_named("").await
+    }
+
+    pub(crate) async fn gated_ctx_named(&self, tool_name: &str) -> Result<ProjectCtx, String> {
         if let Some(gate_response) = self.index_gate().await {
             return Err(gate_response);
         }
-        self.ctx().await
+        self.ctx_named(tool_name).await
     }
 
     /// Load conversation context + knowledge hot cache from DB and cache it.

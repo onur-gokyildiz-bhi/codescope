@@ -47,7 +47,7 @@ impl GraphRagServer {
 
 impl GraphRagServer {
     async fn skills_index(&self, path: String, clean: bool) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("skills").await {
             Ok(c) => c,
             Err(e) => return e,
         };

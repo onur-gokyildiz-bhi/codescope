@@ -17,7 +17,7 @@ impl GraphRagServer {
         description = "Fetch a URL or read a local file, extract text, store in indexed_content for BM25 retrieval."
     )]
     async fn fetch_and_index(&self, Parameters(params): Parameters<FetchAndIndexParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("fetch_and_index").await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -52,7 +52,7 @@ impl GraphRagServer {
         description = "Store a text blob in indexed_content. Pass title, body, and a stable source string for dedupe."
     )]
     async fn index_content(&self, Parameters(params): Parameters<IndexContentParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("index_content").await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -82,7 +82,7 @@ impl GraphRagServer {
         description = "BM25 search over indexed_content (web fetches, log dumps, doc snapshots). Returns snippet + source per hit."
     )]
     async fn search_indexed(&self, Parameters(params): Parameters<SearchIndexedParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("search_indexed").await {
             Ok(c) => c,
             Err(e) => return e,
         };

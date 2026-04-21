@@ -14,16 +14,27 @@ pub async fn run() -> Result<()> {
         return Ok(());
     };
     let calls = state.total_calls;
-    let estimated = calls * codescope_core::gain::TOKENS_PER_CALL_EST;
+
+    // Per-tool breakdown — each tool has its own token-savings
+    // estimate (impact_analysis ≈ 50 000, graph_stats ≈ 500). The
+    // unattributed fallback uses the generic TOKENS_PER_CALL_EST.
+    let attributed_calls: u64 = state.per_tool.values().sum();
+    let unattributed = calls.saturating_sub(attributed_calls);
+    let per_tool_saved: u64 = state
+        .per_tool
+        .iter()
+        .map(|(name, c)| c * codescope_core::gain::tool_savings_estimate(name))
+        .sum();
+    let unattributed_saved = unattributed * codescope_core::gain::TOKENS_PER_CALL_EST;
+    let estimated = per_tool_saved + unattributed_saved;
 
     println!();
     println!("  \x1b[1mcodescope gain\x1b[0m");
     println!("  ───────────────");
     println!("  Total tool calls:         {}", format_num(calls));
     println!(
-        "  Estimated tokens saved:   \x1b[32m~{}\x1b[0m  (≈ {} / call)",
+        "  Estimated tokens saved:   \x1b[32m~{}\x1b[0m",
         format_num(estimated),
-        codescope_core::gain::TOKENS_PER_CALL_EST
     );
     if let Some(first) = state.first_used.as_deref() {
         println!("  Active since:             {}", human_time(first));
@@ -31,13 +42,64 @@ pub async fn run() -> Result<()> {
     if let Some(last) = state.last_used.as_deref() {
         println!("  Last call:                {}", human_time(last));
     }
+
+    if !state.per_tool.is_empty() {
+        // Sort by savings contribution, descending — the top lines
+        // are where the value is coming from.
+        let mut rows: Vec<(&String, u64, u64, u64)> = state
+            .per_tool
+            .iter()
+            .map(|(name, count)| {
+                let per = codescope_core::gain::tool_savings_estimate(name);
+                (name, *count, per, count * per)
+            })
+            .collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.3));
+
+        println!();
+        println!("  \x1b[1mBy tool\x1b[0m");
+        println!(
+            "  \x1b[2m{:<24} {:>6} {:>8} {:>12}\x1b[0m",
+            "tool", "calls", "≈ /call", "total saved"
+        );
+        for (name, count, per, saved) in rows.iter().take(15) {
+            println!(
+                "  {:<24} {:>6} {:>8} {:>12}",
+                truncate(name, 24),
+                format_num(*count),
+                format_num(*per),
+                format_num(*saved)
+            );
+        }
+        if rows.len() > 15 {
+            println!("  \x1b[2m… {} more tools\x1b[0m", rows.len() - 15);
+        }
+        if unattributed > 0 {
+            println!(
+                "  \x1b[2m{:<24} {:>6} {:>8} {:>12}\x1b[0m",
+                "(legacy unattributed)",
+                format_num(unattributed),
+                format_num(codescope_core::gain::TOKENS_PER_CALL_EST),
+                format_num(unattributed_saved)
+            );
+        }
+    }
+
     println!();
+    println!("  \x1b[2mEstimate = Σ (per-tool calls × per-tool token estimate).\x1b[0m");
     println!(
-        "  \x1b[2mEstimate = total_calls × {}. See `docs/llms-full.txt` for the derivation.\x1b[0m",
-        codescope_core::gain::TOKENS_PER_CALL_EST
+        "  \x1b[2mPer-tool numbers come from `gain::tool_savings_estimate` — rough but directional.\x1b[0m"
     );
     println!();
     Ok(())
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max.saturating_sub(1)])
+    }
 }
 
 fn format_num(n: u64) -> String {

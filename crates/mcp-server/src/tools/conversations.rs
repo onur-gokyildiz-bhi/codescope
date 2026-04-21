@@ -44,7 +44,7 @@ impl GraphRagServer {
 
 impl GraphRagServer {
     async fn conversations_index(&self, project_dir_override: Option<String>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("conversations").await {
             Ok(c) => c,
             Err(e) => return e,
         };

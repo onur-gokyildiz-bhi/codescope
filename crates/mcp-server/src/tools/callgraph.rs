@@ -20,7 +20,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<ImpactAnalysisParams>,
     ) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("impact_analysis").await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -214,7 +214,7 @@ impl GraphRagServer {
     /// Show inheritance chain for a class/struct/trait/interface
     #[tool(description = "Type inheritance graph: parents, subtypes, interfaces, implementors.")]
     async fn type_hierarchy(&self, Parameters(params): Parameters<TypeHierarchyParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("type_hierarchy").await {
             Ok(c) => c,
             Err(e) => return e,
         };

@@ -172,7 +172,7 @@ impl GraphRagServer {
     /// Index or re-index the codebase into the graph database
     #[tool(description = "Index source files into the knowledge graph.")]
     async fn index_codebase(&self, Parameters(params): Parameters<IndexParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("index_codebase").await {
             Ok(c) => c,
             Err(e) => return e,
         };

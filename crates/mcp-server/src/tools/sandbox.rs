@@ -40,7 +40,7 @@ impl GraphRagServer {
         description = "Run a python / node / bash snippet in a subprocess. Returns {stdout, stderr, exit_code, timed_out}. Timeout 10s (max 60s), output capped 16KB/stream. Working dir defaults to project codebase."
     )]
     async fn sandbox_run(&self, Parameters(params): Parameters<SandboxRunParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("sandbox_run").await {
             Ok(c) => c,
             Err(e) => return e,
         };

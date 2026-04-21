@@ -12,7 +12,7 @@ impl GraphRagServer {
     /// Generate embeddings for all functions in the graph
     #[tool(description = "Generate vector embeddings for unembedded functions.")]
     async fn embed_functions(&self, Parameters(params): Parameters<EmbedParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("embed_functions").await {
             Ok(c) => c,
             Err(e) => return e,
         };
@@ -74,7 +74,7 @@ impl GraphRagServer {
         &self,
         Parameters(params): Parameters<SemanticSearchParams>,
     ) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("semantic_search").await {
             Ok(c) => c,
             Err(e) => return e,
         };

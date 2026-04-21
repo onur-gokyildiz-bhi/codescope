@@ -34,7 +34,7 @@ impl GraphRagServer {
     /// Pre-flight check before editing a file — validates against team patterns
     #[tool(description = "Check if edit aligns with team coding patterns.")]
     async fn edit_preflight(&self, Parameters(params): Parameters<EditPreflightParams>) -> String {
-        let ctx = match self.gated_ctx().await {
+        let ctx = match self.gated_ctx_named("edit_preflight").await {
             Ok(c) => c,
             Err(e) => return e,
         };

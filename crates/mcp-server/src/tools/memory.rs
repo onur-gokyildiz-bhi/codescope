@@ -14,7 +14,7 @@ impl GraphRagServer {
         description = "Memory management (save/search/pin decisions, problems, solutions across sessions)."
     )]
     async fn memory(&self, Parameters(params): Parameters<MemoryParams>) -> String {
-        let ctx = match self.ctx().await {
+        let ctx = match self.ctx_named("memory").await {
             Ok(c) => c,
             Err(e) => return e,
         };
