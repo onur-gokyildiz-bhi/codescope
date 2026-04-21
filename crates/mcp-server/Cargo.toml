@@ -42,6 +42,9 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # graph_query_tests.rs uses the in-memory SurrealDB engine for fast
 # isolated tests. Lives in dev-dependencies so production binaries

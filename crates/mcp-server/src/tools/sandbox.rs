@@ -102,6 +102,26 @@ impl GraphRagServer {
         cmd.arg(&tmp_path);
         cmd.current_dir(&cwd);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // kill_on_drop reaps the direct child when this future is
+        // dropped. Safety net in case we hit an early-return that
+        // skips the explicit kill path below.
+        cmd.kill_on_drop(true);
+        // Put the snippet in its own process group on Unix so we can
+        // signal the whole tree (child + any subprocesses it spawns)
+        // in one call on timeout. Without this, `child.start_kill()`
+        // hits only the direct child and any descendants become
+        // orphans reparented to init.
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                // setsid() fails only in the parent position or when
+                // already a session leader — neither happens right
+                // after fork, so ignore the return and carry on.
+                libc::setsid();
+                Ok(())
+            });
+        }
         // Don't leak any known credential env vars into the snippet.
         for var in [
             "AWS_SECRET_ACCESS_KEY",
@@ -133,44 +153,46 @@ impl GraphRagServer {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let timed_out_flag = tokio::sync::watch::channel(false);
-        let (timed_tx, timed_rx) = timed_out_flag;
+        // Capture the pid so we can signal the whole process group on
+        // Unix, or fall back to TerminateProcess on Windows. We
+        // deliberately DON'T move `child` into the timeout future —
+        // we need ownership out here to call kill() after the race
+        // is decided.
+        let child_pid = child.id();
+        let stdout_handle = tokio::spawn(read_capped(stdout));
+        let stderr_handle = tokio::spawn(read_capped(stderr));
 
-        let run = async {
-            let stdout_handle = tokio::spawn(read_capped(stdout));
-            let stderr_handle = tokio::spawn(read_capped(stderr));
-            let status = child.wait().await;
-            let so = stdout_handle
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .unwrap_or_default();
-            let se = stderr_handle
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .unwrap_or_default();
-            (status, so, se)
-        };
-
-        let (status, stdout_text, stderr_text, timed_out) =
-            match tokio::time::timeout(Duration::from_millis(timeout_ms), run).await {
-                Ok((status, so, se)) => (status.ok(), so, se, false),
+        let wait_fut = child.wait();
+        let (status, timed_out) =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), wait_fut).await {
+                Ok(res) => (res.ok(), false),
                 Err(_) => {
-                    let _ = timed_tx.send(true);
-                    // Best-effort kill on timeout. We already moved `child`
-                    // into the future — at this point it's dropped; the
-                    // OS reaps it. Worst case: process lives a few ms
-                    // longer until the tokio runtime GCs the handle.
-                    let _ = timed_rx; // silence unused
-                    (
-                        None,
-                        String::new(),
-                        "(timed out before any output was captured)".into(),
-                        true,
-                    )
+                    // Kill the whole process tree. On Unix we signal
+                    // the process group (setsid above made the child
+                    // a group leader); on Windows we fall back to a
+                    // direct kill via tokio's Child handle.
+                    kill_process_tree(child_pid, &mut child).await;
+                    (None, true)
                 }
             };
+
+        let stdout_text = stdout_handle
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or_default();
+        let stderr_text = {
+            let captured = stderr_handle
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or_default();
+            if timed_out && captured.is_empty() {
+                "(timed out before any output was captured)".into()
+            } else {
+                captured
+            }
+        };
 
         let _ = std::fs::remove_file(&tmp_path);
 
@@ -227,6 +249,40 @@ fn bash_cmd() -> String {
     // invoke `bash` and hope it's on PATH — if not, spawn fails
     // and we return a useful hint.
     "bash".to_string()
+}
+
+/// Kill the child and everything it spawned. On Unix, the child is
+/// its own process-group leader (setsid at pre_exec) so `kill(-pgid,
+/// SIGTERM)` followed by `SIGKILL` fans out to every descendant. On
+/// Windows we fall back to tokio's `start_kill()`, which only hits
+/// the direct child — descendants can leak there until we add a
+/// JobObject. `kill_on_drop(true)` on the command catches the
+/// happy-path cleanup.
+async fn kill_process_tree(pid: Option<u32>, child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = pid {
+            // The negative pid targets the whole process group.
+            let pgid = pid as i32;
+            unsafe {
+                libc::kill(-pgid, libc::SIGTERM);
+            }
+            // Grace period then SIGKILL anything still alive.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        } else {
+            let _ = child.start_kill();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid; // used only on Unix
+        let _ = child.start_kill();
+    }
+    // Reap whatever we just killed so the exit_code field has a value.
+    let _ = child.wait().await;
 }
 
 /// Map the `language` param to (interpreter, file_ext, extra_args).
