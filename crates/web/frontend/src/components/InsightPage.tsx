@@ -8,7 +8,7 @@
 
 import { createEffect, createResource, onCleanup, For, Show } from 'solid-js';
 import { BarChart3, Activity, Zap, Clock } from 'lucide-solid';
-import { api, type InsightResponse, type SessionRecap } from '../api';
+import { api, type InsightResponse, type SessionRecap, type GainPerTool } from '../api';
 
 export default function InsightPage() {
   const [data, { refetch }] = createResource<InsightResponse>(async () => {
@@ -59,7 +59,11 @@ export default function InsightPage() {
                 icon={Zap}
                 label="Tokens saved (est.)"
                 value={`~${formatNum(d().gain.tokens_saved_est)}`}
-                sub={`≈ ${d().gain.tokens_per_call_est} / call`}
+                sub={
+                  (d().gain.per_tool?.length ?? 0) > 0
+                    ? 'per-tool weighted, see table below'
+                    : `≈ ${d().gain.tokens_per_call_est} / call`
+                }
                 accent="green"
               />
               <HeadlineCard
@@ -69,6 +73,20 @@ export default function InsightPage() {
                 sub="distinct projects queried"
               />
             </div>
+
+            {/* Per-tool savings table — shows where the numbers
+                in "Tokens saved" are actually coming from. Only
+                renders once the backend has per_tool data (v0.8.4+). */}
+            <Show when={(d().gain.per_tool?.length ?? 0) > 0}>
+              <section class="insight-section">
+                <h3>Savings by tool</h3>
+                <PerToolTable
+                  rows={d().gain.per_tool ?? []}
+                  unattributedCalls={d().gain.unattributed_calls ?? 0}
+                  unattributedPerCall={d().gain.tokens_per_call_est}
+                />
+              </section>
+            </Show>
 
             {/* Per-repo bar chart */}
             <section class="insight-section">
@@ -188,6 +206,54 @@ function HeadlineCard(props: {
       </div>
       <div class="insight-card-value">{props.value}</div>
       <div class="insight-card-sub">{props.sub}</div>
+    </div>
+  );
+}
+
+function PerToolTable(props: {
+  rows: GainPerTool[];
+  unattributedCalls: number;
+  unattributedPerCall: number;
+}) {
+  const max = (): number =>
+    props.rows.reduce((m, r) => Math.max(m, r.total_saved), 1);
+  return (
+    <div class="insight-bars">
+      <For each={props.rows.slice(0, 20)}>
+        {(r) => {
+          const pct = () => Math.max(3, Math.round((r.total_saved / max()) * 100));
+          return (
+            <div class="insight-bar-row">
+              <div class="insight-bar-name" title={r.name}>
+                {r.name}
+              </div>
+              <div class="insight-bar-track">
+                <div class="insight-bar-fill" style={{ width: `${pct()}%` }} />
+              </div>
+              <div class="insight-bar-num">
+                {formatNum(r.total_saved)}
+                <span class="insight-muted">
+                  {' '}
+                  ({formatNum(r.calls)}×{formatNum(r.per_call)})
+                </span>
+              </div>
+            </div>
+          );
+        }}
+      </For>
+      <Show when={props.unattributedCalls > 0}>
+        <div class="insight-bar-row">
+          <div class="insight-bar-name insight-muted">(legacy unattributed)</div>
+          <div class="insight-bar-track" />
+          <div class="insight-bar-num insight-muted">
+            {formatNum(props.unattributedCalls * props.unattributedPerCall)}
+            <span class="insight-muted">
+              {' '}
+              ({formatNum(props.unattributedCalls)}×{formatNum(props.unattributedPerCall)})
+            </span>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }

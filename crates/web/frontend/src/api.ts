@@ -157,7 +157,16 @@ export type InsightResponse = {
     tokens_saved_est: number;
     first_used: string | null;
     last_used: string | null;
+    per_tool?: GainPerTool[];
+    unattributed_calls?: number;
   };
+};
+
+export type GainPerTool = {
+  name: string;
+  calls: number;
+  per_call: number;
+  total_saved: number;
 };
 
 export type DreamArcSummary = {

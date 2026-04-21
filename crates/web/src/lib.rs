@@ -495,14 +495,47 @@ async fn api_insight() -> impl IntoResponse {
     // Also include the gain-counter headline so the UI can show a
     // single "tokens saved" number without a second fetch.
     let gain = codescope_core::gain::load().unwrap_or_default();
+
+    // Per-tool rows: (name, calls, per-call-estimate, total-saved).
+    // Mirrors the CLI's `codescope gain` breakdown so the web UI
+    // can draw the same table.
+    let mut per_tool_rows: Vec<serde_json::Value> = gain
+        .per_tool
+        .iter()
+        .map(|(name, calls)| {
+            let per = codescope_core::gain::tool_savings_estimate(name);
+            serde_json::json!({
+                "name": name,
+                "calls": calls,
+                "per_call": per,
+                "total_saved": calls * per,
+            })
+        })
+        .collect();
+    per_tool_rows.sort_by_key(|r| {
+        std::cmp::Reverse(r.get("total_saved").and_then(|v| v.as_u64()).unwrap_or(0))
+    });
+
+    let attributed_calls: u64 = gain.per_tool.values().sum();
+    let unattributed = gain.total_calls.saturating_sub(attributed_calls);
+    let per_tool_saved: u64 = gain
+        .per_tool
+        .iter()
+        .map(|(n, c)| c * codescope_core::gain::tool_savings_estimate(n))
+        .sum();
+    let unattributed_saved = unattributed * codescope_core::gain::TOKENS_PER_CALL_EST;
+    let total_saved = per_tool_saved + unattributed_saved;
+
     axum::response::Json(serde_json::json!({
         "summary": summary,
         "gain": {
             "total_calls": gain.total_calls,
             "tokens_per_call_est": codescope_core::gain::TOKENS_PER_CALL_EST,
-            "tokens_saved_est": gain.total_calls * codescope_core::gain::TOKENS_PER_CALL_EST,
+            "tokens_saved_est": total_saved,
             "first_used": gain.first_used,
             "last_used": gain.last_used,
+            "per_tool": per_tool_rows,
+            "unattributed_calls": unattributed,
         }
     }))
     .into_response()
