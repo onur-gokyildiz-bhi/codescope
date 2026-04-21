@@ -111,9 +111,11 @@ impl GraphRagServer {
         // in one call on timeout. Without this, `child.start_kill()`
         // hits only the direct child and any descendants become
         // orphans reparented to init.
+        // tokio::process::Command exposes `pre_exec` as an inherent
+        // method on Unix targets, no CommandExt import needed
+        // (clippy flags it as unused on Linux).
         #[cfg(unix)]
         unsafe {
-            use std::os::unix::process::CommandExt;
             cmd.pre_exec(|| {
                 // setsid() fails only in the parent position or when
                 // already a session leader — neither happens right

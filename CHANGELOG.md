@@ -4,6 +4,23 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-04-22
+
+CI hotfix — 0.8.3 / 0.8.4 / 0.8.5 all had their release
+binaries blocked by a Linux-only clippy error. No user-visible
+changes beyond the ones those tags already announced.
+
+### Fixed
+
+- **Linux clippy: unused `CommandExt` import in sandbox.rs.**
+  `tokio::process::Command::pre_exec` is an inherent method on
+  Unix; the extra `use std::os::unix::process::CommandExt;`
+  imported a trait nothing called. Windows builds didn't see it
+  because the `#[cfg(unix)]` block was dead code there. CI's
+  `-D warnings` killed the release build on every tag since
+  0.8.3. Removed the import; local Windows + CI Linux now
+  agree.
+
 ## [0.8.5] - 2026-04-22
 
 UI follow-up to 0.8.4 — the per-tool savings breakdown now
