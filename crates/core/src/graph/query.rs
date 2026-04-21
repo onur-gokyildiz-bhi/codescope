@@ -357,11 +357,15 @@ impl GraphQuery {
         // Get neighborhood based on entity type
         let lim = default_limit();
         if found_type == "function" {
+            // GROUP BY dedups duplicate call edges (see `find_callers`
+            // note for rationale — legacy DBs and shared-name calls).
             let mut resp2 = self.db.query(format!(
                 "SELECT out.name AS name, out.file_path AS file_path, out.signature AS signature \
-                     FROM calls WHERE in.name = $name AND out.name != NONE LIMIT {lim}; \
+                     FROM calls WHERE in.name = $name AND out.name != NONE \
+                     GROUP BY name, file_path, signature LIMIT {lim}; \
                  SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature \
-                     FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}; \
+                     FROM calls WHERE out.name = $name AND in.name != NONE \
+                     GROUP BY name, file_path, signature LIMIT {lim}; \
                  SELECT name, start_line, signature FROM `function` \
                      WHERE file_path IN (SELECT VALUE file_path FROM `function` WHERE name = $name LIMIT 1)[0] \
                      AND name != $name \
@@ -1061,10 +1065,13 @@ impl GraphQuery {
         let n = name.to_string();
 
         let lim = default_limit();
-        // Multi-direction backlink search
+        // Multi-direction backlink search. GROUP BY on edge-sourced
+        // sections (calls, links_to) collapses duplicate rows that
+        // legacy DBs accumulated before the v0.8.3 edge-dedup fix.
         let mut response = self.db.query(format!(
             "SELECT in.name AS name, in.file_path AS file_path, in.signature AS signature, 'caller' AS link_type \
-                 FROM calls WHERE out.name = $name AND in.name != NONE LIMIT {lim}; \
+                 FROM calls WHERE out.name = $name AND in.name != NONE \
+                 GROUP BY name, file_path, signature, link_type LIMIT {lim}; \
              SELECT name, file_path, 'importer' AS link_type \
                  FROM import_decl WHERE string::contains(name, $name) LIMIT {lim}; \
              SELECT path AS name, language, 'container' AS link_type \
@@ -1076,7 +1083,8 @@ impl GraphQuery {
                  FROM package WHERE kind = 'Dependency' AND name = $name LIMIT {lim}; \
              SELECT in.name AS name, in.file_path AS file_path, in.description AS description, \
                     'wikilink' AS link_type, context \
-                 FROM links_to WHERE out.name = $name LIMIT {lim};"
+                 FROM links_to WHERE out.name = $name \
+                 GROUP BY name, file_path, description, link_type, context LIMIT {lim};"
         )).bind(("name", n)).await?;
 
         let callers: Vec<serde_json::Value> = response.take(0).unwrap_or_default();

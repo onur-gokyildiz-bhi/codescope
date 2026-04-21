@@ -178,7 +178,9 @@ impl GraphRagServer {
                     let classes: Vec<serde_json::Value> = r.take(0).unwrap_or_default();
                     for cls in &classes {
                         let cls_name = cls.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let impl_q = "SELECT in.name AS name, in.file_path AS file_path FROM implements WHERE out.name = $name";
+                        // GROUP BY dedups duplicate `implements` edges on
+                        // legacy DBs (see find_callers fix rationale).
+                        let impl_q = "SELECT in.name AS name, in.file_path AS file_path FROM implements WHERE out.name = $name GROUP BY name, file_path";
                         if let Ok(mut ir) = ctx
                             .db
                             .query(impl_q)
