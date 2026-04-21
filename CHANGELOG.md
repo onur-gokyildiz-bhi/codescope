@@ -4,6 +4,62 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-04-21
+
+Bug-fix + hardening pass. `find_callers` duplicate rows were the
+user-visible report; tracking them down surfaced a second bug
+in the orphan resolver that had been silently eating ~97% of
+cross-file call edges.
+
+### Fixed
+
+- **`find_callers` returned the same caller N times.** Two
+  root causes:
+  1. `delete_file_entities` and `clear_repo` dropped entity
+     rows but left their edges. SurrealDB `TYPE RELATION`
+     edges don't cascade on entity delete, so re-indexing
+     a repo four times left four copies of every `calls`
+     edge. Both functions now delete edges before entities,
+     keyed on `in.file_path` / `out.file_path` (file scope)
+     or `in.repo` / `out.repo` (repo scope). Verified
+     empirically: `default_limit` edge count 60 → drops
+     cleanly on `--clean` re-index.
+  2. `resolve_call_targets` used `WHERE out.name IS NULL`
+     to find dangling `calls.out` references. SurrealDB
+     3.0.5 treats a missing record-link dereference as
+     `NONE`, not `NULL` — so the predicate matched nothing
+     and almost no cross-file calls got resolved. Same
+     bug for the `meta::tb(out)` qualifier. Flipped to
+     `IS NONE`. Verified: 0 orphans matched pre-fix → 21,023
+     matched on this repo post-fix.
+- **Defensive `GROUP BY` on `find_callers` / `find_callees`
+  queries.** Collapses duplicate rows on legacy DBs indexed
+  before this release, so the fix takes effect without a
+  required `codescope repair`.
+
+### Added / Hardened
+
+- **`sandbox_run` kills the whole process tree on timeout.**
+  Previous implementation moved the child into the timeout
+  future and relied on drop reaping it. That only killed the
+  direct child — anything the snippet spawned (pip shelling
+  to compilers, node forking workers, bash pipelines) got
+  reparented to `init` and kept running past timeout. Now
+  the Unix path `setsid()`s the child and signals the group
+  (SIGTERM → 200 ms grace → SIGKILL); Windows still hits only
+  the direct child via `start_kill()` until JobObject
+  support lands. `kill_on_drop(true)` as the safety net on
+  both platforms.
+- **`fetch_and_index` prefers `<article>` / `<main>` /
+  `.content` before handing the body to `html2text`.** Docs
+  and blogs almost always wrap real content in one of those;
+  feeding the whole document to the extractor pulled in
+  nav / footer / cookie-banner prose that diluted BM25
+  scoring. Falls back to the full body when none match
+  (SPAs, pages without semantic tags). String-based scan —
+  a DOM parse would pull `html5ever` onto the hot path for
+  a best-effort heuristic.
+
 ## [0.8.2] - 2026-04-21
 
 Absorb context-mode + RTK into the codescope binary. You no longer
