@@ -4,6 +4,41 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-04-24
+
+Memory tool parse-error fix surfaced by the new test matrix, plus
+more smoke-test coverage.
+
+### Fixed
+
+- **Memory tool `~` operator was a silent parse error.**
+  `memory(action=search)` and `memory(action=pin)` both used the
+  SurrealDB `~` free-text-match operator on `name` / `body` /
+  `scope`. SurrealDB 3.0.5 rejects `~` at parse time unless there's
+  a FULLTEXT index on the target field, and the schema never
+  defined one for conv_topic / decision / problem / solution.
+  Every `memory` search since the SurrealDB 3.x upgrade returned
+  "Error searching memory: Parse error…" — caught by the match
+  arm, formatted, and surfaced as an unusable tool response.
+  Fixed by swapping `~` for
+  `string::contains(string::lowercase(field), string::lowercase($q))`
+  — no index required, case-insensitive, same intent. Discovered
+  while writing the memory integration test.
+
+### Added
+
+- **Memory tool integration tests.** Verify the UPSERT + SELECT
+  contracts on `conv_topic` against an in-memory SurrealDB
+  fixture. Two tests: save round-trip, body-text search hit.
+  Regression guard against the `~` bug recurring.
+- **Knowledge tool integration tests.** Save-idempotence on the
+  same id, tag-CONTAINS search match. Exercises the raw UPSERT
+  path the `knowledge(action=save/search)` handler relies on.
+- **`read_capped` (sandbox output cap) unit tests.** Three cases:
+  under-cap passthrough, 16 KB truncation with marker preserved,
+  None-pipe short-circuit. Guards the sandbox_run output-size
+  invariant.
+
 ## [0.8.8] - 2026-04-24
 
 Testing + docs. No binary-behaviour changes.

@@ -324,6 +324,7 @@ fn resolve_language(lang: &str) -> Option<(String, &'static str, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn language_aliases_accepted() {
@@ -347,5 +348,47 @@ mod tests {
         assert_eq!(resolve_language("python").unwrap().1, "py");
         assert_eq!(resolve_language("node").unwrap().1, "js");
         assert_eq!(resolve_language("bash").unwrap().1, "sh");
+    }
+
+    // ── read_capped — output-cap enforcement ────────────────────
+    // Exercises the cap logic end-to-end with a tokio pipe so the
+    // test doubles as a regression check against accidentally
+    // breaking the truncation marker or loop exit.
+
+    async fn run_read_capped(bytes: Vec<u8>) -> String {
+        let (tx, rx) = tokio::io::duplex(8192);
+        let mut writer = tx;
+        tokio::spawn(async move {
+            let _ = writer.write_all(&bytes).await;
+            // Drop writer to close the pipe so read_capped's loop
+            // terminates naturally on EOF instead of hanging.
+        });
+        read_capped(Some(rx))
+            .await
+            .expect("read_capped should not fail on valid pipe")
+    }
+
+    #[tokio::test]
+    async fn read_capped_returns_whole_input_under_cap() {
+        let out = run_read_capped(b"hello world\n".to_vec()).await;
+        assert_eq!(out, "hello world\n");
+    }
+
+    #[tokio::test]
+    async fn read_capped_truncates_at_16kb() {
+        // Write 32 KB of a's — well over the MAX_OUTPUT_BYTES cap.
+        let big = vec![b'a'; 32 * 1024];
+        let out = run_read_capped(big).await;
+        assert!(out.contains("(truncated at 16 KB)"));
+        // Leading bytes + 25-byte marker; total should be ≤ 17 KB.
+        assert!(out.len() <= 17 * 1024, "truncated len = {}", out.len());
+        assert!(out.starts_with("aaaa"), "leading bytes should be preserved");
+    }
+
+    #[tokio::test]
+    async fn read_capped_handles_none_pipe() {
+        // Explicit None — handler path when `child.stdout` is missing.
+        let out: String = read_capped::<tokio::io::DuplexStream>(None).await.unwrap();
+        assert_eq!(out, "");
     }
 }

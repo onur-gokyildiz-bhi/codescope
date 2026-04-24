@@ -63,21 +63,33 @@ impl GraphRagServer {
                 let limit = params.limit.unwrap_or(20) as i64;
                 let safe = query.replace('\'', "");
 
+                // SurrealDB 3.0.5 doesn't accept `~` as a free-text
+                // match operator without a FULLTEXT index on the
+                // target field; the previous implementation parsed
+                // as a syntax error and every memory search returned
+                // "Error searching memory: parse error" silently
+                // (caught + formatted, but unusable). Use
+                // case-insensitive `string::contains` instead — same
+                // intent, indexed-or-linear-scan depending on dataset
+                // size, and actually runs.
                 let scope_clause = if params.scope.is_some() {
-                    " AND scope ~ $scope"
+                    " AND string::contains(string::lowercase(scope), string::lowercase($scope))"
                 } else {
                     ""
                 };
+                let body_match =
+                    "(string::contains(string::lowercase(name), string::lowercase($search)) \
+                     OR string::contains(string::lowercase(body), string::lowercase($search)))";
 
                 let q = format!(
                     "SELECT name, body, kind, timestamp FROM conv_topic \
-                     WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+                     WHERE repo = $repo AND {body_match}{scope} LIMIT $lim; \
                      SELECT name, body, 'decision' AS kind, timestamp FROM decision \
-                     WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+                     WHERE repo = $repo AND {body_match}{scope} LIMIT $lim; \
                      SELECT name, body, 'problem' AS kind, timestamp FROM problem \
-                     WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim; \
+                     WHERE repo = $repo AND {body_match}{scope} LIMIT $lim; \
                      SELECT name, body, 'solution' AS kind, timestamp FROM solution \
-                     WHERE repo = $repo AND (name ~ $search OR body ~ $search){scope} LIMIT $lim",
+                     WHERE repo = $repo AND {body_match}{scope} LIMIT $lim",
                     scope = scope_clause,
                 );
 
@@ -144,9 +156,18 @@ impl GraphRagServer {
                 };
                 let tier = params.tier.unwrap_or(2).min(2) as i64;
 
-                let q = "UPDATE decision SET tier = $tier WHERE name ~ $name AND repo = $repo; \
-                         UPDATE problem SET tier = $tier WHERE name ~ $name AND repo = $repo; \
-                         UPDATE solution SET tier = $tier WHERE name ~ $name AND repo = $repo;";
+                // Same `~` parse-error fix as search — pin used to
+                // silently fail on every invocation because the
+                // operator is invalid under SurrealDB 3.0.5.
+                let q = "UPDATE decision SET tier = $tier WHERE \
+                           string::contains(string::lowercase(name), string::lowercase($name)) \
+                           AND repo = $repo; \
+                         UPDATE problem SET tier = $tier WHERE \
+                           string::contains(string::lowercase(name), string::lowercase($name)) \
+                           AND repo = $repo; \
+                         UPDATE solution SET tier = $tier WHERE \
+                           string::contains(string::lowercase(name), string::lowercase($name)) \
+                           AND repo = $repo;";
 
                 match ctx
                     .db

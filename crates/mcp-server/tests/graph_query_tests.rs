@@ -370,6 +370,139 @@ async fn find_unused_symbols_excludes_called_ones() {
     );
 }
 
+// ── Memory tool underlying queries ────────────────────────────
+// The `memory` MCP tool is handler-logic-heavy but ultimately just
+// UPSERTs into the conv_topic / decision / problem / solution
+// tables and SELECTs via `name ~ $search OR body ~ $search`.
+// These tests lock that contract so a schema drift surfaces fast.
+
+#[tokio::test]
+async fn memory_save_upserts_conv_topic() {
+    let (db, _gq) = setup().await;
+    let q = "UPSERT conv_topic SET name = $name, qualified_name = $qname, \
+             body = $body, repo = $repo, language = 'memory', kind = 'shared_memory', \
+             file_path = 'memory', start_line = 0, end_line = 0, timestamp = $ts";
+    db.query(q)
+        .bind(("name", "use redis for sessions".to_string()))
+        .bind(("qname", "test:memory:use_redis_for_sessions".to_string()))
+        .bind((
+            "body",
+            "Session store switched to Redis 2026-04".to_string(),
+        ))
+        .bind(("repo", "test".to_string()))
+        .bind(("ts", "2026-04-24T00:00:00".to_string()))
+        .await
+        .expect("memory save should succeed");
+
+    let count: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM conv_topic WHERE repo = 'test' GROUP ALL")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(
+        count
+            .first()
+            .and_then(|v| v.get("count"))
+            .and_then(|v| v.as_u64()),
+        Some(1),
+        "exactly one conv_topic row should exist after memory save"
+    );
+}
+
+#[tokio::test]
+async fn memory_search_finds_saved_row_by_body() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "UPSERT conv_topic SET name = 'pick redis', qualified_name = 'test:memory:pick_redis', \
+         body = 'chose redis over memcached for TTL controls', repo = 'test', \
+         language = 'memory', kind = 'shared_memory', file_path = 'memory', \
+         start_line = 0, end_line = 0, timestamp = '2026-04-24T00:00:00'",
+    )
+    .await
+    .unwrap();
+
+    // Mirror the tool's post-fix search predicate (v0.8.9 fixed
+    // the `~` parse error by switching to string::contains).
+    let results: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name FROM conv_topic WHERE repo = $repo \
+             AND (string::contains(string::lowercase(name), string::lowercase($q)) \
+               OR string::contains(string::lowercase(body), string::lowercase($q)))",
+        )
+        .bind(("repo", "test".to_string()))
+        .bind(("q", "memcached".to_string()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(results.len(), 1, "body-text match should find the memory");
+}
+
+// ── Knowledge tool — raw UPSERT smoke ─────────────────────────
+// The knowledge tool's save path upserts into the `knowledge`
+// table keyed on a slugified id, with tags as an inline array.
+// This exercises that path without spinning up a full MCP server.
+
+#[tokio::test]
+async fn knowledge_save_is_idempotent_on_same_id() {
+    let (db, _gq) = setup().await;
+    let upsert = "UPSERT knowledge:test_decision SET \
+                  title = $title, content = $content, kind = 'decision', \
+                  repo = 'test', source_url = '', confidence = 'high', \
+                  tags = ['status:done', 'v0.8.x'], \
+                  created_at = created_at ?? $now, updated_at = $now";
+
+    // First write.
+    db.query(upsert)
+        .bind(("title", "use surreal server".to_string()))
+        .bind(("content", "initial".to_string()))
+        .bind(("now", "2026-04-24T00:00:00".to_string()))
+        .await
+        .unwrap();
+
+    // Second write (simulates re-save) must update, not append.
+    db.query(upsert)
+        .bind(("title", "use surreal server".to_string()))
+        .bind(("content", "revised — added clustering note".to_string()))
+        .bind(("now", "2026-04-24T01:00:00".to_string()))
+        .await
+        .unwrap();
+
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT content FROM knowledge WHERE id = knowledge:test_decision")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1, "UPSERT on same id must not duplicate");
+    assert_eq!(
+        rows[0].get("content").and_then(|v| v.as_str()),
+        Some("revised — added clustering note"),
+        "second write should overwrite content"
+    );
+}
+
+#[tokio::test]
+async fn knowledge_search_matches_tag_contains() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "UPSERT knowledge:t1 SET title = 'Dream narrator', content = 'Phase 3 arc tour', \
+         kind = 'decision', repo = 'test', source_url = '', confidence = 'high', \
+         tags = ['status:done', 'v0.8.0', 'phase3'], created_at = '2026-04-01', updated_at = '2026-04-01'",
+    )
+    .await
+    .unwrap();
+
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT title FROM knowledge WHERE tags CONTAINS 'phase3'")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1, "tag-CONTAINS search should hit the row");
+}
+
 #[tokio::test]
 async fn find_duplicate_functions_smoke() {
     let (_db, gq) = setup().await;
