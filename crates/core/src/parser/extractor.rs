@@ -136,6 +136,40 @@ impl EntityExtractor {
                 }
             }
 
+            // JS / TS / TSX — `const X = () => {...}` and
+            // `const X = function(){...}`. Tree-sitter parses these
+            // as `variable_declarator` with an arrow_function /
+            // function_expression child; the name lives on the
+            // declarator's `name` field, not on the function node.
+            // Without this case, React components and most hooks
+            // (which use the arrow-const style) never surface in
+            // the graph.
+            "variable_declarator" => {
+                if let Some(entity) =
+                    self.extract_arrow_function(node, source, parent_qualified_name)?
+                {
+                    let qname = entity.qualified_name.clone();
+                    let file_qname = format!("{}:{}", self.repo, self.file_path);
+                    relations.push(CodeRelation {
+                        kind: RelationKind::Contains,
+                        from_entity: parent_qualified_name.unwrap_or(&file_qname).to_string(),
+                        to_entity: qname.clone(),
+                        from_table: if parent_qualified_name.is_some() {
+                            "class".to_string()
+                        } else {
+                            "file".to_string()
+                        },
+                        to_table: "function".to_string(),
+                        metadata: None,
+                    });
+                    self.extract_calls(node, source, &qname, relations, entities);
+                    entities.push(entity);
+                    // Don't walk children — the arrow body is part
+                    // of the entity and calls have been recorded.
+                    return Ok(());
+                }
+            }
+
             // Classes / Structs / Interfaces
             "class_declaration"
             | "class_definition"
@@ -281,6 +315,67 @@ impl EntityExtractor {
             body_hash: Some(body_hash),
             language: self.language.clone(),
             cuda_qualifier,
+        }))
+    }
+
+    /// Extract a JS/TS arrow-function-or-function-expression that's
+    /// bound to a `const` / `let` identifier. Returns `None` if the
+    /// declarator's value isn't a function-shaped node, so the
+    /// walker keeps descending for non-function declarations
+    /// (type aliases, simple constants, etc.).
+    fn extract_arrow_function(
+        &self,
+        node: Node,
+        source: &str,
+        parent: Option<&str>,
+    ) -> Result<Option<CodeEntity>> {
+        // Declarator must have a `value` child that is an arrow or
+        // classic function expression. Skip anything else — we'd
+        // otherwise classify every `const x = 42` as a function.
+        let value_node = match node.child_by_field_name("value") {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let value_kind = value_node.kind();
+        if !matches!(value_kind, "arrow_function" | "function_expression") {
+            return Ok(None);
+        }
+
+        let name = match self.find_child_text(node, "name", source) {
+            Some(n) => n,
+            None => return Ok(None),
+        };
+
+        let qualified_name = match parent {
+            Some(p) => format!("{}::{}", p, name),
+            None => format!("{}:{}:{}", self.repo, self.file_path, name),
+        };
+
+        let body_text = value_node.utf8_text(source.as_bytes()).unwrap_or("");
+        let body_hash = hash_content(body_text);
+        let signature = self.build_function_signature(value_node, source, &name);
+
+        let kind = if parent.is_some() {
+            EntityKind::Method
+        } else {
+            EntityKind::Function
+        };
+
+        Ok(Some(CodeEntity {
+            kind,
+            name,
+            qualified_name,
+            file_path: self.file_path.clone(),
+            repo: self.repo.clone(),
+            start_line: node.start_position().row as u32 + 1,
+            end_line: node.end_position().row as u32 + 1,
+            start_col: node.start_position().column as u32,
+            end_col: node.end_position().column as u32,
+            signature: Some(signature),
+            body: Some(body_text.to_string()),
+            body_hash: Some(body_hash),
+            language: self.language.clone(),
+            cuda_qualifier: None,
         }))
     }
 
