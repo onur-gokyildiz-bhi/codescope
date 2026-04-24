@@ -4,6 +4,50 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-04-24
+
+Test coverage pushed from 36 → 52 across the remaining MCP tools,
+surfacing another production bug.
+
+### Fixed
+
+- **`embed_functions` batched UPDATE was a silent parse error.**
+  `type::thing('function', $item.id)` was dropped in SurrealDB
+  3.0.5 in favour of `type::record(thing)`. Every embedding
+  batch has been hitting a parse error, getting caught by the
+  tool's warn-and-continue arm, and never landing on the graph.
+  Noticed while writing the `embed_functions` contract test
+  (the third silent bug the test matrix has caught this week).
+  Swapped for `type::record('function:' + $item.id)`; same for
+  the binary-embedding backfill path.
+
+### Added
+
+- **16 new integration tests** covering the remaining MCP tool
+  categories. Written by four parallel research agents that
+  extracted the actual SurrealQL from each tool, handed me
+  Rust test blocks, and I merged + compiled + fixed three
+  SurrealDB-3.0.5 syntax drifts.
+  - **analytics**: `community_detection` (clusters + central),
+    `api_changelog` (ordering + empty-repo), `suggest_structure`
+    entity count probe
+  - **refactor**: `rename` via `find_all_references` surfaces
+    definition + call_site; `find_unused` includes orphans,
+    excludes called fns
+  - **skills**: `traverse_skill_graph` hits seeded root,
+    errors on missing root; `index` clean query wipes tables
+  - **temporal**: `sync_git_history` commit UPSERT idempotency;
+    `code_health` hotspots risk-score aggregation shape
+  - **embeddings**: `semantic_search` cosine SELECT runs on a
+    seeded embedding; `embed_functions` batched FOR UPDATE
+    (after fixing the `type::record` drift)
+  - **conversations**: body-match search across tables;
+    timeline CONTAINS with inlined literal
+- **SKIP comments** call out what can't be tested at the
+  SurrealQL layer (filesystem-bound: `export_obsidian`,
+  `skills(generate)`, `conversations(index)`, git-on-disk
+  paths of `code_health`, provider-bound embeddings).
+
 ## [0.8.10] - 2026-04-24
 
 Test-only release — 6 new integration tests covering ADR,

@@ -736,3 +736,509 @@ async fn explore_function_returns_deduped_neighborhood() {
         "main's calls_to should dedupe to 2 unique: {callees:?}"
     );
 }
+
+// ── Analytics tools ────────────────────────────────────────────
+// community_detection / api_changelog / suggest_structure:
+// mirror the raw SurrealQL each tool runs against the same
+// fixture. Asserts row shape + ordering, not formatting.
+// export_obsidian is filesystem-bound — skipped.
+
+#[tokio::test]
+async fn community_detection_clusters_ranks_by_total_edges() {
+    let (db, _gq) = setup().await;
+    let q = "SELECT file_path, count(->calls) AS out_calls, count(<-calls) AS in_calls, \
+             (count(->calls) + count(<-calls)) AS total_edges \
+             FROM `function` WHERE file_path != NONE AND repo = $repo \
+             GROUP BY file_path ORDER BY total_edges DESC LIMIT $lim";
+    let rows: Vec<serde_json::Value> = db
+        .query(q)
+        .bind(("lim", 20i64))
+        .bind(("repo", "test".to_string()))
+        .await
+        .expect("clusters query should run")
+        .take(0)
+        .unwrap_or_default();
+    assert!(
+        !rows.is_empty(),
+        "fixture has call edges, expected clusters"
+    );
+    let top_file = rows[0]
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let top_total = rows[0]
+        .get("total_edges")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(top_total > 0, "top cluster must have non-zero total_edges");
+    assert!(
+        top_file == "src/parser.rs" || top_file == "src/main.rs",
+        "unexpected top cluster file: {top_file}"
+    );
+}
+
+#[tokio::test]
+async fn community_detection_central_orders_by_in_degree() {
+    let (db, _gq) = setup().await;
+    let q = "SELECT name, file_path, count(<-calls) AS in_degree \
+             FROM `function` WHERE repo = $repo ORDER BY in_degree DESC LIMIT $lim";
+    let rows: Vec<serde_json::Value> = db
+        .query(q)
+        .bind(("lim", 20i64))
+        .bind(("repo", "test".to_string()))
+        .await
+        .expect("central query should run")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 4, "all four fixture fns should appear");
+    let first = rows[0]
+        .get("in_degree")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let last = rows[rows.len() - 1]
+        .get("in_degree")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(
+        first >= last,
+        "ORDER BY in_degree DESC violated: {first} < {last}"
+    );
+    assert_eq!(
+        rows[rows.len() - 1].get("name").and_then(|v| v.as_str()),
+        Some("main"),
+        "main has in_degree 0, should be at the tail"
+    );
+}
+
+#[tokio::test]
+async fn api_changelog_query_orders_by_file_then_line() {
+    let (db, _gq) = setup().await;
+    let q = "SELECT name, file_path, start_line, end_line, signature \
+             FROM `function` WHERE repo = $repo \
+             ORDER BY file_path, start_line LIMIT 200";
+    let rows: Vec<serde_json::Value> = db
+        .query(q)
+        .bind(("repo", "test".to_string()))
+        .await
+        .expect("api_changelog fn query should run")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 4);
+    let files: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| r.get("file_path").and_then(|v| v.as_str()))
+        .collect();
+    let mut sorted = files.clone();
+    sorted.sort();
+    assert_eq!(files, sorted, "rows must be sorted by file_path");
+}
+
+#[tokio::test]
+async fn api_changelog_empty_on_unknown_repo() {
+    let (db, _gq) = setup().await;
+    // SurrealDB 3.0.5 requires ORDER BY idioms to be in the
+    // projection — matches what api_changelog actually selects.
+    let rows: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, file_path, start_line FROM `function` WHERE repo = $repo \
+             ORDER BY file_path, start_line LIMIT 200",
+        )
+        .bind(("repo", "does-not-exist".to_string()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert!(rows.is_empty());
+}
+
+#[tokio::test]
+async fn suggest_structure_entity_count_sees_indexed_repo() {
+    let (db, _gq) = setup().await;
+    // SurrealDB 3.0.5 doesn't allow bare SELECT without FROM.
+    // Split into two concrete GROUP ALL probes — same signal.
+    let fn_rows: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM `function` WHERE repo = $repo GROUP ALL")
+        .bind(("repo", "test".to_string()))
+        .await
+        .expect("fn count probe")
+        .take(0)
+        .unwrap_or_default();
+    let cls_rows: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM class WHERE repo = $repo GROUP ALL")
+        .bind(("repo", "test".to_string()))
+        .await
+        .expect("cls count probe")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(
+        fn_rows
+            .first()
+            .and_then(|r| r.get("count"))
+            .and_then(|v| v.as_u64()),
+        Some(4)
+    );
+    assert_eq!(
+        cls_rows
+            .first()
+            .and_then(|r| r.get("count"))
+            .and_then(|v| v.as_u64()),
+        Some(2)
+    );
+}
+
+// SKIP: export_obsidian: filesystem-bound — DB reads are plain
+// `SELECT ... WHERE repo = $repo` shapes already covered above.
+
+// ── Refactor + skills ──────────────────────────────────────────
+
+#[tokio::test]
+async fn refactor_rename_surfaces_caller_as_reference() {
+    let (_db, gq) = setup().await;
+    let result = gq.find_all_references("parse_file").await.unwrap();
+    let total = result
+        .get("total_references")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert!(total >= 2, "definition + call_site expected, got {total}");
+    let refs = result
+        .get("references")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let types: Vec<&str> = refs
+        .iter()
+        .filter_map(|r| r.get("ref_type").and_then(|v| v.as_str()))
+        .collect();
+    assert!(types.contains(&"definition"));
+    assert!(types.contains(&"call_site"));
+}
+
+#[tokio::test]
+async fn refactor_find_unused_includes_orphan_function() {
+    let (db, gq) = setup().await;
+    let builder = GraphBuilder::new(db.clone());
+    builder
+        .insert_entities(&[make_fn("lonely_helper", "src/dead.rs")])
+        .await
+        .unwrap();
+    let unused = gq.find_unused_symbols(0, "test").await.unwrap();
+    let names: Vec<String> = unused
+        .iter()
+        .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    assert!(
+        names.contains(&"lonely_helper".to_string()),
+        "orphan fn should be flagged unused; got {names:?}"
+    );
+    assert!(
+        !names.contains(&"write_output".to_string()),
+        "write_output is called by main — must not appear"
+    );
+}
+
+#[tokio::test]
+async fn skills_index_clean_wipes_skill_and_links_to() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "CREATE skill SET name = 'rust', qualified_name = 'test:skill:rust', \
+         kind = 'SkillNode', file_path = 'rust.md', repo = 'test', \
+         language = 'markdown', start_line = 1, end_line = 10, \
+         description = 'systems lang', node_type = 'skill'",
+    )
+    .await
+    .unwrap();
+    db.query("DELETE FROM skill; DELETE FROM links_to;")
+        .await
+        .expect("skills clean should succeed");
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM skill GROUP ALL")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert!(rows.is_empty() || rows[0].get("count").and_then(|v| v.as_u64()) == Some(0));
+}
+
+#[tokio::test]
+async fn skills_traverse_returns_error_for_missing_skill() {
+    let (_db, gq) = setup().await;
+    let result = gq
+        .traverse_skill_graph("nonexistent_skill", 1, 2)
+        .await
+        .expect("traverse should complete even for missing root");
+    assert!(
+        result.get("error").is_some(),
+        "missing skill must yield error key, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn skills_traverse_finds_seeded_skill_node() {
+    let (db, gq) = setup().await;
+    db.query(
+        "CREATE skill SET name = 'rust', qualified_name = 'test:skill:rust', \
+         kind = 'SkillNode', file_path = 'rust.md', repo = 'test', \
+         language = 'markdown', start_line = 1, end_line = 10, \
+         description = 'systems lang', node_type = 'skill'",
+    )
+    .await
+    .unwrap();
+    let result = gq.traverse_skill_graph("rust", 1, 2).await.unwrap();
+    assert!(result.get("error").is_none(), "root should be found");
+    let sname = result
+        .get("skill")
+        .and_then(|s| s.get("name"))
+        .and_then(|v| v.as_str());
+    assert_eq!(sname, Some("rust"));
+    assert!(result.get("links_to").is_some());
+    assert!(result.get("linked_from").is_some());
+}
+
+// SKIP: skills(action="generate") — filesystem + LLM-bound.
+
+// ── Temporal: code_health + sync_git_history ──────────────────
+
+async fn init_commit_schema(db: &DbHandle) {
+    db.query(
+        "DEFINE TABLE IF NOT EXISTS commit SCHEMAFULL; \
+         DEFINE FIELD IF NOT EXISTS hash ON commit TYPE string; \
+         DEFINE FIELD IF NOT EXISTS author ON commit TYPE string; \
+         DEFINE FIELD IF NOT EXISTS message ON commit TYPE string; \
+         DEFINE FIELD IF NOT EXISTS timestamp ON commit TYPE int; \
+         DEFINE FIELD IF NOT EXISTS files_changed ON commit TYPE int; \
+         DEFINE FIELD IF NOT EXISTS repo ON commit TYPE string;",
+    )
+    .await
+    .expect("commit schema bootstrap should succeed");
+}
+
+#[tokio::test]
+async fn sync_git_history_upserts_commit_row() {
+    let (db, _gq) = setup().await;
+    init_commit_schema(&db).await;
+    db.query(
+        "UPSERT commit:abc123 SET hash = 'abc123', author = 'Alice', \
+         message = 'first commit', timestamp = 1700000000, \
+         files_changed = 2, repo = 'test'",
+    )
+    .await
+    .expect("SCHEMAFULL commit UPSERT must accept every required field");
+    db.query(
+        "UPSERT commit:abc123 SET hash = 'abc123', author = 'Alice', \
+         message = 'amended', timestamp = 1700000000, \
+         files_changed = 3, repo = 'test'",
+    )
+    .await
+    .unwrap();
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT hash, message, files_changed FROM commit WHERE repo = 'test'")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1, "UPSERT must be idempotent on commit:<hash>");
+    assert_eq!(
+        rows[0].get("message").and_then(|v| v.as_str()),
+        Some("amended"),
+        "second UPSERT should overwrite message"
+    );
+    assert_eq!(
+        rows[0].get("files_changed").and_then(|v| v.as_u64()),
+        Some(3)
+    );
+}
+
+#[tokio::test]
+async fn code_health_hotspots_query_shape() {
+    let (db, _gq) = setup().await;
+    init_commit_schema(&db).await;
+    db.query(
+        "UPSERT commit:c1 SET hash='c1', author='A', message='m1', \
+         timestamp=1700000000, files_changed=1, repo='test'; \
+         UPSERT commit:c2 SET hash='c2', author='A', message='m2', \
+         timestamp=1700000100, files_changed=1, repo='test';",
+    )
+    .await
+    .unwrap();
+    db.query(
+        "LET $f = (SELECT VALUE id FROM `function` WHERE name='parse_file' LIMIT 1)[0]; \
+         RELATE $f->modified_in->commit:c1 SET change_type='modified'; \
+         RELATE $f->modified_in->commit:c2 SET change_type='modified';",
+    )
+    .await
+    .expect("modified_in RELATE should accept the edge");
+
+    let hotspots: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, file_path, start_line, end_line, \
+             (end_line - start_line) AS size, \
+             count(->modified_in) AS churn, \
+             ((end_line - start_line) * count(->modified_in)) AS risk_score \
+             FROM `function` WHERE repo = $repo \
+             ORDER BY risk_score DESC LIMIT 30",
+        )
+        .bind(("repo", "test".to_string()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+
+    assert_eq!(hotspots.len(), 4, "all test-repo fns should appear");
+    assert_eq!(
+        hotspots[0].get("name").and_then(|v| v.as_str()),
+        Some("parse_file")
+    );
+    assert_eq!(
+        hotspots[0].get("churn").and_then(|v| v.as_u64()),
+        Some(2),
+        "parse_file has 2 modified_in edges"
+    );
+}
+
+// SKIP: code_health churn / coupling / review_diff — all read
+// from on-disk git repo via GitAnalyzer; no SurrealQL path.
+
+// ── Embeddings + conversations ────────────────────────────────
+// SKIP: semantic_search end-to-end — requires embedding provider.
+// SKIP: embed_functions end-to-end — requires embedding provider.
+// SKIP: conversations(action=index) — filesystem-bound.
+// We lock the DB-layer contracts that those tools delegate to.
+
+#[tokio::test]
+async fn semantic_search_cosine_surql_runs_on_seeded_embedding() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "UPDATE `function` SET embedding = [0.1, 0.2, 0.3, 0.4] \
+         WHERE name = 'parse_file' AND repo = 'test'",
+    )
+    .await
+    .expect("seed embedding UPDATE should succeed");
+
+    let rows: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, vector::similarity::cosine(embedding, $query_vec) AS score \
+             FROM `function` WHERE embedding IS NOT NONE \
+             ORDER BY score DESC LIMIT $limit",
+        )
+        .bind(("query_vec", vec![0.1f32, 0.2, 0.3, 0.4]))
+        .bind(("limit", 10i64))
+        .await
+        .expect("cosine SELECT must parse")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("name").and_then(|v| v.as_str()),
+        Some("parse_file")
+    );
+}
+
+#[tokio::test]
+async fn embed_functions_batched_for_update_lands_embedding() {
+    let (db, _gq) = setup().await;
+    // SurrealDB 3.0.5 renamed `type::thing` to `type::record`.
+    // Lock the replacement shape so a future upgrade surfaces
+    // the drift immediately.
+    let surql = "FOR $item IN $updates { \
+                 UPDATE type::record('function:' + $item.id) \
+                 SET embedding = $item.embedding, binary_embedding = $item.bq; \
+                 }";
+    let id = codescope_core::graph::builder::sanitize_id("test::parse_file");
+    let updates = vec![serde_json::json!({
+        "id": id,
+        "embedding": [0.5f32, 0.5, 0.5, 0.5],
+        "bq": [0i64, 0, 0, 0],
+    })];
+    db.query(surql)
+        .bind(("updates", updates))
+        .await
+        .expect("batched FOR UPDATE must parse + execute");
+
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT embedding FROM `function` WHERE name = 'parse_file'")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0]
+            .get("embedding")
+            .and_then(|v| v.as_array())
+            .is_some(),
+        "embedding array must be set after batched UPDATE"
+    );
+}
+
+#[tokio::test]
+async fn conversations_search_matches_body_across_tables() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "CREATE decision SET name = 'pick redis', qualified_name = 'test:dec:redis', \
+         body = 'chose redis for ttl controls', repo = 'test', language = 'conv', \
+         kind = 'decision', file_path = 'conv', start_line = 0, end_line = 0, \
+         timestamp = '2026-04-20T00:00:00'",
+    )
+    .await
+    .expect("decision seed");
+    db.query(
+        "CREATE problem SET name = 'cache miss storm', qualified_name = 'test:prob:cms', \
+         body = 'memcached dogpile during deploy', repo = 'test', language = 'conv', \
+         kind = 'problem', file_path = 'conv', start_line = 0, end_line = 0, \
+         timestamp = '2026-04-21T00:00:00'",
+    )
+    .await
+    .expect("problem seed");
+
+    let rows: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name, 'problem' AS type FROM problem WHERE \
+             string::contains(string::lowercase(name), string::lowercase($kw)) \
+             OR string::contains(string::lowercase(body), string::lowercase($kw)) \
+             LIMIT $lim",
+        )
+        .bind(("kw", "memcached".to_string()))
+        .bind(("lim", 20u32))
+        .await
+        .expect("per-table search SELECT must parse")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("name").and_then(|v| v.as_str()),
+        Some("cache miss storm")
+    );
+}
+
+#[tokio::test]
+async fn conversations_timeline_contains_inlined_literal() {
+    let (db, _gq) = setup().await;
+    db.query(
+        "CREATE decision SET name = 'pin parse_file', qualified_name = 'test:dec:pin_pf', \
+         body = 'freeze parse_file until parser lands', repo = 'test', language = 'conv', \
+         kind = 'decision', file_path = 'conv', start_line = 0, end_line = 0, \
+         timestamp = '2026-04-20T00:00:00'",
+    )
+    .await
+    .expect("decision seed");
+
+    let safe_name = "parse_file".replace('\'', "");
+    let q = format!(
+        "SELECT name, body, timestamp, 'decision' AS type \
+         FROM decision WHERE body CONTAINS '{}' \
+         ORDER BY timestamp DESC LIMIT $lim",
+        safe_name
+    );
+    let rows: Vec<serde_json::Value> = db
+        .query(&q)
+        .bind(("lim", 20u32))
+        .await
+        .expect("timeline CONTAINS query must parse")
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("name").and_then(|v| v.as_str()),
+        Some("pin parse_file")
+    );
+}

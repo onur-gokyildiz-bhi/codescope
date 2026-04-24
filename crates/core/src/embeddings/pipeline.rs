@@ -160,8 +160,13 @@ impl EmbeddingPipeline {
         let mut total = 0;
 
         for chunk in updates.chunks(CHUNK_SIZE) {
+            // SurrealDB 3.0.5 dropped `type::thing(table, id)`; use
+            // `type::record(thing)` with a string concat instead.
+            // Without this swap every batch silently hits a parse
+            // error and gets warn-logged — embeddings never land
+            // on the graph.
             let surql = "FOR $item IN $updates { \
-                         UPDATE type::thing('function', $item.id) \
+                         UPDATE type::record('function:' + $item.id) \
                          SET embedding = $item.embedding, binary_embedding = $item.bq; \
                          }";
             match self.db.query(surql).bind(("updates", chunk.to_vec())).await {
@@ -215,8 +220,10 @@ impl EmbeddingPipeline {
         const CHUNK_SIZE: usize = 100;
         let mut count = 0;
         for chunk in updates.chunks(CHUNK_SIZE) {
+            // Same type::thing → type::record rename as the main
+            // embedding path above.
             let surql = "FOR $item IN $updates { \
-                         UPDATE type::thing('function', $item.id) \
+                         UPDATE type::record('function:' + $item.id) \
                          SET binary_embedding = $item.bq; \
                          }";
             match self.db.query(surql).bind(("updates", chunk.to_vec())).await {
