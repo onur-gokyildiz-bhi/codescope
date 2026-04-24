@@ -4,6 +4,31 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-04-24
+
+Test-only release — 6 new integration tests covering ADR,
+capture_insight, http_analysis, and lint(dead_code) contracts.
+
+### Added
+
+- **ADR tool contract tests** — `adr_create_then_list_roundtrip`
+  verifies the UPSERT + ORDER BY timestamp flow, and
+  `adr_get_by_contains_substring` locks the inlined CONTAINS
+  pattern the tool uses (SurrealDB's CONTAINS + .bind() is
+  unreliable; the comment in the handler calls it out
+  explicitly).
+- **capture_insight CREATE test** — verifies a `decision` row
+  actually lands when the handler's CREATE statement runs.
+- **http_analysis tests** — empty-fixture case (returns
+  `Vec::new()`, not an error) and method-filter hits only the
+  matching kind.
+- **lint(dead_code) predicate test** — asserts the
+  `NOT IN (SELECT VALUE out.name FROM calls)` pattern the
+  `find_unused_symbols` / lint handlers rely on actually
+  surfaces functions with zero callers.
+
+Test count: 30 → 36 in `graph_query_tests`.
+
 ## [0.8.9] - 2026-04-24
 
 Memory tool parse-error fix surfaced by the new test matrix, plus

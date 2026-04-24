@@ -439,6 +439,211 @@ async fn memory_search_finds_saved_row_by_body() {
     assert_eq!(results.len(), 1, "body-text match should find the memory");
 }
 
+// ── ADR tool — create / list / get round trip ─────────────────
+// `manage_adr` upserts into the `decision` table and queries it
+// back via SELECT ... ORDER BY timestamp / CONTAINS. These tests
+// lock the end-to-end SurrealQL contract without a full MCP
+// server instance.
+
+async fn adr_create(db: &DbHandle, title: &str, body: &str, ts: &str) {
+    let qname = format!(
+        "test:adr:{}",
+        title
+            .to_lowercase()
+            .replace(' ', "_")
+            .chars()
+            .take(60)
+            .collect::<String>()
+    );
+    db.query(
+        "UPSERT decision SET name = $name, qualified_name = $qname, \
+         body = $body, repo = 'test', language = 'adr', \
+         file_path = 'adr', start_line = 0, end_line = 0, \
+         timestamp = $ts",
+    )
+    .bind(("name", title.to_string()))
+    .bind(("qname", qname))
+    .bind(("body", body.to_string()))
+    .bind(("ts", ts.to_string()))
+    .await
+    .expect("ADR upsert should succeed");
+}
+
+#[tokio::test]
+async fn adr_create_then_list_roundtrip() {
+    let (db, _gq) = setup().await;
+    adr_create(
+        &db,
+        "use surreal server",
+        "local DB",
+        "2026-04-20T00:00:00Z",
+    )
+    .await;
+    adr_create(
+        &db,
+        "codescope exec compression",
+        "rtk pattern",
+        "2026-04-21T00:00:00Z",
+    )
+    .await;
+
+    // list: newest first.
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT name, timestamp FROM decision WHERE repo = 'test' ORDER BY timestamp DESC LIMIT 50")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].get("name").and_then(|v| v.as_str()),
+        Some("codescope exec compression"),
+        "ORDER BY timestamp DESC should put the newer ADR first"
+    );
+}
+
+#[tokio::test]
+async fn adr_get_by_contains_substring() {
+    let (db, _gq) = setup().await;
+    adr_create(
+        &db,
+        "use surreal server",
+        "local DB",
+        "2026-04-20T00:00:00Z",
+    )
+    .await;
+
+    // Mirror the handler's query shape — CONTAINS with inlined
+    // literal (the tool comment explicitly notes CONTAINS + bind
+    // is unreliable in SurrealDB).
+    let rows: Vec<serde_json::Value> = db
+        .query("SELECT name FROM decision WHERE name CONTAINS 'surreal' AND repo = 'test' LIMIT 1")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(rows.len(), 1);
+}
+
+// ── capture_insight — CREATE into decision / problem / solution ─
+
+#[tokio::test]
+async fn capture_insight_creates_decision_row() {
+    let (db, _gq) = setup().await;
+    let qname = "test:insight:decision:pin_redis";
+    let create = "CREATE decision SET name = $name, qualified_name = $qname, \
+                  body = $body, repo = 'test', language = 'insight', \
+                  file_path = 'insight', start_line = 0, end_line = 0, \
+                  timestamp = $ts, agent = $agent";
+    db.query(create)
+        .bind(("name", "pin redis version".to_string()))
+        .bind(("qname", qname.to_string()))
+        .bind((
+            "body",
+            "Stay on 7.2 until the new cluster spec stabilises.".to_string(),
+        ))
+        .bind(("ts", "2026-04-24T00:00:00Z".to_string()))
+        .bind(("agent", "claude-code".to_string()))
+        .await
+        .expect("capture_insight CREATE should succeed");
+
+    let count: Vec<serde_json::Value> = db
+        .query("SELECT count() FROM decision WHERE repo = 'test' GROUP ALL")
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    assert_eq!(
+        count
+            .first()
+            .and_then(|v| v.get("count"))
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+// ── HTTP analysis — smoke ─────────────────────────────────────
+
+#[tokio::test]
+async fn find_http_calls_returns_empty_on_bare_fixture() {
+    let (_db, gq) = setup().await;
+    // Fixture has no http_call rows; tool should return an empty
+    // vec rather than erroring out.
+    let calls = gq
+        .find_http_calls(None)
+        .await
+        .expect("find_http_calls should complete on empty fixture");
+    assert!(calls.is_empty());
+}
+
+#[tokio::test]
+async fn find_http_calls_filters_by_method() {
+    let (db, gq) = setup().await;
+    // Seed two http_call rows with different methods. Schema is
+    // strict — set every non-optional field.
+    db.query(
+        "CREATE http_call SET name = 'get_user_api', kind = 'GET', \
+         qualified_name = 'test:http:get_user', repo = 'test', \
+         file_path = 'src/api.rs', start_line = 10, end_line = 12, \
+         url_pattern = '/user/:id', language = 'rust'",
+    )
+    .await
+    .expect("http_call GET CREATE should succeed");
+    db.query(
+        "CREATE http_call SET name = 'post_login_api', kind = 'POST', \
+         qualified_name = 'test:http:post_login', repo = 'test', \
+         file_path = 'src/api.rs', start_line = 20, end_line = 22, \
+         url_pattern = '/login', language = 'rust'",
+    )
+    .await
+    .expect("http_call POST CREATE should succeed");
+
+    let all = gq.find_http_calls(None).await.unwrap();
+    assert_eq!(all.len(), 2, "no filter should return both rows");
+
+    let posts = gq.find_http_calls(Some("POST")).await.unwrap();
+    assert_eq!(posts.len(), 1, "method=POST should narrow to one row");
+}
+
+// ── Quality / lint tool — dead_code detection ─────────────────
+// The lint(mode=dead_code) tool queries the same thing
+// find_unused_symbols does (callers.len() == 0). This test
+// locks the contract for both.
+
+#[tokio::test]
+async fn lint_dead_code_flags_uncalled_function() {
+    let (db, _gq) = setup().await;
+    // Add a never-called fn via the builder (keeps the test honest —
+    // if schema evolves, insert_entities stays in lockstep with it).
+    let builder = GraphBuilder::new(db.clone());
+    builder
+        .insert_entities(&[make_fn("orphan_helper", "src/dead.rs")])
+        .await
+        .expect("insert orphan fn");
+
+    // Mirror the lint(mode=dead_code) predicate: no incoming calls
+    // edge. The fixture's main/parse_file/write_output/read_input
+    // are also uncalled by test fixtures, so just check presence.
+    let rows: Vec<serde_json::Value> = db
+        .query(
+            "SELECT name FROM `function` WHERE \
+             repo = 'test' \
+             AND name NOT IN (SELECT VALUE out.name FROM calls WHERE out.name != NONE AND out.repo = 'test')",
+        )
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap_or_default();
+    let names: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    assert!(
+        names.contains(&"orphan_helper".to_string()),
+        "orphan_helper should be flagged as dead code; got {names:?}"
+    );
+}
+
 // ── Knowledge tool — raw UPSERT smoke ─────────────────────────
 // The knowledge tool's save path upserts into the `knowledge`
 // table keyed on a slugified id, with tags as an inline array.
