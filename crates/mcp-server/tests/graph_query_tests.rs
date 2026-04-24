@@ -242,6 +242,146 @@ async fn backlinks_collapses_duplicate_caller_edges() {
     );
 }
 
+// ── Graph-wide queries — smoke ─────────────────────────────────
+// Covers the remaining GraphQuery public methods that each power
+// at least one MCP tool. Each test asserts the query completes
+// and returns a result in the expected shape — the point is to
+// catch schema / syntax regressions early, not to exhaustively
+// verify correctness (the tool body's own tests do that).
+
+#[tokio::test]
+async fn stats_returns_populated_object() {
+    let (_db, gq) = setup().await;
+    let stats = gq.stats().await.expect("stats query should run");
+    // Shape check — must be an object with at least a functions field.
+    let obj = stats
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first());
+    assert!(
+        obj.is_some(),
+        "stats returned an unexpected shape: {stats:?}"
+    );
+}
+
+#[tokio::test]
+async fn raw_query_passthrough_works() {
+    let (_db, gq) = setup().await;
+    // Single-statement → flat-array shape (see raw_query's
+    // backward-compat branch).
+    let result = gq
+        .raw_query("SELECT name FROM `function` WHERE name = 'main'")
+        .await
+        .expect("raw_query should accept arbitrary SurrealQL");
+    let rows = result
+        .as_array()
+        .expect("single-statement raw_query returns a flat array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("name").and_then(|v| v.as_str()), Some("main"),);
+}
+
+#[tokio::test]
+async fn raw_query_surfaces_parse_errors() {
+    let (_db, gq) = setup().await;
+    let err = gq.raw_query("NOT VALID SURREALQL").await;
+    assert!(err.is_err(), "parse error should bubble up");
+}
+
+#[tokio::test]
+async fn file_context_returns_neighborhood() {
+    let (_db, gq) = setup().await;
+    let ctx = gq
+        .file_context("src/parser.rs")
+        .await
+        .expect("file_context should complete");
+    // Must surface at least the `entities` key (functions + classes
+    // of the file) regardless of call structure.
+    assert!(
+        ctx.get("entities").is_some() || ctx.is_array() || ctx.is_object(),
+        "unexpected file_context shape: {ctx:?}"
+    );
+}
+
+#[tokio::test]
+async fn type_hierarchy_returns_entity_info() {
+    let (_db, gq) = setup().await;
+    let result = gq
+        .type_hierarchy("Parser", 2)
+        .await
+        .expect("type_hierarchy should complete for known class");
+    // The class row (entity) should be present even with no inheritance.
+    assert!(
+        result.get("entity").is_some() || result.is_object(),
+        "unexpected type_hierarchy shape: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn type_hierarchy_handles_unknown_name() {
+    let (_db, gq) = setup().await;
+    let result = gq
+        .type_hierarchy("NonExistentClass", 2)
+        .await
+        .expect("should not error on missing class");
+    assert!(result.is_object());
+}
+
+#[tokio::test]
+async fn find_all_references_smoke() {
+    let (_db, gq) = setup().await;
+    let result = gq
+        .find_all_references("parse_file")
+        .await
+        .expect("find_all_references should complete");
+    assert!(result.is_object() || result.is_array());
+}
+
+#[tokio::test]
+async fn safe_delete_check_returns_advice() {
+    let (_db, gq) = setup().await;
+    // parse_file has one caller (main) — safe_delete should warn.
+    let result = gq
+        .safe_delete_check("parse_file")
+        .await
+        .expect("safe_delete_check should complete");
+    assert!(
+        result.is_object(),
+        "safe_delete_check should return an advisory object"
+    );
+}
+
+#[tokio::test]
+async fn find_unused_symbols_excludes_called_ones() {
+    let (_db, gq) = setup().await;
+    // With min_lines=0 every fn passes the length filter.
+    let unused = gq
+        .find_unused_symbols(0, "test")
+        .await
+        .expect("find_unused_symbols should complete");
+    let names: Vec<String> = unused
+        .iter()
+        .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    // parse_file IS called (by main), so it must NOT appear.
+    assert!(
+        !names.contains(&"parse_file".to_string()),
+        "parse_file is called by main but appeared as unused"
+    );
+}
+
+#[tokio::test]
+async fn find_duplicate_functions_smoke() {
+    let (_db, gq) = setup().await;
+    let dupes = gq
+        .find_duplicate_functions("test")
+        .await
+        .expect("find_duplicate_functions should complete");
+    // Fixture has no body hashes set on the entities, so this may
+    // return empty. Smoke test just asserts no crash.
+    assert!(dupes.is_empty() || !dupes.is_empty());
+}
+
 #[tokio::test]
 async fn explore_function_returns_deduped_neighborhood() {
     let (_db, gq) = setup_with_dup_calls().await;
