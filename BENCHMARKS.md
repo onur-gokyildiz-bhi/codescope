@@ -1,6 +1,22 @@
 # Codescope Benchmarks
 
-Benchmarks run on real-world open-source projects. All measurements taken on Windows 11, Rust 1.91.1, SurrealDB embedded (SurrealKV). Reproduce with `cargo run -p codescope-bench --release -- <path>`.
+Benchmarks run on real-world open-source projects. All measurements taken on Windows 11, Rust 1.91.1, bundled SurrealDB 3.0.5 server via the remote WS client, release build. Reproduce with `cargo run -p codescope-bench --release -- <path>`.
+
+Latest re-run: **2026-04-24 against v0.8.11**. Previous numbers (2026-04-10, SurrealDB embedded, debug build) preserved inline for comparison.
+
+## Index Throughput
+
+| Project | Files | Entities | Relations | 2026-04-24 | 2026-04-10 | Speedup |
+|---------|------:|---------:|----------:|-----------:|-----------:|--------:|
+| ripgrep | 142   | 4,623    | 16,535    | **3.3s**   | 36.9s      | **11×** |
+| axum    | 410   | 5,319    | 15,353    | **4.6s**   | 37.2s      | **8×**  |
+| tokio   | 819   | 13,776   | 45,548    | **11.2s**  | 141.8s     | **13×** |
+| gin     | 109   | 2,400    | 11,324    | **2.2s**   | 25.1s      | **11×** |
+
+The 8-13× speedup is the compound effect of two changes:
+
+- **R1-v2 server migration** — one shared `surreal` server owns the DB files; clients connect via WS. Prior to this, each bench run opened a local SurrealKV embedded engine, paying the per-run cold-start cost.
+- **Batched INSERT builder** — one `INSERT RELATION INTO table [objs…]` per chunk instead of one `RELATE` per edge, wrapped in explicit transactions.
 
 ## Graph-First Multi-Hop Traversal (the differentiator)
 
@@ -8,16 +24,18 @@ This is what graph-based code intelligence enables that embedding-only tools (Cu
 
 For each repo, the benchmark dynamically picks the highest fan-in function as the impact target (so the numbers are meaningful — hardcoding `main` produces zero results because it's the call-graph root). Transitive callers are computed using SurrealDB's native graph traversal syntax (`<-calls<-\`function\`<-calls<-\`function\`.name`), which walks indexed edges in a single statement.
 
-| Repo (size) | Impact target | 2-hop traversal | 3-hop traversal | `impact_analysis` (prod, per hop) |
-|-------------|---------------|-----------------|-----------------|-----------------------------------|
-| **ripgrep** (4.6k entities, 16.5k edges) | `build` | **0.66 ms** | **0.63 ms** | **2.75 ms** |
-| **axum** (5.3k entities, 15.1k edges) | `clone` | **0.91 ms** | **0.80 ms** | **2.52 ms** |
-| **tokio** (13.6k entities, 44.7k edges) | `ms` | **1.10 ms** | **0.97 ms** | **3.26 ms** |
-| **gin** (Go, 2.4k entities, 11.3k edges) | `testRequest` | **1.49 ms** | **1.37 ms** | **1.06 ms** |
+Numbers below are 2026-04-24 / v0.8.11 (median of 3 runs):
+
+| Repo (size) | Impact target | 2-hop traversal | 3-hop traversal | `impact_analysis` (prod) |
+|-------------|---------------|-----------------|-----------------|--------------------------|
+| **ripgrep** (4.6k entities, 16.5k edges) | `build` | **0.97 ms** | **0.60 ms** | **2.78 ms** |
+| **axum** (5.3k entities, 15.4k edges) | `clone` | **1.19 ms** | **0.48 ms** | **1.49 ms** |
+| **tokio** (13.8k entities, 45.5k edges) | `ms` | **0.55 ms** | **0.48 ms** | **1.92 ms** |
+| **gin** (Go, 2.4k entities, 11.3k edges) | `testRequest` | **1.23 ms** | **1.11 ms** | **1.01 ms** |
 
 The first two columns measure the minimal traversal primitive (returning just `.name` from each hop). The third column measures the production MCP tool `impact_analysis`, which returns **full function records** per caller — heavier payload, realistic workload. It runs BFS per hop using the same native traversal pattern.
 
-**Key result:** native multi-hop traversal stays **single-digit-millisecond regardless of repo size**. The production tool does a 3-hop BFS end-to-end in roughly 3 × per-hop cost — so under 10 ms on tokio (44.7k edges) where the old WHERE-filter path was ~520 ms.
+**Key result:** native multi-hop traversal stays **sub-millisecond regardless of repo size** on the latest bench. The production tool does a 3-hop BFS end-to-end in 1-3 ms — bounded by fan-out at the target, not by corpus size.
 
 **Speedup vs the old WHERE-filter implementation.** Before 2026-04-12 the `impact_analysis` MCP tool issued `FROM calls WHERE out.name IN [...]` per hop, which is a full scan of the calls table and scales linearly with edge count. The new native traversal hits an indexed graph walk instead:
 

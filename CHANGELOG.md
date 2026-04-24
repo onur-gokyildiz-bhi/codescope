@@ -4,6 +4,38 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-04-24
+
+Benchmarks re-run against v0.8.11 — **8-13× faster indexing**
+than the 2026-04-10 numbers across all four corpora.
+
+### Docs
+
+- **BENCHMARKS.md and README numbers refreshed** for ripgrep /
+  axum / tokio / gin on Windows 11, Rust 1.91.1, bundled
+  SurrealDB 3.0.5 server, release build, v0.8.11 binary.
+  - ripgrep: 36.9s → **3.3s** (11×)
+  - axum:    37.2s → **4.6s** (8×)
+  - tokio:  141.8s → **11.2s** (13×)
+  - gin:     25.1s → **2.2s** (11×)
+- **Multi-hop traversal**: 0.48-1.11 ms at depth 3 (was
+  1.06-3.26 ms). Still sub-millisecond regardless of corpus
+  size; the win over the prior run is the server migration
+  removing per-run cold-start cost.
+- BENCHMARKS.md keeps the 2026-04-10 numbers inline so the
+  comparison is auditable.
+
+### How it got faster
+
+Two changes compounded:
+
+1. **R1-v2 server migration** — one `surreal` server owns the
+   DB files; clients connect via WS. The prior bench runs
+   opened a local SurrealKV embedded engine each invocation.
+2. **Batched INSERT builder** — `INSERT RELATION INTO table
+   [obj, obj, …]` per chunk instead of one `RELATE` per edge,
+   wrapped in explicit transactions.
+
 ## [0.8.11] - 2026-04-24
 
 Test coverage pushed from 36 → 52 across the remaining MCP tools,

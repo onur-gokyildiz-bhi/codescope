@@ -215,18 +215,18 @@ JSON · YAML · TOML · Markdown · Dockerfile · SQL · Terraform · OpenAPI ·
 
 ## Benchmarks
 
-Re-benchmarked 2026-04-10 on 4 real repositories (Windows 11, Rust 1.91.1, SurrealDB embedded, bench tool with single-row inserts):
+Re-benchmarked 2026-04-24 on the same 4 corpora against v0.8.11 (Windows 11, Rust 1.91.1, bundled SurrealDB 3.0.5 server, release build, bench tool with batched INSERTs):
 
-| Project | Language | Files | Entities | Relations | Index | DB size |
-|---------|----------|------:|---------:|----------:|------:|--------:|
-| ripgrep | Rust     | 142   | 4,623    | 16,535    | 36.9s | 22.2 MB |
-| axum    | Rust     | 410   | 5,278    | 15,068    | 37.2s | 22.5 MB |
-| tokio   | Rust     | 812   | 13,600   | 44,675    | 141.8s| 63.8 MB |
-| Gin     | Go       | 109   | 2,400    | 11,324    | 25.1s | 11.5 MB |
+| Project | Language | Files | Entities | Relations | Index |
+|---------|----------|------:|---------:|----------:|------:|
+| ripgrep | Rust     | 142   | 4,623    | 16,535    | 3.3s  |
+| axum    | Rust     | 410   | 5,319    | 15,353    | 4.6s  |
+| tokio   | Rust     | 819   | 13,776   | 45,548    | 11.2s |
+| Gin     | Go       | 109   | 2,400    | 11,324    | 2.2s  |
 
-> The bench tool uses single-row inserts as a worst-case baseline. The production MCP server pipeline batches inserts and runs materially faster.
+**8-13× faster than the 2026-04-10 run** (ripgrep 36.9s → 3.3s, tokio 141.8s → 11.2s) — combined effect of the R1-v2 server migration and the batched-INSERT builder.
 
-**Multi-hop traversal (end-to-end via `impact_analysis`):** 1.06–3.26 ms across the four re-benchmarked repos (up to 44.7k edges). The minimal traversal primitive (`.name` only) runs 0.63–1.49 ms per hop.
+**Multi-hop traversal (end-to-end via `impact_analysis`):** 0.48–1.11 ms at depth 3 across all four repos (up to 45.5k edges). Graph traversal scales with edge fan-out, not corpus size.
 
 **Token savings — sample rows:**
 
