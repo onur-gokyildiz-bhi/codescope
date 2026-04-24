@@ -4,6 +4,30 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-04-24
+
+Parser coverage + dedup regression tests. Closes two gaps that
+the recent status review surfaced.
+
+### Added
+
+- **JS / TS / TSX arrow-function extraction.** The walker now
+  handles `variable_declarator` nodes whose value is an
+  `arrow_function` or `function_expression`, pulling the
+  identifier from the declarator's `name` field. Previously
+  only `function_declaration` was caught, so React / SolidJS
+  components and hooks written in the `const Foo = () => {}`
+  style never surfaced in the graph. On this repo's
+  frontend: `InsightPage.tsx` jumped from 7 → 19 functions
+  as the local helpers and small inner closures became
+  visible.
+- **Dedup regression tests.** Four new integration tests
+  against the in-memory SurrealDB fixture seed a duplicate
+  `calls` edge and assert every traversal query
+  (`find_callers`, `find_callees`, `backlinks`, `explore`)
+  collapses it. Locks the v0.8.3 / v0.8.4 fixes against
+  regression.
+
 ## [0.8.6] - 2026-04-22
 
 CI hotfix — 0.8.3 / 0.8.4 / 0.8.5 all had their release
