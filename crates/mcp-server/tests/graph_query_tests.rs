@@ -190,3 +190,71 @@ async fn health_check_succeeds() {
     let (_db, gq) = setup().await;
     gq.health_check().await.expect("health check should pass");
 }
+
+// ── Dedup regression — v0.8.3 / v0.8.4 ─────────────────────────
+// Legacy DBs accumulated one `calls` edge per re-index because
+// delete_file_entities didn't drop the edge rows. Every
+// edge-traversal query has since been given a defensive
+// GROUP BY. These tests simulate that state by inserting the
+// same call relation twice and verifying the tools collapse
+// the duplicate rows.
+
+async fn setup_with_dup_calls() -> (DbHandle, GraphQuery) {
+    let (db, gq) = setup().await;
+    let builder = GraphBuilder::new(db.clone());
+    // Insert the `main -> parse_file` edge a second and third time —
+    // the bug was one accumulated per re-index.
+    let dup = vec![
+        make_call("main", "parse_file"),
+        make_call("main", "parse_file"),
+    ];
+    builder.insert_relations(&dup).await.unwrap();
+    (db, gq)
+}
+
+#[tokio::test]
+async fn find_callers_collapses_duplicate_edges() {
+    let (_db, gq) = setup_with_dup_calls().await;
+    let callers = gq.find_callers("parse_file").await.unwrap();
+    // main should appear exactly once even though 3 edges exist.
+    assert_eq!(callers.len(), 1, "duplicate calls edges must collapse");
+    assert_eq!(callers[0].name.as_deref(), Some("main"));
+}
+
+#[tokio::test]
+async fn find_callees_collapses_duplicate_edges() {
+    let (_db, gq) = setup_with_dup_calls().await;
+    let callees = gq.find_callees("main").await.unwrap();
+    // 3 edges to parse_file + 1 edge to write_output → 2 unique
+    assert_eq!(callees.len(), 2);
+}
+
+#[tokio::test]
+async fn backlinks_collapses_duplicate_caller_edges() {
+    let (_db, gq) = setup_with_dup_calls().await;
+    let result = gq.backlinks("parse_file").await.unwrap();
+    let callers = result.get("callers").and_then(|v| v.as_array());
+    assert!(callers.is_some(), "backlinks should surface callers array");
+    assert_eq!(
+        callers.unwrap().len(),
+        1,
+        "duplicate calls edges must collapse in backlinks too"
+    );
+}
+
+#[tokio::test]
+async fn explore_function_returns_deduped_neighborhood() {
+    let (_db, gq) = setup_with_dup_calls().await;
+    let result = gq.explore("main").await.unwrap();
+    // explore emits `calls_to` / `called_by` for function entities.
+    let callees = result
+        .get("calls_to")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        callees.len(),
+        2,
+        "main's calls_to should dedupe to 2 unique: {callees:?}"
+    );
+}
