@@ -1,10 +1,19 @@
 # Using codescope with GSD (Get Shit Done)
 
 > **TL;DR** — [GSD](https://github.com/gsd-build/get-shit-done) is a
-> spec-driven workflow layer for Claude Code (and 13 other AI
-> runtimes). codescope is a code-intelligence layer. Install both.
-> GSD subagents automatically use codescope MCP tools — no extra
-> wiring needed.
+> spec-driven workflow layer. codescope is a code-intelligence
+> layer. Install both — they don't overlap.
+>
+> GSD ships in two generations:
+>
+> - **v1** (`get-shit-done-cc`) — a prompt framework that hijacks
+>   Claude Code via slash commands + subagents. Runs inside an
+>   existing Claude session.
+> - **v2** (`gsd-pi`) — a standalone CLI agent built on the Pi SDK
+>   with its own MCP client, crash recovery, cost tracking, and
+>   autonomous mode.
+>
+> codescope works with both. v2 is the current path.
 
 ## What GSD is
 
@@ -47,25 +56,45 @@ surface and prefer them automatically.
 
 ## Install
 
-Run both installers. Order doesn't matter.
+### codescope (either path)
 
 ```bash
-# codescope (one-liner installer — see README for platforms)
 curl -fsSL https://raw.githubusercontent.com/onur-gokyildiz-bhi/codescope/main/install.sh | bash
 # or Homebrew:
 brew install onur-gokyildiz-bhi/codescope/codescope
 codescope start                # bring up the bundled surreal server
 cd your-project
 codescope init --agent claude-code
+```
 
-# GSD
+### GSD v2 (recommended)
+
+```bash
+npm install -g gsd-pi@latest
+gsd config                     # one-time wizard: auth, default model
+```
+
+GSD v2 has a built-in MCP client. To let it see codescope's tools
+on this project, enter the project dir and either:
+
+- Use `/gsd` inside Claude Code (picks up the project's `.mcp.json`
+  transitively via the Claude Code runtime), **or**
+- Run `gsd` standalone and install codescope as an MCP extension
+  from the universal-config discovery flow (one-time `gsd mcp`).
+
+`gsd auto` runs without the TUI. `gsd headless` is for CI / scripts.
+
+### GSD v1 (legacy, prompt framework)
+
+```bash
 npx get-shit-done-cc@latest --claude --local
 ```
 
-Codescope's `codescope init` adds the MCP config. GSD installs
-its slash commands and subagents into `.claude/commands/gsd/`.
-When you then run `/gsd-new-project`, the spawned Claude Code
-subprocesses have both surfaces available.
+Installs slash commands (`/gsd-new-project`, `/gsd-plan-phase`,
+etc.) and 30+ subagents into `.claude/commands/gsd/`. When invoked
+inside a Claude Code session, spawned subprocesses inherit the
+project's `.mcp.json` and can reach codescope. Still works, but
+`gsd-pi` is the maintained path.
 
 ## Which GSD command benefits from which codescope tool
 
@@ -83,11 +112,22 @@ up from the `ServerInfo.instructions` codescope injects at MCP
 initialize (see [`codescope doctor`](../../README.md) → routing
 rules).
 
-## State overlap: `STATE.md` ↔ codescope `knowledge`
+## State overlap: GSD graph ↔ codescope `knowledge`
 
-GSD tracks current-milestone progress in `STATE.md`. Codescope's
-`knowledge_save(status:done, shipped:YYYY-MM-DD, vX.Y.Z)` tracks
-the same thing in a queryable graph. Keep both:
+Both tools keep their own graph:
+
+- **GSD v2** writes `.gsd/graphs/graph.json` from its `.gsd/`
+  artifacts (milestones, slices, tasks, rules, patterns, lessons).
+  `gsd graph build/query/status/diff` operates on it.
+- **codescope** writes to per-repo SurrealDB tables (functions,
+  calls, knowledge, conversations, …).
+
+They don't overlap in content — GSD's graph is about *the plan*,
+codescope's is about *the code*. Query whichever fits the question.
+
+GSD v1 used `STATE.md` for progress. Codescope's
+`knowledge_save(tags=[status:done, shipped:YYYY-MM-DD, vX.Y.Z])`
+tracks the same thing in a cross-project graph. Keep both:
 
 - `STATE.md` is for humans + GSD agents walking the plan.
 - `knowledge` is for cross-session + cross-project recall

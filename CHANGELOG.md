@@ -4,6 +4,26 @@ All notable changes to Codescope will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-04-24
+
+Testing + docs. No binary-behaviour changes.
+
+### Added
+
+- **GraphQuery smoke-test matrix** — 10 new integration tests
+  covering `stats`, `raw_query` (happy + parse-error cases),
+  `file_context`, `type_hierarchy` (known + unknown class),
+  `find_all_references`, `safe_delete_check`,
+  `find_unused_symbols`, and `find_duplicate_functions`. Brings
+  the GraphQuery test count from 6 → 26 and catches schema /
+  syntax regressions without retesting tool-handler correctness.
+- **GSD v2 integration guide** (`docs/integrations/gsd.md`).
+  The doc used to assume GSD v1 (prompt framework). v2
+  (`gsd-pi` CLI built on the Pi SDK) is now the recommended
+  path; v1 stays documented for users who still run it.
+  Covers the separate-graphs model (GSD graph = plan, codescope
+  graph = code) so users don't expect one to subsume the other.
+
 ## [0.8.7] - 2026-04-24
 
 Parser coverage + dedup regression tests. Closes two gaps that
